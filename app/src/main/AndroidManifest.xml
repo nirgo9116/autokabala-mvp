@@ -4,26 +4,17 @@
     package="com.autokabala.listener">
 
     <application
-        android:label="AutoKabalaListener"
+        android:allowBackup="true"
+        android:label="@string/app_name"
         android:supportsRtl="true"
         android:theme="@style/Theme.AutoKabalaListener"
         tools:targetApi="31">
 
-        <activity
-            android:name=".MainActivity"
-            android:exported="true"
-            android:label="AutoKabalaListener">
-            <intent-filter>
-                <action android:name="android.intent.action.MAIN" />
-                <category android:name="android.intent.category.LAUNCHER" />
-            </intent-filter>
-        </activity>
-
+        <!-- Notification Listener Service -->
         <service
             android:name=".AutoKabalaNotificationService"
-            android:label="AutoKabala Listener"
             android:permission="android.permission.BIND_NOTIFICATION_LISTENER_SERVICE"
-            android:exported="true">
+            android:exported="false">
             <intent-filter>
                 <action android:name="android.service.notification.NotificationListenerService" />
             </intent-filter>

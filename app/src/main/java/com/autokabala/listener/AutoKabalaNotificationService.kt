@@ -17,6 +17,14 @@ class AutoKabalaNotificationService : NotificationListenerService() {
     }
 
     override fun onNotificationPosted(sbn: StatusBarNotification) {
-        Log.d("AutoKabalaNL", "NOTIFICATION POSTED FROM: ${sbn.packageName}")
+        val pkg = sbn.packageName
+        val extras = sbn.notification.extras
+        val title = extras.getCharSequence("android.title")
+        val text = extras.getCharSequence("android.text")
+
+        Log.d(
+            "AutoKabalaNL",
+            "NOTIF pkg=$pkg | title=$title | text=$text"
+        )
     }
 }
