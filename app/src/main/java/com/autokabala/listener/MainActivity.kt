@@ -36,6 +36,14 @@ class MainActivity : ComponentActivity() {
             AutoKabalaListenerTheme {
                 var isListenerActive by remember { mutableStateOf(true) }
 
+                fun startListener() {
+                    isListenerActive = true
+                }
+
+                fun stopListener() {
+                    isListenerActive = false
+                }
+
                 Scaffold(modifier = Modifier.fillMaxSize()) { innerPadding ->
                     Column(modifier = Modifier.padding(innerPadding)) {
                         Greeting(name = "AutoKabala")
