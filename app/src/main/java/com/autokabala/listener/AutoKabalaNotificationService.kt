@@ -17,6 +17,8 @@ class AutoKabalaNotificationService : NotificationListenerService() {
     }
 
     override fun onNotificationPosted(sbn: StatusBarNotification) {
+        if (!ListenerManager.enabled.value) return
+
         val pkg = sbn.packageName
         val extras = sbn.notification.extras
         val title = extras.getCharSequence("android.title")
