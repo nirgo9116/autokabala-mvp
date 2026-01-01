@@ -1,32 +1,34 @@
 package com.autokabala.listener
 
+import android.app.Notification
 import android.service.notification.NotificationListenerService
 import android.service.notification.StatusBarNotification
 import android.util.Log
 
 class AutoKabalaNotificationService : NotificationListenerService() {
 
-    override fun onCreate() {
-        super.onCreate()
-        Log.d("AutoKabalaNL", "SERVICE CREATED")
+    override fun onNotificationPosted(sbn: StatusBarNotification) {
+        val extras = sbn.notification.extras ?: return
+
+        val title = extras.getString(Notification.EXTRA_TITLE)
+        val text = extras.getCharSequence(Notification.EXTRA_TEXT)?.toString()
+
+        val rawText = listOfNotNull(title, text)
+            .map { it.trim() }
+            .filter { it.isNotEmpty() }
+            .joinToString(" | ")
+
+        if (rawText.isNotBlank()) {
+            Log.d("AutoKabalaNL", "NOTIF pkg=${sbn.packageName} | $rawText")
+            ListenerManager.onNotificationReceived(rawText)
+        }
     }
 
     override fun onListenerConnected() {
-        super.onListenerConnected()
-        Log.d("AutoKabalaNL", "LISTENER CONNECTED")
+        Log.d("AutoKabalaNL", "Notification listener connected")
     }
 
-    override fun onNotificationPosted(sbn: StatusBarNotification) {
-        if (!ListenerManager.enabled.value) return
-
-        val pkg = sbn.packageName
-        val extras = sbn.notification.extras
-        val title = extras.getCharSequence("android.title")
-        val text = extras.getCharSequence("android.text")
-
-        Log.d(
-            "AutoKabalaNL",
-            "NOTIF pkg=$pkg | title=$title | text=$text"
-        )
+    override fun onListenerDisconnected() {
+        Log.d("AutoKabalaNL", "Notification listener disconnected")
     }
 }
