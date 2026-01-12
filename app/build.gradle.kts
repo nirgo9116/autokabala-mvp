@@ -1,9 +1,17 @@
+import java.util.Properties
+
 plugins {
     alias(libs.plugins.android.application)
     alias(libs.plugins.kotlin.android)
     alias(libs.plugins.kotlin.compose)
-    // Add the serialization plugin
     alias(libs.plugins.kotlin.serialization)
+}
+
+// Load properties from local.properties file
+val localProperties = Properties()
+val localPropertiesFile = rootProject.file("local.properties")
+if (localPropertiesFile.exists()) {
+    localProperties.load(localPropertiesFile.inputStream())
 }
 
 android {
@@ -18,6 +26,16 @@ android {
         versionName = "1.0"
 
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
+
+        // Expose iCount credentials as build-time constants
+        // The surrounding quotes are now correctly handled directly here.
+        val icountCid = localProperties.getProperty("icount.cid") ?: ""
+        val icountUser = localProperties.getProperty("icount.user") ?: ""
+        val icountPass = localProperties.getProperty("icount.pass") ?: ""
+
+        buildConfigField("String", "ICOUNT_CID", "\"$icountCid\"")
+        buildConfigField("String", "ICOUNT_USER", "\"$icountUser\"")
+        buildConfigField("String", "ICOUNT_PASS", "\"$icountPass\"")
     }
 
     buildTypes {
@@ -38,6 +56,7 @@ android {
     }
     buildFeatures {
         compose = true
+        buildConfig = true
     }
 }
 
@@ -57,6 +76,7 @@ dependencies {
     implementation(libs.ktor.client.cio)
     implementation(libs.ktor.client.content.negotiation)
     implementation(libs.ktor.serialization.kotlinx.json)
+    implementation(libs.ktor.client.logging) // <-- ADDED THIS LINE
 
     testImplementation(libs.junit)
     androidTestImplementation(libs.androidx.junit)
