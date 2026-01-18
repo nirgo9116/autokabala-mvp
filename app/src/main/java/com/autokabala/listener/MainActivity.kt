@@ -124,12 +124,12 @@ class MainActivity : ComponentActivity() {
                                 }
                                 Button(
                                     onClick = {
+                                        Log.d("AutoKabala-Manual", "Issue Receipt button clicked!")
                                         // Launch a coroutine to call the API without blocking the UI
                                         coroutineScope.launch {
                                             ReceiptApiClient.issueReceipt(currentPayment)
                                         }
-                                    },
-                                    enabled = !currentPayment.isConfirmed
+                                    }
                                 ) {
                                     Text("Issue Receipt")
                                 }

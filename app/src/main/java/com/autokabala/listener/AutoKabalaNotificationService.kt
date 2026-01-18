@@ -14,10 +14,11 @@ class AutoKabalaNotificationService : NotificationListenerService() {
         // Get the timestamp from the notification object
         val timestamp = sbn.postTime
 
-        val title = extras.getString(Notification.EXTRA_TITLE)
-        val text = extras.getCharSequence(Notification.EXTRA_TEXT)?.toString()
+        // Safely extract text fields, providing an empty string as a default to prevent null pointer crashes.
+        val title = extras.getString(Notification.EXTRA_TITLE) ?: ""
+        val text = extras.getCharSequence(Notification.EXTRA_TEXT)?.toString() ?: ""
 
-        val rawText = listOfNotNull(title, text)
+        val rawText = listOf(title, text)
             .map { it.trim() }
             .filter { it.isNotEmpty() }
             .joinToString(" | ")
