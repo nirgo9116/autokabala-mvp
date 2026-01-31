@@ -5,7 +5,6 @@ import io.ktor.client.HttpClient
 import io.ktor.client.call.body
 import io.ktor.client.engine.cio.CIO
 import io.ktor.client.plugins.contentnegotiation.ContentNegotiation
-import io.ktor.client.request.get
 import io.ktor.client.request.post
 import io.ktor.client.request.setBody
 import io.ktor.http.ContentType
@@ -15,9 +14,16 @@ import kotlinx.serialization.SerialName
 import kotlinx.serialization.Serializable
 import kotlinx.serialization.json.Json
 
-// --- Data classes with explicit @SerialName for all fields ---
+// --- Data classes for both Serialization and Deserialization, aligned with official docs ---
 
-// Client Search (for the GET call)
+@Serializable
+data class SearchClientRequest(
+    @SerialName("cid") val cid: String,
+    @SerialName("user") val user: String,
+    @SerialName("pass") val pass: String,
+    @SerialName("search") val search: String // Correct field name as per docs
+)
+
 @Serializable
 data class ClientInfo(
     @SerialName("client_id") val clientId: Long,
@@ -31,7 +37,6 @@ data class SearchClientResponse(
     @SerialName("reason") val reason: String? = null
 )
 
-// Client Creation
 @Serializable
 data class CreateClientRequest(
     @SerialName("cid") val cid: String,
@@ -47,7 +52,6 @@ data class CreateClientResponse(
     @SerialName("client_id") val clientId: Long? = null
 )
 
-// Document Creation
 @Serializable
 data class DocumentItem(
     @SerialName("description") val description: String,
@@ -66,7 +70,7 @@ data class CreateDocumentRequest(
     @SerialName("cid") val cid: String,
     @SerialName("user") val user: String,
     @SerialName("pass") val pass: String,
-    @SerialName("doctype") val docType: String = "rec",
+    @SerialName("doctype") val docType: String, // Value will be "receipt"
     @SerialName("client_id") val clientId: Long,
     @SerialName("items") val items: List<DocumentItem>,
     @SerialName("pays") val pays: List<PaymentItem>
@@ -91,56 +95,47 @@ object ReceiptApiClient {
 
     private suspend fun getOrCreateClient(senderName: String): Long? {
         val experimentalName = senderName.trim().split(" ").firstOrNull()?.plus(" בדיקה") ?: (senderName.trim() + " בדיקה")
-        Log.d("AutoKabalaNL-Action", "--- Starting Get/Create Client with name: '$experimentalName' (Robust Flow) ---")
+        Log.d("AutoKabalaNL-Action", "--- Starting Get/Create Client with name: '$experimentalName' (Final Flow) ---")
 
-        // --- Step 1: ALWAYS try to create the client first ---
+        // --- Step 1: Search for existing client using the correct endpoint and field ---
         try {
-            Log.d("AutoKabalaNL-Action", "[1/2] Attempting to create client...")
+            Log.d("AutoKabalaNL-Action", "[1/2] Searching for client via POST to /client/search...")
+            val searchResponse = client.post("$BASE_URL/client/search") {
+                contentType(ContentType.Application.Json)
+                setBody(SearchClientRequest(BuildConfig.ICOUNT_CID, BuildConfig.ICOUNT_USER, BuildConfig.ICOUNT_PASS, experimentalName))
+            }.body<SearchClientResponse>()
+
+            Log.d("AutoKabalaNL-Action", "[1/2] Search response received: $searchResponse")
+
+            if (searchResponse.status && searchResponse.records.isNotEmpty()) {
+                val bestMatch = searchResponse.records.first()
+                Log.i("AutoKabalaNL-Action", "[1/2] Found existing client. ID: ${bestMatch.clientId}, Name: ${bestMatch.clientName}")
+                return bestMatch.clientId
+            } else {
+                Log.d("AutoKabalaNL-Action", "[1/2] Client not found or search failed (Reason: ${searchResponse.reason}). Proceeding to creation.")
+            }
+        } catch (e: Exception) {
+            Log.e("AutoKabalaNL-Action", "[1/2] Exception during client search. Aborting.", e)
+            return null
+        }
+
+        // --- Step 2: If not found, create new client ---
+        try {
+            Log.d("AutoKabalaNL-Action", "[2/2] Creating new client...")
             val createResponse = client.post("$BASE_URL/client/create") {
                 contentType(ContentType.Application.Json)
                 setBody(CreateClientRequest(BuildConfig.ICOUNT_CID, BuildConfig.ICOUNT_USER, BuildConfig.ICOUNT_PASS, experimentalName))
             }.body<CreateClientResponse>()
 
             if (createResponse.status && createResponse.clientId != null) {
-                Log.i("AutoKabalaNL-Action", "[1/2] Successfully created new client. ID: ${createResponse.clientId}")
+                Log.i("AutoKabalaNL-Action", "[2/2] Successfully created new client. ID: ${createResponse.clientId}")
                 return createResponse.clientId
-            }
-
-            if (createResponse.reason == "client_already_exists") {
-                Log.d("AutoKabalaNL-Action", "[1/2] Client already exists. Proceeding to fetch existing client ID.")
-                // Fall through to step 2
             } else {
-                Log.e("AutoKabalaNL-Action", "[1/2] Failed to create client for a new reason: ${createResponse.reason}. Aborting.")
+                Log.e("AutoKabalaNL-Action", "[2/2] Failed to create new client: ${createResponse.reason}. Aborting.")
                 return null
             }
         } catch (e: Exception) {
-            Log.e("AutoKabalaNL-Action", "[1/2] Exception during client creation. Aborting.", e)
-            return null
-        }
-
-        // --- Step 2: If client already exists, FETCH it to get the ID ---
-        try {
-            Log.d("AutoKabalaNL-Action", "[2/2] Fetching existing client via GET...")
-            // Using /client/get which is more standard for fetching by name
-            val searchResponse = client.get("$BASE_URL/client/get") { // FIXED ENDPOINT
-                url {
-                    parameters.append("cid", BuildConfig.ICOUNT_CID)
-                    parameters.append("user", BuildConfig.ICOUNT_USER)
-                    parameters.append("pass", BuildConfig.ICOUNT_PASS)
-                    parameters.append("search", experimentalName)
-                }
-            }.body<SearchClientResponse>()
-
-            if (searchResponse.status && searchResponse.records.isNotEmpty()) {
-                val bestMatch = searchResponse.records.first()
-                Log.i("AutoKabalaNL-Action", "[2/2] Successfully fetched existing client. ID: ${bestMatch.clientId}")
-                return bestMatch.clientId
-            } else {
-                Log.e("AutoKabalaNL-Action", "[2/2] Failed to fetch existing client after creation failed. Reason: ${searchResponse.reason}")
-                return null
-            }
-        } catch (e: Exception) {
-            Log.e("AutoKabalaNL-Action", "[2/2] Exception during client fetch. Aborting.", e)
+            Log.e("AutoKabalaNL-Action", "[2/2] Exception during client creation. Aborting.", e)
             return null
         }
     }
@@ -155,23 +150,25 @@ object ReceiptApiClient {
         }
 
         try {
+            // Using "receipt" as per iCount support's instruction
             val requestBody = CreateDocumentRequest(
                 cid = BuildConfig.ICOUNT_CID,
                 user = BuildConfig.ICOUNT_USER,
                 pass = BuildConfig.ICOUNT_PASS,
+                docType = "receipt", // CORRECTED VALUE
                 clientId = clientId,
                 items = listOf(DocumentItem("קבלה עבור ${paymentData.senderName} דרך ${paymentData.source}", paymentData.amount)),
                 pays = listOf(PaymentItem(amount = paymentData.amount))
             )
 
-            Log.d("AutoKabalaNL-Action", "Sending request to /doc/create with body: $requestBody")
+            Log.d("AutoKabalaNL-Action", "Sending final request to /doc/create with body: $requestBody")
             val response = client.post("$BASE_URL/doc/create") {
                 contentType(ContentType.Application.Json)
                 setBody(requestBody)
             }
 
             val createResponse = response.body<CreateDocumentResponse>()
-            Log.d("AutoKabalaNL-Action", "Received response from /doc/create: $createResponse")
+            Log.d("AutoKabalaNL-Action", "Received final response from /doc/create: $createResponse")
 
             if (createResponse.status) {
                 Log.i("AutoKabalaNL-Action", "##### SUCCESS! Issued document number: ${createResponse.docNumber} for client ID: $clientId #####")
