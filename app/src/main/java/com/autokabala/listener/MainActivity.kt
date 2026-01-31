@@ -26,7 +26,6 @@ import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
-import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
@@ -37,8 +36,8 @@ import androidx.compose.ui.unit.dp
 import androidx.core.app.NotificationManagerCompat
 import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.LifecycleEventObserver
+import androidx.lifecycle.viewmodel.compose.viewModel
 import com.autokabala.listener.ui.theme.AutoKabalaListenerTheme
-import kotlinx.coroutines.launch
 import java.text.SimpleDateFormat
 import java.util.Date
 import java.util.Locale
@@ -51,98 +50,104 @@ class MainActivity : ComponentActivity() {
 
         enableEdgeToEdge()
         setContent {
+            val mainViewModel: MainViewModel = viewModel()
+
             AutoKabalaListenerTheme {
-                val isEnabled by ListenerManager.enabled.collectAsState()
-                val lastPayment by ListenerManager.lastPayment.collectAsState()
-                val context = LocalContext.current
-                val lifecycleOwner = LocalLifecycleOwner.current
-                val coroutineScope = rememberCoroutineScope()
-
-                var hasNotificationPermission by remember {
-                    mutableStateOf(isNotificationPermissionGranted(context))
-                }
-
-                DisposableEffect(lifecycleOwner) {
-                    val observer = LifecycleEventObserver { _, event ->
-                        if (event == Lifecycle.Event.ON_RESUME) {
-                            hasNotificationPermission = isNotificationPermissionGranted(context)
-                        }
+                // The UI is now cleaner and only responsible for displaying the state
+                // that the ViewModel provides, and delegating events to it.
+                MainScreen(
+                    viewModel = mainViewModel,
+                    isNotificationPermissionGranted = isNotificationPermissionGranted(LocalContext.current),
+                    onOpenSettingsClicked = {
+                        startActivity(Intent(Settings.ACTION_NOTIFICATION_LISTENER_SETTINGS))
                     }
-                    lifecycleOwner.lifecycle.addObserver(observer)
-                    onDispose {
-                        lifecycleOwner.lifecycle.removeObserver(observer)
-                    }
-                }
-
-                Scaffold(modifier = Modifier.fillMaxSize()) { innerPadding ->
-                    Column(
-                        modifier = Modifier
-                            .padding(innerPadding)
-                            .padding(16.dp)
-                    ) {
-                        Text(
-                            text = "AutoKabala MVP",
-                            style = MaterialTheme.typography.headlineMedium
-                        )
-
-                        Spacer(modifier = Modifier.height(24.dp))
-
-                        SectionTitle("1. Grant Permission")
-                        Text(
-                            "Permission Granted: $hasNotificationPermission",
-                            color = if (hasNotificationPermission) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.error
-                        )
-                        Spacer(modifier = Modifier.height(8.dp))
-                        Button(onClick = {
-                            context.startActivity(Intent(Settings.ACTION_NOTIFICATION_LISTENER_SETTINGS))
-                        }) {
-                            Text("Open Notification Settings")
-                        }
-
-                        Spacer(modifier = Modifier.height(24.dp))
-
-                        SectionTitle("2. Control Listener")
-                        Text("Status: ${if (isEnabled) "Active" else "Inactive"}")
-                        Spacer(modifier = Modifier.height(8.dp))
-                        Button(onClick = {
-                            if (isEnabled) ListenerManager.disable() else ListenerManager.enable()
-                        }) {
-                            Text(if (isEnabled) "Disable Listener" else "Enable Listener")
-                        }
-
-                        Spacer(modifier = Modifier.height(24.dp))
-
-                        SectionTitle("3. Last Parsed Payment")
-                        ParsedPaymentInfo(lastPayment)
-
-                        val currentPayment = lastPayment
-                        if (currentPayment != null) {
-                            Spacer(modifier = Modifier.height(16.dp))
-                            Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                                Button(onClick = { ListenerManager.clearLastPayment() }) {
-                                    Text("Clear")
-                                }
-                                Button(
-                                    onClick = {
-                                        Log.d("AutoKabala-Manual", "Issue Receipt button clicked!")
-                                        // Launch a coroutine to call the API without blocking the UI
-                                        coroutineScope.launch {
-                                            ReceiptApiClient.issueReceipt(currentPayment)
-                                        }
-                                    }
-                                ) {
-                                    Text("Issue Receipt")
-                                }
-                            }
-                        }
-                    }
-                }
+                )
             }
         }
     }
 
     private fun isNotificationPermissionGranted(context: Context): Boolean {
         return NotificationManagerCompat.getEnabledListenerPackages(context).contains(context.packageName)
+    }
+}
+
+@Composable
+fun MainScreen(
+    viewModel: MainViewModel,
+    isNotificationPermissionGranted: Boolean,
+    onOpenSettingsClicked: () -> Unit
+) {
+    // Collect the state from the ViewModel, not directly from the ListenerManager
+    val isEnabled by viewModel.isEnabled.collectAsState()
+    val lastPayment by viewModel.lastPayment.collectAsState()
+
+    var hasNotificationPermission by remember(isNotificationPermissionGranted) {
+        mutableStateOf(isNotificationPermissionGranted)
+    }
+
+    val lifecycleOwner = LocalLifecycleOwner.current
+    DisposableEffect(lifecycleOwner) {
+        val observer = LifecycleEventObserver { _, event ->
+            if (event == Lifecycle.Event.ON_RESUME) {
+                // This logic remains in the UI as it depends on the context and lifecycle
+                hasNotificationPermission = isNotificationPermissionGranted
+            }
+        }
+        lifecycleOwner.lifecycle.addObserver(observer)
+        onDispose {
+            lifecycleOwner.lifecycle.removeObserver(observer)
+        }
+    }
+
+    Scaffold(modifier = Modifier.fillMaxSize()) { innerPadding ->
+        Column(
+            modifier = Modifier
+                .padding(innerPadding)
+                .padding(16.dp)
+        ) {
+            Text(
+                text = "AutoKabala MVP",
+                style = MaterialTheme.typography.headlineMedium
+            )
+
+            Spacer(modifier = Modifier.height(24.dp))
+
+            SectionTitle("1. Grant Permission")
+            Text(
+                "Permission Granted: $hasNotificationPermission",
+                color = if (hasNotificationPermission) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.error
+            )
+            Spacer(modifier = Modifier.height(8.dp))
+            Button(onClick = onOpenSettingsClicked) {
+                Text("Open Notification Settings")
+            }
+
+            Spacer(modifier = Modifier.height(24.dp))
+
+            SectionTitle("2. Control Listener")
+            Text("Status: ${if (isEnabled) "Active" else "Inactive"}")
+            Spacer(modifier = Modifier.height(8.dp))
+            Button(onClick = { viewModel.onEnableDisableClicked() }) {
+                Text(if (isEnabled) "Disable Listener" else "Enable Listener")
+            }
+
+            Spacer(modifier = Modifier.height(24.dp))
+
+            SectionTitle("3. Last Parsed Payment")
+            ParsedPaymentInfo(lastPayment)
+
+            if (lastPayment != null) {
+                Spacer(modifier = Modifier.height(16.dp))
+                Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                    Button(onClick = { viewModel.onClearLastPaymentClicked() }) {
+                        Text("Clear")
+                    }
+                    Button(onClick = { viewModel.onIssueReceiptClicked() }) {
+                        Text("Issue Receipt")
+                    }
+                }
+            }
+        }
     }
 }
 
