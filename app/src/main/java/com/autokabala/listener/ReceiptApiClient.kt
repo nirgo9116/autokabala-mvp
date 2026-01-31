@@ -14,43 +14,7 @@ import kotlinx.serialization.SerialName
 import kotlinx.serialization.Serializable
 import kotlinx.serialization.json.Json
 
-// --- Data classes for both Serialization and Deserialization, aligned with official docs ---
-
-@Serializable
-data class SearchClientRequest(
-    @SerialName("cid") val cid: String,
-    @SerialName("user") val user: String,
-    @SerialName("pass") val pass: String,
-    @SerialName("search") val search: String // Correct field name as per docs
-)
-
-@Serializable
-data class ClientInfo(
-    @SerialName("client_id") val clientId: Long,
-    @SerialName("client_name") val clientName: String
-)
-
-@Serializable
-data class SearchClientResponse(
-    @SerialName("status") val status: Boolean,
-    @SerialName("records") val records: List<ClientInfo> = emptyList(),
-    @SerialName("reason") val reason: String? = null
-)
-
-@Serializable
-data class CreateClientRequest(
-    @SerialName("cid") val cid: String,
-    @SerialName("user") val user: String,
-    @SerialName("pass") val pass: String,
-    @SerialName("client_name") val clientName: String
-)
-
-@Serializable
-data class CreateClientResponse(
-    @SerialName("status") val status: Boolean,
-    @SerialName("reason") val reason: String? = null,
-    @SerialName("client_id") val clientId: Long? = null
-)
+// --- Data classes updated based on the new, simplified flow ---
 
 @Serializable
 data class DocumentItem(
@@ -60,9 +24,8 @@ data class DocumentItem(
 )
 
 @Serializable
-data class PaymentItem(
-    @SerialName("type") val type: Int = 3,
-    @SerialName("amount") val amount: Double
+data class CashPayment(
+    @SerialName("sum") val sum: Double
 )
 
 @Serializable
@@ -70,10 +33,12 @@ data class CreateDocumentRequest(
     @SerialName("cid") val cid: String,
     @SerialName("user") val user: String,
     @SerialName("pass") val pass: String,
-    @SerialName("doctype") val docType: String, // Value will be "receipt"
-    @SerialName("client_id") val clientId: Long,
+    @SerialName("doctype") val docType: String,
+    @SerialName("client_name") val clientName: String, // Using client_name instead of client_id
+    @SerialName("email") val email: String? = null, // Optional email
+    @SerialName("currency_code") val currencyCode: String? = "ILS", // Default to ILS
     @SerialName("items") val items: List<DocumentItem>,
-    @SerialName("pays") val pays: List<PaymentItem>
+    @SerialName("cash") val cash: CashPayment // Using cash payment as the simplest method
 )
 
 @Serializable
@@ -93,75 +58,25 @@ object ReceiptApiClient {
         }
     }
 
-    private suspend fun getOrCreateClient(senderName: String): Long? {
-        val experimentalName = senderName.trim().split(" ").firstOrNull()?.plus(" בדיקה") ?: (senderName.trim() + " בדיקה")
-        Log.d("AutoKabalaNL-Action", "--- Starting Get/Create Client with name: '$experimentalName' (Final Flow) ---")
-
-        // --- Step 1: Search for existing client using the correct endpoint and field ---
-        try {
-            Log.d("AutoKabalaNL-Action", "[1/2] Searching for client via POST to /client/search...")
-            val searchResponse = client.post("$BASE_URL/client/search") {
-                contentType(ContentType.Application.Json)
-                setBody(SearchClientRequest(BuildConfig.ICOUNT_CID, BuildConfig.ICOUNT_USER, BuildConfig.ICOUNT_PASS, experimentalName))
-            }.body<SearchClientResponse>()
-
-            Log.d("AutoKabalaNL-Action", "[1/2] Search response received: $searchResponse")
-
-            if (searchResponse.status && searchResponse.records.isNotEmpty()) {
-                val bestMatch = searchResponse.records.first()
-                Log.i("AutoKabalaNL-Action", "[1/2] Found existing client. ID: ${bestMatch.clientId}, Name: ${bestMatch.clientName}")
-                return bestMatch.clientId
-            } else {
-                Log.d("AutoKabalaNL-Action", "[1/2] Client not found or search failed (Reason: ${searchResponse.reason}). Proceeding to creation.")
-            }
-        } catch (e: Exception) {
-            Log.e("AutoKabalaNL-Action", "[1/2] Exception during client search. Aborting.", e)
-            return null
-        }
-
-        // --- Step 2: If not found, create new client ---
-        try {
-            Log.d("AutoKabalaNL-Action", "[2/2] Creating new client...")
-            val createResponse = client.post("$BASE_URL/client/create") {
-                contentType(ContentType.Application.Json)
-                setBody(CreateClientRequest(BuildConfig.ICOUNT_CID, BuildConfig.ICOUNT_USER, BuildConfig.ICOUNT_PASS, experimentalName))
-            }.body<CreateClientResponse>()
-
-            if (createResponse.status && createResponse.clientId != null) {
-                Log.i("AutoKabalaNL-Action", "[2/2] Successfully created new client. ID: ${createResponse.clientId}")
-                return createResponse.clientId
-            } else {
-                Log.e("AutoKabalaNL-Action", "[2/2] Failed to create new client: ${createResponse.reason}. Aborting.")
-                return null
-            }
-        } catch (e: Exception) {
-            Log.e("AutoKabalaNL-Action", "[2/2] Exception during client creation. Aborting.", e)
-            return null
-        }
-    }
-
     suspend fun issueReceipt(paymentData: PaymentData) {
-        Log.i("AutoKabalaNL-Action", "--- Starting Document Issuance for: $paymentData ---")
+        Log.i("AutoKabalaNL-Action", "--- Starting Document Issuance (Simplified Flow) for: $paymentData ---")
 
-        val clientId = getOrCreateClient(paymentData.senderName)
-        if (clientId == null) {
-            Log.e("AutoKabalaNL-Action", "Could not get or create client ID for sender: '${paymentData.senderName}'. See previous logs. Aborting.")
-            return
-        }
+        val clientNameForReceipt = paymentData.senderName.trim().split(" ").firstOrNull()?.plus(" בדיקה") ?: (paymentData.senderName.trim() + " בדיקה")
 
         try {
-            // Using "receipt" as per iCount support's instruction
             val requestBody = CreateDocumentRequest(
                 cid = BuildConfig.ICOUNT_CID,
                 user = BuildConfig.ICOUNT_USER,
                 pass = BuildConfig.ICOUNT_PASS,
-                docType = "receipt", // CORRECTED VALUE
-                clientId = clientId,
-                items = listOf(DocumentItem("קבלה עבור ${paymentData.senderName} דרך ${paymentData.source}", paymentData.amount)),
-                pays = listOf(PaymentItem(amount = paymentData.amount))
+                docType = "receipt",
+                clientName = clientNameForReceipt,
+                email = "", // Sending a blank email as a placeholder
+                currencyCode = "ILS",
+                items = listOf(DocumentItem("קבלה עבור ${paymentData.senderName}", paymentData.amount)), // Generic description
+                cash = CashPayment(sum = paymentData.amount)
             )
 
-            Log.d("AutoKabalaNL-Action", "Sending final request to /doc/create with body: $requestBody")
+            Log.d("AutoKabalaNL-Action", "Sending final, simplified request to /doc/create with body: $requestBody")
             val response = client.post("$BASE_URL/doc/create") {
                 contentType(ContentType.Application.Json)
                 setBody(requestBody)
@@ -171,7 +86,7 @@ object ReceiptApiClient {
             Log.d("AutoKabalaNL-Action", "Received final response from /doc/create: $createResponse")
 
             if (createResponse.status) {
-                Log.i("AutoKabalaNL-Action", "##### SUCCESS! Issued document number: ${createResponse.docNumber} for client ID: $clientId #####")
+                Log.i("AutoKabalaNL-Action", "##### SUCCESS! Issued document number: ${createResponse.docNumber} for client: $clientNameForReceipt #####")
             } else {
                 Log.e("AutoKabalaNL-Action", "##### FAILED to issue document: ${createResponse.reason} #####")
             }
