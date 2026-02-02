@@ -16,7 +16,11 @@ import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.lazy.LazyColumn
+import androidx.compose.foundation.lazy.items
 import androidx.compose.material3.Button
+import androidx.compose.material3.Card
+import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Text
@@ -50,14 +54,12 @@ class MainActivity : ComponentActivity() {
 
         enableEdgeToEdge()
         setContent {
-            val mainViewModel: MainViewModel = viewModel()
+            // The ViewModel is now retrieved from the activity, which gets it from the Application.
+            val mainViewModel: MainViewModel = viewModel(factory = viewModelFactory { MainViewModel(application) })
 
             AutoKabalaListenerTheme {
-                // The UI is now cleaner and only responsible for displaying the state
-                // that the ViewModel provides, and delegating events to it.
                 MainScreen(
                     viewModel = mainViewModel,
-                    isNotificationPermissionGranted = isNotificationPermissionGranted(LocalContext.current),
                     onOpenSettingsClicked = {
                         startActivity(Intent(Settings.ACTION_NOTIFICATION_LISTENER_SETTINGS))
                     }
@@ -65,32 +67,36 @@ class MainActivity : ComponentActivity() {
             }
         }
     }
+}
 
-    private fun isNotificationPermissionGranted(context: Context): Boolean {
-        return NotificationManagerCompat.getEnabledListenerPackages(context).contains(context.packageName)
+// A simple factory to provide the Application context to the ViewModel
+inline fun <reified T : MainViewModel> ComponentActivity.viewModelFactory(crossinline creator: () -> T): androidx.lifecycle.ViewModelProvider.Factory {
+    return object : androidx.lifecycle.ViewModelProvider.Factory {
+        override fun <T : androidx.lifecycle.ViewModel> create(modelClass: Class<T>): T {
+            return creator() as T
+        }
     }
 }
 
 @Composable
 fun MainScreen(
     viewModel: MainViewModel,
-    isNotificationPermissionGranted: Boolean,
     onOpenSettingsClicked: () -> Unit
 ) {
-    // Collect the state from the ViewModel, not directly from the ListenerManager
     val isEnabled by viewModel.isEnabled.collectAsState()
-    val lastPayment by viewModel.lastPayment.collectAsState()
+    // Get the list of pending payments from the ViewModel
+    val pendingPayments by viewModel.pendingPayments.collectAsState()
 
-    var hasNotificationPermission by remember(isNotificationPermissionGranted) {
-        mutableStateOf(isNotificationPermissionGranted)
+    val context = LocalContext.current
+    var hasNotificationPermission by remember {
+        mutableStateOf(NotificationManagerCompat.getEnabledListenerPackages(context).contains(context.packageName))
     }
 
     val lifecycleOwner = LocalLifecycleOwner.current
     DisposableEffect(lifecycleOwner) {
         val observer = LifecycleEventObserver { _, event ->
             if (event == Lifecycle.Event.ON_RESUME) {
-                // This logic remains in the UI as it depends on the context and lifecycle
-                hasNotificationPermission = isNotificationPermissionGranted
+                hasNotificationPermission = NotificationManagerCompat.getEnabledListenerPackages(context).contains(context.packageName)
             }
         }
         lifecycleOwner.lifecycle.addObserver(observer)
@@ -112,6 +118,7 @@ fun MainScreen(
 
             Spacer(modifier = Modifier.height(24.dp))
 
+            // --- Permission and Listener Control (remains the same) ---
             SectionTitle("1. Grant Permission")
             Text(
                 "Permission Granted: $hasNotificationPermission",
@@ -133,23 +140,39 @@ fun MainScreen(
 
             Spacer(modifier = Modifier.height(24.dp))
 
-            SectionTitle("3. Last Parsed Payment")
-            ParsedPaymentInfo(lastPayment)
-
-            if (lastPayment != null) {
-                Spacer(modifier = Modifier.height(16.dp))
-                Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                    Button(onClick = { viewModel.onClearLastPaymentClicked() }) {
-                        Text("Clear")
-                    }
-                    Button(onClick = { viewModel.onIssueReceiptClicked() }) {
-                        Text("Issue Receipt")
+            // --- List of Pending Payments ---
+            SectionTitle("3. Pending Payments")
+            if (pendingPayments.isEmpty()) {
+                Text("No pending payments.")
+            } else {
+                LazyColumn(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                    items(pendingPayments) { payment ->
+                        PaymentCard(payment = payment, viewModel = viewModel)
                     }
                 }
             }
         }
     }
 }
+
+@Composable
+fun PaymentCard(payment: PaymentEntity, viewModel: MainViewModel) {
+    Card(elevation = CardDefaults.cardElevation(defaultElevation = 4.dp)) {
+        Column(modifier = Modifier.padding(16.dp)) {
+            ParsedPaymentInfo(payment)
+            Spacer(modifier = Modifier.height(16.dp))
+            Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                Button(onClick = { viewModel.onDeletePaymentClicked(payment) }) {
+                    Text("Ignore")
+                }
+                Button(onClick = { viewModel.onIssueReceiptClicked(payment) }) {
+                    Text("Issue Receipt")
+                }
+            }
+        }
+    }
+}
+
 
 @Composable
 fun SectionTitle(title: String) {
@@ -162,27 +185,23 @@ fun SectionTitle(title: String) {
 }
 
 @Composable
-fun ParsedPaymentInfo(payment: PaymentData?) {
-    if (payment == null) {
-        Text("No payment events processed yet.", modifier = Modifier.fillMaxWidth())
-    } else {
-        val formattedDate = remember(payment.timestamp) {
-            val sdf = SimpleDateFormat("dd/MM/yyyy HH:mm:ss", Locale.getDefault())
-            sdf.format(Date(payment.timestamp))
-        }
+fun ParsedPaymentInfo(payment: PaymentEntity) { // Updated to take PaymentEntity
+    val formattedDate = remember(payment.timestamp) {
+        val sdf = SimpleDateFormat("dd/MM/yyyy HH:mm:ss", Locale.getDefault())
+        sdf.format(Date(payment.timestamp))
+    }
 
-        Column {
-            Text("Source: ${payment.source}", fontWeight = FontWeight.Bold)
-            Text("Sender: ${payment.senderName}")
-            Text("Amount: ${payment.amount} ILS")
-            Text("Date: $formattedDate")
-            Text(
-                "Status: ${if (payment.isConfirmed) "Confirmed Payment" else "Payment Request"}",
-                color = if (payment.isConfirmed) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.error
-            )
-            Spacer(modifier = Modifier.height(4.dp))
-            Text("Raw: ${payment.rawText}", style = MaterialTheme.typography.bodySmall)
-        }
+    Column {
+        Text("Source: ${payment.source}", fontWeight = FontWeight.Bold)
+        Text("Sender: ${payment.senderName}")
+        Text("Amount: ${payment.amount} ILS")
+        Text("Date: $formattedDate")
+        Text(
+            "Status: ${if (payment.isConfirmed) "Confirmed Payment" else "Payment Request"}",
+            color = if (payment.isConfirmed) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.error
+        )
+        Spacer(modifier = Modifier.height(4.dp))
+        Text("Raw: ${payment.rawText}", style = MaterialTheme.typography.bodySmall)
     }
 }
 
@@ -190,16 +209,17 @@ fun ParsedPaymentInfo(payment: PaymentData?) {
 @Composable
 fun MainActivityPreview() {
     AutoKabalaListenerTheme {
-        Column(modifier = Modifier.padding(16.dp)) {
-            val samplePayment = PaymentData(
-                source = "bit",
-                senderName = "Danny",
-                amount = 75.0,
-                isConfirmed = false,
-                timestamp = System.currentTimeMillis(),
-                rawText = "...",
-            )
-            ParsedPaymentInfo(samplePayment)
-        }
+        val samplePayment = PaymentEntity(
+            id = 1,
+            source = "bit",
+            senderName = "Danny",
+            amount = 75.0,
+            isConfirmed = false,
+            timestamp = System.currentTimeMillis(),
+            rawText = "...",
+        )
+        // This preview will need a mock ViewModel to work correctly now.
+        // For simplicity, we just show the card.
+        PaymentCard(payment = samplePayment, viewModel = viewModel())
     }
 }

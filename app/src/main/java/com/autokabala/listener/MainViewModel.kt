@@ -1,25 +1,26 @@
 package com.autokabala.listener
 
-import androidx.lifecycle.ViewModel
+import android.app.Application
+import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.viewModelScope
 import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.launch
 
-class MainViewModel : ViewModel() {
+class MainViewModel(application: Application) : AndroidViewModel(application) {
 
-    // The ViewModel now depends on the Repository, not a specific ApiClient.
-    private val receiptRepository = ReceiptRepository()
+    // Get the repository from the application class.
+    private val receiptRepository = (application as AutoKabalaApplication).receiptRepository
 
-    // 1. Expose the state from ListenerManager to the UI
+    // Expose the list of pending payments from the repository to the UI.
+    val pendingPayments: StateFlow<List<PaymentEntity>> = receiptRepository.pendingPayments
+        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), emptyList())
+
     val isEnabled: StateFlow<Boolean> = ListenerManager.enabled
         .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), false)
 
-    val lastPayment: StateFlow<PaymentData?> = ListenerManager.lastPayment
-        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), null)
-
-    // 2. Expose functions to handle user events
+    // --- Event Handlers ---
 
     fun onEnableDisableClicked() {
         if (isEnabled.value) {
@@ -29,17 +30,15 @@ class MainViewModel : ViewModel() {
         }
     }
 
-    fun onClearLastPaymentClicked() {
-        ListenerManager.clearLastPayment()
+    fun onIssueReceiptClicked(payment: PaymentEntity) {
+        viewModelScope.launch {
+            receiptRepository.issueReceipt(payment)
+        }
     }
 
-    fun onIssueReceiptClicked() {
-        val payment = lastPayment.value
-        if (payment != null) {
-            viewModelScope.launch {
-                // The ViewModel calls the Repository, abstracting the data source.
-                receiptRepository.issueReceipt(payment)
-            }
+    fun onDeletePaymentClicked(payment: PaymentEntity) {
+        viewModelScope.launch {
+            receiptRepository.deletePayment(payment)
         }
     }
 }
