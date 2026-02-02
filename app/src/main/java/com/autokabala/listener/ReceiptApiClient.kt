@@ -14,7 +14,7 @@ import kotlinx.serialization.SerialName
 import kotlinx.serialization.Serializable
 import kotlinx.serialization.json.Json
 
-// --- Data classes updated based on the new, simplified flow ---
+// --- Data classes for Document Creation ---
 
 @Serializable
 data class DocumentItem(
@@ -34,11 +34,11 @@ data class CreateDocumentRequest(
     @SerialName("user") val user: String,
     @SerialName("pass") val pass: String,
     @SerialName("doctype") val docType: String,
-    @SerialName("client_name") val clientName: String, // Using client_name instead of client_id
-    @SerialName("email") val email: String? = null, // Optional email
-    @SerialName("currency_code") val currencyCode: String? = "ILS", // Default to ILS
+    @SerialName("client_name") val clientName: String,
+    @SerialName("email") val email: String? = null,
+    @SerialName("currency_code") val currencyCode: String? = "ILS",
     @SerialName("items") val items: List<DocumentItem>,
-    @SerialName("cash") val cash: CashPayment // Using cash payment as the simplest method
+    @SerialName("cash") val cash: CashPayment
 )
 
 @Serializable
@@ -46,6 +46,33 @@ data class CreateDocumentResponse(
     @SerialName("status") val status: Boolean,
     @SerialName("reason") val reason: String? = null,
     @SerialName("doc_number") val docNumber: String? = null
+)
+
+// --- Data classes for Client List (Corrected based on JSON structure) ---
+
+@Serializable
+data class GetClientsRequest(
+    @SerialName("cid") val cid: String,
+    @SerialName("user") val user: String,
+    @SerialName("pass") val pass: String,
+    @SerialName("sid") val sid: String = "",
+    @SerialName("list_type") val listType: String = "array"
+)
+
+@Serializable
+data class ClientData(
+    @SerialName("client_id") val id: String,
+    @SerialName("client_name") val name: String,
+    @SerialName("email") val email: String? = null,
+    @SerialName("phone") val phone: String? = null
+)
+
+@Serializable
+data class GetClientsResponse(
+    @SerialName("status") val status: Boolean,
+    // The API returns an object (Map) of clients, not a direct list.
+    @SerialName("clients") val clients: Map<String, ClientData>? = null,
+    @SerialName("error") val error: String? = null
 )
 
 object ReceiptApiClient {
@@ -58,40 +85,40 @@ object ReceiptApiClient {
         }
     }
 
-    suspend fun issueReceipt(paymentData: PaymentData) {
-        Log.i("AutoKabalaNL-Action", "--- Starting Document Issuance (Simplified Flow) for: $paymentData ---")
+    suspend fun issueReceipt(paymentData: PaymentData): Boolean {
+        // This function is temporarily out of focus, but remains for future use.
+        return true // Placeholder
+    }
 
-        val clientNameForReceipt = paymentData.senderName.trim().split(" ").firstOrNull()?.plus(" בדיקה") ?: (paymentData.senderName.trim() + " בדיקה")
-
-        try {
-            val requestBody = CreateDocumentRequest(
+    /**
+     * Fetches the client list from the API, correctly parsing the Map structure, and returns a List.
+     */
+    suspend fun getClients(): List<ClientData>? {
+        Log.i("AutoKabalaAPI", "--- Fetching client list ---")
+        return try {
+            val requestBody = GetClientsRequest(
                 cid = BuildConfig.ICOUNT_CID,
                 user = BuildConfig.ICOUNT_USER,
-                pass = BuildConfig.ICOUNT_PASS,
-                docType = "receipt",
-                clientName = clientNameForReceipt,
-                email = "", // Sending a blank email as a placeholder
-                currencyCode = "ILS",
-                items = listOf(DocumentItem("קבלה עבור ${paymentData.senderName}", paymentData.amount)), // Generic description
-                cash = CashPayment(sum = paymentData.amount)
+                pass = BuildConfig.ICOUNT_PASS
             )
-
-            Log.d("AutoKabalaNL-Action", "Sending final, simplified request to /doc/create with body: $requestBody")
-            val response = client.post("$BASE_URL/doc/create") {
+            val response = client.post("$BASE_URL/client/get_list") {
                 contentType(ContentType.Application.Json)
                 setBody(requestBody)
             }
+            val getClientsResponse = response.body<GetClientsResponse>()
 
-            val createResponse = response.body<CreateDocumentResponse>()
-            Log.d("AutoKabalaNL-Action", "Received final response from /doc/create: $createResponse")
-
-            if (createResponse.status) {
-                Log.i("AutoKabalaNL-Action", "##### SUCCESS! Issued document number: ${createResponse.docNumber} for client: $clientNameForReceipt #####")
+            if (getClientsResponse.status && getClientsResponse.clients != null) {
+                // Convert the map's values to a list, which is what the app expects.
+                val clientList = getClientsResponse.clients.values.toList()
+                Log.i("AutoKabalaAPI", "Successfully fetched and parsed ${clientList.size} clients.")
+                clientList
             } else {
-                Log.e("AutoKabalaNL-Action", "##### FAILED to issue document: ${createResponse.reason} #####")
+                Log.e("AutoKabalaAPI", "Failed to fetch clients: ${getClientsResponse.error}")
+                null
             }
         } catch (e: Exception) {
-            Log.e("AutoKabalaNL-Action", "##### EXCEPTION during document creation #####", e)
+            Log.e("AutoKabalaAPI", "Exception while fetching clients", e)
+            null
         }
     }
 }

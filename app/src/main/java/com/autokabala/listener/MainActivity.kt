@@ -22,14 +22,19 @@ import androidx.compose.material3.Button
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.Scaffold
+import androidx.compose.material3.SnackbarHost
+import androidx.compose.material3.SnackbarHostState
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.DisposableEffect
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
@@ -42,6 +47,7 @@ import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.LifecycleEventObserver
 import androidx.lifecycle.viewmodel.compose.viewModel
 import com.autokabala.listener.ui.theme.AutoKabalaListenerTheme
+import kotlinx.coroutines.flow.collectLatest
 import java.text.SimpleDateFormat
 import java.util.Date
 import java.util.Locale
@@ -54,7 +60,6 @@ class MainActivity : ComponentActivity() {
 
         enableEdgeToEdge()
         setContent {
-            // The ViewModel is now retrieved from the activity, which gets it from the Application.
             val mainViewModel: MainViewModel = viewModel(factory = viewModelFactory { MainViewModel(application) })
 
             AutoKabalaListenerTheme {
@@ -84,7 +89,6 @@ fun MainScreen(
     onOpenSettingsClicked: () -> Unit
 ) {
     val isEnabled by viewModel.isEnabled.collectAsState()
-    // Get the list of pending payments from the ViewModel
     val pendingPayments by viewModel.pendingPayments.collectAsState()
 
     val context = LocalContext.current
@@ -105,7 +109,23 @@ fun MainScreen(
         }
     }
 
-    Scaffold(modifier = Modifier.fillMaxSize()) { innerPadding ->
+    val snackbarHostState = remember { SnackbarHostState() }
+
+    // Listen for UI events from the ViewModel
+    LaunchedEffect(Unit) {
+        viewModel.uiEvent.collectLatest {
+            when (it) {
+                is MainViewModel.UiEvent.ShowError -> {
+                    snackbarHostState.showSnackbar(message = it.message)
+                }
+            }
+        }
+    }
+
+    Scaffold(
+        modifier = Modifier.fillMaxSize(),
+        snackbarHost = { SnackbarHost(snackbarHostState) }
+    ) { innerPadding ->
         Column(
             modifier = Modifier
                 .padding(innerPadding)
@@ -118,7 +138,7 @@ fun MainScreen(
 
             Spacer(modifier = Modifier.height(24.dp))
 
-            // --- Permission and Listener Control (remains the same) ---
+            // --- Permission and Listener Control ---
             SectionTitle("1. Grant Permission")
             Text(
                 "Permission Granted: $hasNotificationPermission",
@@ -134,9 +154,16 @@ fun MainScreen(
             SectionTitle("2. Control Listener")
             Text("Status: ${if (isEnabled) "Active" else "Inactive"}")
             Spacer(modifier = Modifier.height(8.dp))
-            Button(onClick = { viewModel.onEnableDisableClicked() }) {
-                Text(if (isEnabled) "Disable Listener" else "Enable Listener")
+            Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                Button(onClick = { viewModel.onEnableDisableClicked() }) {
+                    Text(if (isEnabled) "Disable Listener" else "Enable Listener")
+                }
+                // Temporary Test Button
+                OutlinedButton(onClick = { viewModel.onSyncClientsClicked() }) {
+                    Text("Sync Clients")
+                }
             }
+
 
             Spacer(modifier = Modifier.height(24.dp))
 

@@ -5,28 +5,29 @@ import androidx.room.Database
 import androidx.room.Room
 import androidx.room.RoomDatabase
 
-@Database(entities = [PaymentEntity::class], version = 1, exportSchema = false)
+// Increment the version number to 2 because we added the ClientEntity table.
+@Database(entities = [PaymentEntity::class, ClientEntity::class], version = 2, exportSchema = false)
 abstract class AppDatabase : RoomDatabase() {
 
     abstract fun paymentDao(): PaymentDao
+    abstract fun clientDao(): ClientDao
 
     companion object {
-        // Volatile annotation ensures that the INSTANCE is always up-to-date and the same for all execution threads.
         @Volatile
         private var INSTANCE: AppDatabase? = null
 
         fun getDatabase(context: Context): AppDatabase {
-            // Return the existing instance if it exists, otherwise create a new one.
             return INSTANCE ?: synchronized(this) {
                 val instance = Room.databaseBuilder(
                     context.applicationContext,
                     AppDatabase::class.java,
                     "autokabala_database"
                 )
-                .fallbackToDestructiveMigration() // Strategy for handling version changes
+                // This will destroy and re-create the database if a migration is needed,
+                // which is fine for the development phase.
+                .fallbackToDestructiveMigration()
                 .build()
                 INSTANCE = instance
-                // return instance
                 instance
             }
         }
