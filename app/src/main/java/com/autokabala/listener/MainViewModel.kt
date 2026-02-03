@@ -7,18 +7,56 @@ import kotlinx.coroutines.channels.Channel
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
+import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.flow.receiveAsFlow
 import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.launch
 
+// Represents the result of matching a payment to existing clients
+sealed class MatchResult {
+    object NoMatch : MatchResult()
+    data class SingleMatch(val client: ClientEntity) : MatchResult()
+    data class MultipleMatches(val clients: List<ClientEntity>) : MatchResult()
+}
+
+// Holds the combined state for a single payment, ready for the UI
+data class PaymentProcessingState(
+    val payment: PaymentEntity,
+    val matchResult: MatchResult
+)
+
 class MainViewModel(application: Application) : AndroidViewModel(application) {
 
-    // Get the repository from the application class.
     private val receiptRepository = (application as AutoKabalaApplication).receiptRepository
 
     // --- UI State ---
-    val pendingPayments: StateFlow<List<PaymentEntity>> = receiptRepository.pendingPayments
+    private val pendingPayments: StateFlow<List<PaymentEntity>> = receiptRepository.pendingPayments
         .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), emptyList())
+
+    private val allClients: StateFlow<List<ClientEntity>> = receiptRepository.allClients
+        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), emptyList())
+
+    val paymentProcessingStates: StateFlow<List<PaymentProcessingState>> = combine(
+        pendingPayments, allClients
+    ) { payments, clients ->
+        payments.map { payment ->
+            val senderFirstName = payment.senderName.trim().split(" ").firstOrNull() ?: ""
+            val matchingClients = if (senderFirstName.isBlank()) emptyList() else {
+                clients.filter { client ->
+                    client.name.contains(senderFirstName, ignoreCase = true)
+                }
+            }
+
+            val matchResult = when {
+                matchingClients.isEmpty() -> MatchResult.NoMatch
+                matchingClients.size == 1 -> MatchResult.SingleMatch(matchingClients.first())
+                else -> MatchResult.MultipleMatches(matchingClients)
+            }
+
+            PaymentProcessingState(payment, matchResult)
+        }
+    }.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), emptyList())
+
 
     val isEnabled: StateFlow<Boolean> = ListenerManager.enabled
         .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), false)
@@ -41,9 +79,9 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         }
     }
 
-    fun onIssueReceiptClicked(payment: PaymentEntity) {
+    fun onIssueReceiptForClientClicked(payment: PaymentEntity, clientId: String) {
         viewModelScope.launch {
-            val wasSuccessful = receiptRepository.issueReceipt(payment)
+            val wasSuccessful = receiptRepository.issueReceiptForClient(payment, clientId)
             if (!wasSuccessful) {
                 _uiEvent.send(UiEvent.ShowError("Failed to issue receipt. Please check internet connection and try again."))
             }
@@ -59,6 +97,12 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
     fun onSyncClientsClicked() {
         viewModelScope.launch {
             receiptRepository.syncClients()
+        }
+    }
+
+    fun onAddFakePaymentClicked() {
+        viewModelScope.launch {
+            receiptRepository.addFakePayment()
         }
     }
 }

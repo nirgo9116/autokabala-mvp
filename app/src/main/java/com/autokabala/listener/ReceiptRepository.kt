@@ -6,19 +6,10 @@ import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.launchIn
 import kotlinx.coroutines.flow.onEach
 
-/**
- * The Repository is the single source of truth for all data operations.
- * It now takes both DAOs as dependencies to interact with the database.
- */
 class ReceiptRepository(private val paymentDao: PaymentDao, private val clientDao: ClientDao) {
 
-    // --- Pending Payments ---
     val pendingPayments: Flow<List<PaymentEntity>> = paymentDao.getPendingPayments()
 
-    /**
-     * Starts listening for new payment events from the ListenerManager.
-     * This should be called only once from the Application class.
-     */
     fun startListeningForPayments(scope: CoroutineScope) {
         ListenerManager.newPaymentEvent
             .onEach { paymentData ->
@@ -33,10 +24,10 @@ class ReceiptRepository(private val paymentDao: PaymentDao, private val clientDa
                 )
                 paymentDao.insertPayment(paymentEntity)
             }
-            .launchIn(scope) // Launch the collection in the provided application scope
+            .launchIn(scope)
     }
 
-    suspend fun issueReceipt(payment: PaymentEntity): Boolean {
+    suspend fun issueReceiptForClient(payment: PaymentEntity, clientId: String): Boolean {
         val paymentData = PaymentData(
             source = payment.source,
             senderName = payment.senderName,
@@ -45,7 +36,7 @@ class ReceiptRepository(private val paymentDao: PaymentDao, private val clientDa
             timestamp = payment.timestamp,
             rawText = payment.rawText
         )
-        val wasSuccessful = ReceiptApiClient.issueReceipt(paymentData)
+        val wasSuccessful = ReceiptApiClient.issueReceipt(paymentData, clientId)
         if (wasSuccessful) {
             paymentDao.updatePaymentStatus(payment.id, "processed")
         }
@@ -56,16 +47,28 @@ class ReceiptRepository(private val paymentDao: PaymentDao, private val clientDa
         paymentDao.deletePayment(payment.id)
     }
 
+    // --- Test Function ---
+    suspend fun addFakePayment() {
+        val names = listOf("Danny", "Moshe", "Yossi", "ניר", "סמדר בדיקה", "Elad")
+        val randomName = names.random()
+        val fakePayment = PaymentEntity(
+            source = "bit",
+            senderName = randomName,
+            amount = 1.0, // Set to 1 NIS for easier testing
+            isConfirmed = true,
+            timestamp = System.currentTimeMillis(),
+            rawText = "Fake payment for testing"
+        )
+        paymentDao.insertPayment(fakePayment)
+        Log.d("Repository", "Added fake payment for $randomName")
+    }
+
     // --- Clients ---
     val allClients: Flow<List<ClientEntity>> = clientDao.getAllClients()
 
-    /**
-     * Fetches the client list from the API and replaces the local data with the new list.
-     */
     suspend fun syncClients() {
         Log.d("SyncClients", "Starting client sync...")
         val clientsFromApi = ReceiptApiClient.getClients()
-
         if (clientsFromApi != null) {
             Log.d("SyncClients", "Successfully fetched ${clientsFromApi.size} clients. Updating database...")
             val clientEntities = clientsFromApi.map { clientData ->

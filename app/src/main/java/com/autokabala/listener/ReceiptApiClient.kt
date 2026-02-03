@@ -29,12 +29,13 @@ data class CashPayment(
 )
 
 @Serializable
-data class CreateDocumentRequest(
+data class CreateDocumentWithClientIdRequest(
+    @SerialName("sid") val sid: String = "",
     @SerialName("cid") val cid: String,
     @SerialName("user") val user: String,
     @SerialName("pass") val pass: String,
     @SerialName("doctype") val docType: String,
-    @SerialName("client_name") val clientName: String,
+    @SerialName("client_id") val clientId: Int,
     @SerialName("email") val email: String? = null,
     @SerialName("currency_code") val currencyCode: String? = "ILS",
     @SerialName("items") val items: List<DocumentItem>,
@@ -44,11 +45,11 @@ data class CreateDocumentRequest(
 @Serializable
 data class CreateDocumentResponse(
     @SerialName("status") val status: Boolean,
-    @SerialName("reason") val reason: String? = null,
+    @SerialName("error") val error: String? = null,
     @SerialName("doc_number") val docNumber: String? = null
 )
 
-// --- Data classes for Client List (Corrected based on JSON structure) ---
+// --- Data classes for Client List ---
 
 @Serializable
 data class GetClientsRequest(
@@ -70,7 +71,6 @@ data class ClientData(
 @Serializable
 data class GetClientsResponse(
     @SerialName("status") val status: Boolean,
-    // The API returns an object (Map) of clients, not a direct list.
     @SerialName("clients") val clients: Map<String, ClientData>? = null,
     @SerialName("error") val error: String? = null
 )
@@ -85,14 +85,39 @@ object ReceiptApiClient {
         }
     }
 
-    suspend fun issueReceipt(paymentData: PaymentData): Boolean {
-        // This function is temporarily out of focus, but remains for future use.
-        return true // Placeholder
+    suspend fun issueReceipt(paymentData: PaymentData, clientId: String): Boolean {
+        Log.i("AutoKabalaAPI", "--- Starting Document Issuance for client ID: $clientId ---")
+        return try {
+            val requestBody = CreateDocumentWithClientIdRequest(
+                cid = BuildConfig.ICOUNT_CID,
+                user = BuildConfig.ICOUNT_USER,
+                pass = BuildConfig.ICOUNT_PASS,
+                docType = "receipt",
+                clientId = clientId.toInt(),
+                email = null,
+                currencyCode = "ILS",
+                items = listOf(DocumentItem("קבלה עבור ${paymentData.senderName}", paymentData.amount)),
+                cash = CashPayment(sum = paymentData.amount)
+            )
+            Log.d("AutoKabalaAPI", "Sending request to /doc/create with body: $requestBody")
+            val response = client.post("$BASE_URL/doc/create") {
+                contentType(ContentType.Application.Json)
+                setBody(requestBody)
+            }
+            val createResponse = response.body<CreateDocumentResponse>()
+            if (createResponse.status) {
+                Log.i("AutoKabalaAPI", "##### SUCCESS! Issued document for client ID: $clientId #####")
+                true
+            } else {
+                Log.e("AutoKabalaAPI", "##### FAILED to issue document: ${createResponse.error} #####")
+                false
+            }
+        } catch (e: Exception) {
+            Log.e("AutoKabalaAPI", "##### EXCEPTION during document creation: ${e.message} #####", e)
+            false
+        }
     }
 
-    /**
-     * Fetches the client list from the API, correctly parsing the Map structure, and returns a List.
-     */
     suspend fun getClients(): List<ClientData>? {
         Log.i("AutoKabalaAPI", "--- Fetching client list ---")
         return try {
@@ -108,7 +133,6 @@ object ReceiptApiClient {
             val getClientsResponse = response.body<GetClientsResponse>()
 
             if (getClientsResponse.status && getClientsResponse.clients != null) {
-                // Convert the map's values to a list, which is what the app expects.
                 val clientList = getClientsResponse.clients.values.toList()
                 Log.i("AutoKabalaAPI", "Successfully fetched and parsed ${clientList.size} clients.")
                 clientList
@@ -117,7 +141,7 @@ object ReceiptApiClient {
                 null
             }
         } catch (e: Exception) {
-            Log.e("AutoKabalaAPI", "Exception while fetching clients", e)
+            Log.e("AutoKabalaAPI", "Exception while fetching clients: ${e.message}", e)
             null
         }
     }
