@@ -43,6 +43,23 @@ class ReceiptRepository(private val paymentDao: PaymentDao, private val clientDa
         return wasSuccessful
     }
 
+    suspend fun createClientAndIssueReceipt(payment: PaymentEntity, newClientName: String): Boolean {
+        Log.d("Repository", "Attempting to create client '$newClientName' and issue receipt.")
+
+        when (val result = ReceiptApiClient.createClient(newClientName)) {
+            is ApiResult.Success -> {
+                val newClientId = result.data
+                Log.d("Repository", "Client created successfully with ID: $newClientId. Now issuing receipt.")
+                // If client creation was successful, issue the receipt with the new ID
+                return issueReceiptForClient(payment, newClientId.toString())
+            }
+            is ApiResult.Failure -> {
+                Log.e("Repository", "Failed to create new client: ${result.reason}. Aborting receipt issuance.")
+                return false
+            }
+        }
+    }
+
     suspend fun deletePayment(payment: PaymentEntity) {
         paymentDao.deletePayment(payment.id)
     }

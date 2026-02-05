@@ -88,6 +88,15 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         }
     }
 
+    fun onCreateClientAndIssueReceiptClicked(payment: PaymentEntity, newClientName: String) {
+        viewModelScope.launch {
+            val wasSuccessful = receiptRepository.createClientAndIssueReceipt(payment, newClientName)
+            if (!wasSuccessful) {
+                _uiEvent.send(UiEvent.ShowError("Failed to create client or issue receipt."))
+            }
+        }
+    }
+
     fun onDeletePaymentClicked(payment: PaymentEntity) {
         viewModelScope.launch {
             receiptRepository.deletePayment(payment)

@@ -1,5 +1,6 @@
 package com.autokabala.listener
 
+import android.app.Application
 import android.content.Intent
 import android.os.Bundle
 import android.provider.Settings
@@ -7,13 +8,11 @@ import android.util.Log
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
 import androidx.activity.enableEdgeToEdge
-import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
-import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
@@ -21,7 +20,6 @@ import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Info
-import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
@@ -49,6 +47,7 @@ import androidx.compose.ui.unit.dp
 import androidx.core.app.NotificationManagerCompat
 import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.LifecycleEventObserver
+import androidx.lifecycle.ViewModel
 import androidx.lifecycle.ViewModelProvider
 import androidx.lifecycle.viewmodel.compose.viewModel
 import com.autokabala.listener.ui.theme.AutoKabalaListenerTheme
@@ -56,6 +55,16 @@ import kotlinx.coroutines.flow.collectLatest
 import java.text.SimpleDateFormat
 import java.util.Date
 import java.util.Locale
+
+class MainViewModelFactory(private val application: Application) : ViewModelProvider.Factory {
+    override fun <T : ViewModel> create(modelClass: Class<T>): T {
+        if (modelClass.isAssignableFrom(MainViewModel::class.java)) {
+            @Suppress("UNCHECKED_CAST")
+            return MainViewModel(application) as T
+        }
+        throw IllegalArgumentException("Unknown ViewModel class")
+    }
+}
 
 class MainActivity : ComponentActivity() {
 
@@ -65,8 +74,8 @@ class MainActivity : ComponentActivity() {
 
         enableEdgeToEdge()
         setContent {
-            // Reverting to the stable, working way of creating the ViewModel
-            val mainViewModel: MainViewModel = viewModel(factory = viewModelFactory { MainViewModel(application) })
+            val factory = remember { MainViewModelFactory(application) }
+            val mainViewModel: MainViewModel = viewModel(factory = factory)
 
             AutoKabalaListenerTheme {
                 MainScreen(
@@ -76,15 +85,6 @@ class MainActivity : ComponentActivity() {
                     }
                 )
             }
-        }
-    }
-}
-
-// The stable, albeit less conventional, factory that was working before.
-inline fun <reified T : MainViewModel> ComponentActivity.viewModelFactory(crossinline creator: () -> T): ViewModelProvider.Factory {
-    return object : ViewModelProvider.Factory {
-        override fun <T : androidx.lifecycle.ViewModel> create(modelClass: Class<T>): T {
-            return creator() as T
         }
     }
 }
@@ -101,7 +101,7 @@ fun MainScreen(
     val lifecycleOwner = LocalLifecycleOwner.current
 
     var showClientSelectionDialogFor by remember { mutableStateOf<PaymentProcessingState?>(null) }
-    // The create client dialog logic is removed as part of the revert
+    var showCreateClientDialogFor by remember { mutableStateOf<PaymentProcessingState?>(null) }
 
     DisposableEffect(lifecycleOwner) {
         val observer = LifecycleEventObserver { _, event ->
@@ -136,6 +136,17 @@ fun MainScreen(
         }
     }
 
+    showCreateClientDialogFor?.let { state ->
+        CreateNewClientDialog(
+            initialName = state.payment.senderName,
+            onDismiss = { showCreateClientDialogFor = null },
+            onCreateConfirm = { newName ->
+                viewModel.onCreateClientAndIssueReceiptClicked(state.payment, newName)
+                showCreateClientDialogFor = null
+            }
+        )
+    }
+
     Scaffold(
         modifier = Modifier.fillMaxSize(),
         snackbarHost = { SnackbarHost(snackbarHostState) }
@@ -143,12 +154,15 @@ fun MainScreen(
         Column(modifier = Modifier.padding(innerPadding).padding(16.dp)) {
             SectionTitle(text = "AutoKabala MVP")
             ControlSection(isEnabled, hasNotificationPermission, onOpenSettingsClicked) { viewModel.onEnableDisableClicked() }
-            TestSection(onSyncClients = { viewModel.onSyncClientsClicked() }, onAddFakePayment = { viewModel.onAddFakePaymentClicked() })
+            TestSection(
+                onSyncClients = { viewModel.onSyncClientsClicked() },
+                onAddFakePayment = { viewModel.onAddFakePaymentClicked() }
+            )
             PaymentsSection(
                 paymentStates = paymentStates,
                 viewModel = viewModel,
                 onSelectClientClicked = { showClientSelectionDialogFor = it },
-                onCreateClientClicked = { /* For now, does nothing */ }
+                onCreateClientClicked = { showCreateClientDialogFor = it } // Connect the click handler
             )
         }
     }
@@ -178,7 +192,6 @@ fun TestSection(onSyncClients: () -> Unit, onAddFakePayment: () -> Unit) {
         }
     }
 }
-
 
 @Composable
 fun PaymentsSection(paymentStates: List<PaymentProcessingState>, viewModel: MainViewModel, onSelectClientClicked: (PaymentProcessingState) -> Unit, onCreateClientClicked: (PaymentProcessingState) -> Unit) {
@@ -240,8 +253,7 @@ fun SmartActionArea(state: PaymentProcessingState, viewModel: MainViewModel, onS
                 Text("No matching client found in iCount.", style = MaterialTheme.typography.bodyMedium)
                 Spacer(modifier = Modifier.height(8.dp))
                 Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                    // Button is now disabled as the logic is being reverted
-                    Button(onClick = { /* TODO: Re-implement create client */ }, enabled = false) { Text("Create Client & Issue") }
+                    Button(onClick = { onCreateClientClicked(state) }) { Text("Create Client & Issue") }
                     OutlinedButton(onClick = { viewModel.onDeletePaymentClicked(state.payment) }) { Text("Ignore (Friend)") }
                 }
             }

@@ -49,6 +49,29 @@ data class CreateDocumentResponse(
     @SerialName("doc_number") val docNumber: String? = null
 )
 
+// --- Data classes for Client Creation ---
+@Serializable
+data class CreateClientRequest(
+    @SerialName("sid") val sid: String = "",
+    @SerialName("cid") val cid: String,
+    @SerialName("user") val user: String,
+    @SerialName("pass") val pass: String,
+    @SerialName("client_name") val clientName: String
+)
+
+@Serializable
+data class CreateClientResponse(
+    @SerialName("status") val status: Boolean,
+    @SerialName("client_id") val clientId: Int? = null,
+    @SerialName("data") val data: ClientIdWrapper? = null,
+    @SerialName("error") val error: String? = null
+)
+
+@Serializable
+data class ClientIdWrapper(
+    @SerialName("client_id") val clientId: Int
+)
+
 // --- Data classes for Client List ---
 
 @Serializable
@@ -74,6 +97,12 @@ data class GetClientsResponse(
     @SerialName("clients") val clients: Map<String, ClientData>? = null,
     @SerialName("error") val error: String? = null
 )
+
+// API RESULT WRAPPER
+sealed class ApiResult<out T> {
+    data class Success<out T>(val data: T) : ApiResult<T>()
+    data class Failure(val reason: String) : ApiResult<Nothing>()
+}
 
 object ReceiptApiClient {
 
@@ -126,23 +155,73 @@ object ReceiptApiClient {
                 user = BuildConfig.ICOUNT_USER,
                 pass = BuildConfig.ICOUNT_PASS
             )
+
             val response = client.post("$BASE_URL/client/get_list") {
                 contentType(ContentType.Application.Json)
                 setBody(requestBody)
             }
-            val getClientsResponse = response.body<GetClientsResponse>()
 
-            if (getClientsResponse.status && getClientsResponse.clients != null) {
-                val clientList = getClientsResponse.clients.values.toList()
-                Log.i("AutoKabalaAPI", "Successfully fetched and parsed ${clientList.size} clients.")
-                clientList
+            val rawBody = response.body<String>()
+            Log.d("AutoKabalaAPI", "GetClients raw response: $rawBody")
+
+            val parsed = Json {
+                ignoreUnknownKeys = true
+                isLenient = true
+            }.decodeFromString<GetClientsResponse>(rawBody)
+
+            if (parsed.status && parsed.clients != null) {
+                val clients = parsed.clients.values.toList()
+                Log.i("AutoKabalaAPI", "Fetched ${clients.size} clients successfully.")
+                clients
             } else {
-                Log.e("AutoKabalaAPI", "Failed to fetch clients: ${getClientsResponse.error}")
+                Log.e("AutoKabalaAPI", "API returned error: ${parsed.error}")
                 null
             }
         } catch (e: Exception) {
-            Log.e("AutoKabalaAPI", "Exception while fetching clients: ${e.message}", e)
+            Log.e(
+                "AutoKabalaAPI",
+                "getClients failed BEFORE business logic. This is a parsing or transport issue.",
+                e
+            )
             null
+        }
+    }
+
+    // UPDATED FUNCTION
+    suspend fun createClient(clientName: String): ApiResult<Int> {
+        Log.i("AutoKabalaAPI", "--- Creating new client: $clientName ---")
+        return try {
+            val requestBody = CreateClientRequest(
+                cid = BuildConfig.ICOUNT_CID,
+                user = BuildConfig.ICOUNT_USER,
+                pass = BuildConfig.ICOUNT_PASS,
+                clientName = clientName
+            )
+            val response = client.post("$BASE_URL/client/create") {
+                contentType(ContentType.Application.Json)
+                setBody(requestBody)
+            }
+            val createResponse = response.body<CreateClientResponse>()
+
+            if (createResponse.status) {
+                val newId = createResponse.clientId ?: createResponse.data?.clientId
+                if (newId != null) {
+                    Log.i("AutoKabalaAPI", "SUCCESS! Created new client. ID: $newId")
+                    ApiResult.Success(newId)
+                } else {
+                    val errorMsg = "Failed to create client: Status was true but no client_id was returned."
+                    Log.e("AutoKabalaAPI", errorMsg)
+                    ApiResult.Failure(errorMsg)
+                }
+            } else {
+                val errorMsg = createResponse.error ?: "Unknown error"
+                Log.e("AutoKabalaAPI", "FAILED to create client: $errorMsg")
+                ApiResult.Failure(errorMsg)
+            }
+        } catch (e: Exception) {
+            val errorMsg = e.message ?: "Exception during client creation"
+            Log.e("AutoKabalaAPI", "EXCEPTION during client creation: $errorMsg", e)
+            ApiResult.Failure(errorMsg)
         }
     }
 }
