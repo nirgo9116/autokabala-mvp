@@ -2,9 +2,11 @@ package com.autokabala.listener
 
 import android.util.Log
 import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.launchIn
 import kotlinx.coroutines.flow.onEach
+import kotlinx.coroutines.withContext
 
 class ReceiptRepository(private val paymentDao: PaymentDao, private val clientDao: ClientDao) {
 
@@ -36,11 +38,13 @@ class ReceiptRepository(private val paymentDao: PaymentDao, private val clientDa
             timestamp = payment.timestamp,
             rawText = payment.rawText
         )
-        val wasSuccessful = ReceiptApiClient.issueReceipt(paymentData, clientId)
-        if (wasSuccessful) {
-            paymentDao.updatePaymentStatus(payment.id, "processed")
+        return withContext(Dispatchers.IO) {
+            val wasSuccessful = ReceiptApiClient.issueReceipt(paymentData, clientId)
+            if (wasSuccessful) {
+                paymentDao.updatePaymentStatus(payment.id, "processed")
+            }
+            wasSuccessful
         }
-        return wasSuccessful
     }
 
     suspend fun createClientAndIssueReceipt(payment: PaymentEntity, newClientName: String): Boolean {
@@ -83,24 +87,34 @@ class ReceiptRepository(private val paymentDao: PaymentDao, private val clientDa
     // --- Clients ---
     val allClients: Flow<List<ClientEntity>> = clientDao.getAllClients()
 
-    suspend fun syncClients() {
-        Log.d("SyncClients", "Starting client sync...")
-        val clientsFromApi = ReceiptApiClient.getClients()
-        if (clientsFromApi != null) {
-            Log.d("SyncClients", "Successfully fetched ${clientsFromApi.size} clients. Updating database...")
-            val clientEntities = clientsFromApi.map { clientData ->
-                ClientEntity(
-                    id = clientData.id,
-                    name = clientData.name,
-                    email = clientData.email,
-                    phone = clientData.phone
-                )
+    suspend fun syncClients(): Boolean {
+        return withContext(Dispatchers.IO) {
+            try {
+                Log.d("SyncClients", "Starting client sync on IO thread...")
+                val clientsFromApi = ReceiptApiClient.getClients()
+
+                if (clientsFromApi != null) {
+                    Log.d("SyncClients", "Successfully fetched ${clientsFromApi.size} clients. Updating database...")
+                    val clientEntities = clientsFromApi.map { clientData ->
+                        ClientEntity(
+                            id = clientData.id,
+                            name = clientData.name,
+                            email = clientData.email,
+                            phone = clientData.phone
+                        )
+                    }
+                    clientDao.deleteAll()
+                    clientDao.insertAll(clientEntities)
+                    Log.d("SyncClients", "Database updated successfully.")
+                    true
+                } else {
+                    Log.e("SyncClients", "Failed to fetch clients from API. Check AutoKabalaAPI logs for details.")
+                    false
+                }
+            } catch (e: Exception) {
+                Log.e("SyncClients", "An exception occurred during client sync", e)
+                false
             }
-            clientDao.deleteAll()
-            clientDao.insertAll(clientEntities)
-            Log.d("SyncClients", "Database updated successfully.")
-        } else {
-            Log.e("SyncClients", "Failed to fetch clients from API.")
         }
     }
 }

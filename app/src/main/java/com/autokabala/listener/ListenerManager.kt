@@ -12,7 +12,7 @@ import kotlinx.coroutines.flow.asStateFlow
  */
 object ListenerManager {
 
-    private val _enabled = MutableStateFlow(false)
+    private val _enabled = MutableStateFlow(true) // Changed to true
     val enabled: StateFlow<Boolean> = _enabled.asStateFlow()
 
     // This is now a SharedFlow. It emits events to any collectors without holding state.

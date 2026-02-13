@@ -1,9 +1,13 @@
 package com.autokabala.listener
 
 import android.app.Notification
+import android.app.PendingIntent
+import android.content.Intent
 import android.service.notification.NotificationListenerService
 import android.service.notification.StatusBarNotification
 import android.util.Log
+import androidx.core.app.NotificationCompat
+import androidx.core.app.NotificationManagerCompat
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
@@ -19,7 +23,7 @@ class AutoKabalaNotificationService : NotificationListenerService() {
 
         val timestamp = sbn.postTime
 
-        val title = extras.getString(Notification.EXTRA_TITLE) ?: ""
+        val title = extras.getCharSequence(Notification.EXTRA_TITLE)?.toString() ?: ""
         val text = extras.getCharSequence(Notification.EXTRA_TEXT)?.toString() ?: ""
 
         val rawText = listOf(title, text)
@@ -37,10 +41,30 @@ class AutoKabalaNotificationService : NotificationListenerService() {
             serviceScope.launch {
                 ListenerManager.onPaymentParsed(paymentData)
             }
+            showConfirmationNotification(paymentData)
         } else {
             if (packageName in setOf("com.bnhp.payments.paymentsapp", "com.payboxapp")) {
                 Log.w("AutoKabalaNL", "Failed to parse notification from $packageName: $rawText")
             }
+        }
+    }
+
+    private fun showConfirmationNotification(paymentData: PaymentData) {
+        val intent = Intent(this, MainActivity::class.java).apply {
+            flags = Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_CLEAR_TASK
+        }
+        val pendingIntent: PendingIntent = PendingIntent.getActivity(this, 0, intent, PendingIntent.FLAG_IMMUTABLE)
+
+        val builder = NotificationCompat.Builder(this, "new_payment_channel")
+            .setSmallIcon(R.drawable.ic_launcher_foreground)
+            .setContentTitle("New Payment Detected")
+            .setContentText("From: ${paymentData.senderName}, Amount: ${paymentData.amount}")
+            .setPriority(NotificationCompat.PRIORITY_DEFAULT)
+            .setContentIntent(pendingIntent)
+            .setAutoCancel(true)
+
+        with(NotificationManagerCompat.from(this)) {
+            notify(System.currentTimeMillis().toInt(), builder.build())
         }
     }
 

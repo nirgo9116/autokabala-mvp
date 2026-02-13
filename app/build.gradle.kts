@@ -67,6 +67,7 @@ dependencies {
     implementation(libs.androidx.lifecycle.runtime.ktx)
     implementation("androidx.lifecycle:lifecycle-viewmodel-compose:2.9.1") // For ViewModel
     implementation(libs.androidx.activity.compose)
+    implementation("androidx.activity:activity-ktx:1.9.0") // ADDED: For ActivityResultContracts
     implementation(platform(libs.androidx.compose.bom))
     implementation(libs.androidx.ui)
     implementation(libs.androidx.ui.graphics)

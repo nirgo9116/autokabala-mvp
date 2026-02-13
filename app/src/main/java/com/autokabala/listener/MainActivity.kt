@@ -1,12 +1,17 @@
 package com.autokabala.listener
 
+import android.Manifest
 import android.app.Application
 import android.content.Intent
+import android.content.pm.PackageManager
+import android.net.Uri
+import android.os.Build
 import android.os.Bundle
 import android.provider.Settings
 import android.util.Log
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
+import androidx.activity.result.contract.ActivityResultContracts
 import androidx.activity.enableEdgeToEdge
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
@@ -44,6 +49,7 @@ import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalLifecycleOwner
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
+import androidx.core.content.ContextCompat
 import androidx.core.app.NotificationManagerCompat
 import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.LifecycleEventObserver
@@ -68,9 +74,18 @@ class MainViewModelFactory(private val application: Application) : ViewModelProv
 
 class MainActivity : ComponentActivity() {
 
+    private val requestPermissionLauncher = registerForActivityResult(
+        ActivityResultContracts.RequestPermission()
+    ) { isGranted: Boolean ->
+        Log.d("AutoKabala", "Notification permission granted: $isGranted")
+        // The UI will update its state automatically when the activity resumes
+    }
+
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         Log.d("AutoKabalaNL", "MAIN ACTIVITY CREATED")
+
+        askNotificationPermissionIfNeeded()
 
         enableEdgeToEdge()
         setContent {
@@ -80,10 +95,19 @@ class MainActivity : ComponentActivity() {
             AutoKabalaListenerTheme {
                 MainScreen(
                     viewModel = mainViewModel,
-                    onOpenSettingsClicked = {
+                    onOpenListenerSettingsClicked = {
                         startActivity(Intent(Settings.ACTION_NOTIFICATION_LISTENER_SETTINGS))
                     }
                 )
+            }
+        }
+    }
+
+    private fun askNotificationPermissionIfNeeded() {
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
+            val permission = Manifest.permission.POST_NOTIFICATIONS
+            if (ContextCompat.checkSelfPermission(this, permission) != PackageManager.PERMISSION_GRANTED) {
+                requestPermissionLauncher.launch(permission)
             }
         }
     }
@@ -92,21 +116,30 @@ class MainActivity : ComponentActivity() {
 @Composable
 fun MainScreen(
     viewModel: MainViewModel,
-    onOpenSettingsClicked: () -> Unit
+    onOpenListenerSettingsClicked: () -> Unit
 ) {
-    val isEnabled by viewModel.isEnabled.collectAsState()
-    val paymentStates by viewModel.paymentProcessingStates.collectAsState()
     val context = LocalContext.current
-    var hasNotificationPermission by remember { mutableStateOf(NotificationManagerCompat.getEnabledListenerPackages(context).contains(context.packageName)) }
     val lifecycleOwner = LocalLifecycleOwner.current
 
-    var showClientSelectionDialogFor by remember { mutableStateOf<PaymentProcessingState?>(null) }
-    var showCreateClientDialogFor by remember { mutableStateOf<PaymentProcessingState?>(null) }
+    var hasListenerPermission by remember {
+        mutableStateOf(NotificationManagerCompat.getEnabledListenerPackages(context).contains(context.packageName))
+    }
+
+    var hasPostPermission by remember {
+        mutableStateOf(
+            if (Build.VERSION.SDK_INT < Build.VERSION_CODES.TIRAMISU) true
+            else ContextCompat.checkSelfPermission(context, Manifest.permission.POST_NOTIFICATIONS) == PackageManager.PERMISSION_GRANTED
+        )
+    }
 
     DisposableEffect(lifecycleOwner) {
         val observer = LifecycleEventObserver { _, event ->
             if (event == Lifecycle.Event.ON_RESUME) {
-                hasNotificationPermission = NotificationManagerCompat.getEnabledListenerPackages(context).contains(context.packageName)
+                // When the app comes back to the foreground, re-check both permissions
+                hasListenerPermission = NotificationManagerCompat.getEnabledListenerPackages(context).contains(context.packageName)
+                if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
+                    hasPostPermission = ContextCompat.checkSelfPermission(context, Manifest.permission.POST_NOTIFICATIONS) == PackageManager.PERMISSION_GRANTED
+                }
             }
         }
         lifecycleOwner.lifecycle.addObserver(observer)
@@ -115,21 +148,47 @@ fun MainScreen(
 
     val snackbarHostState = remember { SnackbarHostState() }
     LaunchedEffect(Unit) {
-        viewModel.uiEvent.collectLatest {
-            when (it) {
-                is MainViewModel.UiEvent.ShowError -> snackbarHostState.showSnackbar(message = it.message)
+        viewModel.uiEvent.collectLatest { event ->
+            if (event is MainViewModel.UiEvent.ShowError) {
+                snackbarHostState.showSnackbar(message = event.message)
             }
         }
     }
 
-    // --- Dialogs ---
+    var showClientSelectionDialogFor by remember { mutableStateOf<PaymentProcessingState?>(null) }
+    var showCreateClientDialogFor by remember { mutableStateOf<PaymentProcessingState?>(null) }
+
+    Scaffold(
+        modifier = Modifier.fillMaxSize(),
+        snackbarHost = { SnackbarHost(snackbarHostState) }
+    ) { innerPadding ->
+        Column(modifier = Modifier.padding(innerPadding).padding(16.dp)) {
+            SectionTitle(text = "AutoKabala MVP")
+            ControlSection(
+                hasListenerPermission = hasListenerPermission,
+                hasPostPermission = hasPostPermission,
+                onOpenListenerSettings = onOpenListenerSettingsClicked
+            )
+            TestSection(
+                onSyncClients = { viewModel.onSyncClientsClicked() },
+                onAddFakePayment = { viewModel.onAddFakePaymentClicked() }
+            )
+            PaymentsSection(
+                paymentStates = viewModel.paymentProcessingStates.collectAsState().value,
+                viewModel = viewModel,
+                onSelectClientClicked = { showClientSelectionDialogFor = it },
+                onCreateClientClicked = { showCreateClientDialogFor = it }
+            )
+        }
+    }
+
     showClientSelectionDialogFor?.let { state ->
         if (state.matchResult is MatchResult.MultipleMatches) {
             ClientSelectionDialog(
                 clients = state.matchResult.clients,
                 onDismiss = { showClientSelectionDialogFor = null },
-                onClientSelected = {
-                    viewModel.onIssueReceiptForClientClicked(state.payment, it.id)
+                onClientSelected = { client ->
+                    viewModel.onIssueReceiptForClientClicked(state.payment, client.id)
                     showClientSelectionDialogFor = null
                 }
             )
@@ -146,38 +205,32 @@ fun MainScreen(
             }
         )
     }
-
-    Scaffold(
-        modifier = Modifier.fillMaxSize(),
-        snackbarHost = { SnackbarHost(snackbarHostState) }
-    ) { innerPadding ->
-        Column(modifier = Modifier.padding(innerPadding).padding(16.dp)) {
-            SectionTitle(text = "AutoKabala MVP")
-            ControlSection(isEnabled, hasNotificationPermission, onOpenSettingsClicked) { viewModel.onEnableDisableClicked() }
-            TestSection(
-                onSyncClients = { viewModel.onSyncClientsClicked() },
-                onAddFakePayment = { viewModel.onAddFakePaymentClicked() }
-            )
-            PaymentsSection(
-                paymentStates = paymentStates,
-                viewModel = viewModel,
-                onSelectClientClicked = { showClientSelectionDialogFor = it },
-                onCreateClientClicked = { showCreateClientDialogFor = it } // Connect the click handler
-            )
-        }
-    }
 }
 
 @Composable
-fun ControlSection(isEnabled: Boolean, hasPermission: Boolean, onOpenSettings: () -> Unit, onToggle: () -> Unit) {
+fun ControlSection(
+    hasListenerPermission: Boolean,
+    hasPostPermission: Boolean,
+    onOpenListenerSettings: () -> Unit
+) {
+    val context = LocalContext.current
     Column {
         SectionTitle(text = "1. Controls")
-        Text("Permission Granted: $hasPermission", color = if (hasPermission) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.error)
-        Text("Listener Status: ${if (isEnabled) "Active" else "Inactive"}")
+        Text("Listener Permission: $hasListenerPermission", color = if (hasListenerPermission) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.error)
+        Text("Post Permission: $hasPostPermission", color = if (hasPostPermission) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.error)
+        Text("Listener Status: Active (Default)")
         Spacer(modifier = Modifier.height(8.dp))
         Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-            Button(onClick = onOpenSettings) { Text("Permissions") }
-            Button(onClick = onToggle) { Text(if (isEnabled) "Disable" else "Enable") }
+            Button(onClick = onOpenListenerSettings) { Text("Listener Settings") }
+            if (!hasPostPermission) {
+                Button(onClick = {
+                    val intent = Intent(Settings.ACTION_APPLICATION_DETAILS_SETTINGS)
+                    intent.data = Uri.fromParts("package", context.packageName, null)
+                    context.startActivity(intent)
+                }) {
+                    Text("Grant Push Permission")
+                }
+            }
         }
     }
 }
