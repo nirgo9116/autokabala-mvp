@@ -4,6 +4,7 @@
 
     <!-- Request permission to access the internet -->
     <uses-permission android:name="android.permission.INTERNET" />
+    <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
 
     <!-- The android:name attribute registers the Application class with the system -->
     <application
@@ -15,7 +16,7 @@
         android:label="@string/app_name"
         android:roundIcon="@mipmap/ic_launcher_round"
         android:supportsRtl="true"
-        android:theme="@style/Theme.AutoKabalaListener"
+        android.theme="@style/Theme.AutoKabalaListener"
         tools:targetApi="31">
         <activity
             android:name=".MainActivity"
@@ -31,7 +32,7 @@
         <!-- Notification Listener Service -->
         <service
             android:name=".AutoKabalaNotificationService"
-            android:exported="true"
+            android:exported="false"
             android:label="@string/app_name"
             android:permission="android.permission.BIND_NOTIFICATION_LISTENER_SERVICE">
             <intent-filter>

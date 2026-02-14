@@ -30,9 +30,9 @@ android {
 
         // Expose iCount credentials as build-time constants
         // The surrounding quotes are now correctly handled directly here.
-        val icountCid = localProperties.getProperty("icount.cid") ?: ""
-        val icountUser = localProperties.getProperty("icount.user") ?: ""
-        val icountPass = localProperties.getProperty("icount.pass") ?: ""
+        val icountCid = (localProperties.getProperty("icount.cid") ?: "").removeSurrounding("\"")
+        val icountUser = (localProperties.getProperty("icount.user") ?: "").removeSurrounding("\"")
+        val icountPass = (localProperties.getProperty("icount.pass") ?: "").removeSurrounding("\"")
 
         buildConfigField("String", "ICOUNT_CID", "\"$icountCid\"")
         buildConfigField("String", "ICOUNT_USER", "\"$icountUser\"")

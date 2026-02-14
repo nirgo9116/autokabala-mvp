@@ -12,6 +12,5 @@ data class PaymentData(
     val senderName: String,
     val amount: Double,
     val isConfirmed: Boolean,
-    val timestamp: Long,
-    val rawText: String
+    val timestamp: Long
 )

@@ -40,17 +40,22 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         pendingPayments, allClients
     ) { payments, clients ->
         payments.map { payment ->
-            val senderFirstName = payment.senderName.trim().split(" ").firstOrNull() ?: ""
-            val matchingClients = if (senderFirstName.isBlank()) emptyList() else {
-                clients.filter { client ->
-                    client.name.contains(senderFirstName, ignoreCase = true)
-                }
-            }
+            val senderFirstName = payment.senderName.trim().split(" ").firstOrNull()?.lowercase() ?: ""
+            var matchResult: MatchResult = MatchResult.NoMatch
 
-            val matchResult = when {
-                matchingClients.isEmpty() -> MatchResult.NoMatch
-                matchingClients.size == 1 -> MatchResult.SingleMatch(matchingClients.first())
-                else -> MatchResult.MultipleMatches(matchingClients)
+            if (senderFirstName.isNotBlank()) {
+                val matchingClients = clients.filter { client ->
+                    val clientName = client.name.trim().lowercase()
+                    // Logic: The client's name is either an exact match to the first name,
+                    // OR it starts with the first name followed by a space.
+                    clientName == senderFirstName || clientName.startsWith("$senderFirstName ")
+                }
+
+                matchResult = when {
+                    matchingClients.isEmpty() -> MatchResult.NoMatch
+                    matchingClients.size == 1 -> MatchResult.SingleMatch(matchingClients.first())
+                    else -> MatchResult.MultipleMatches(matchingClients)
+                }
             }
 
             PaymentProcessingState(payment, matchResult)
@@ -67,6 +72,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
 
     sealed class UiEvent {
         data class ShowError(val message: String) : UiEvent()
+        data class ShowToast(val message: String) : UiEvent()
     }
 
     // --- Event Handlers ---
@@ -96,13 +102,28 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
 
     fun onSyncClientsClicked() {
         viewModelScope.launch {
-            receiptRepository.syncClients()
+            val wasSuccessful = receiptRepository.syncClients()
+
+            if (wasSuccessful) {
+                _uiEvent.send(UiEvent.ShowToast("Clients synced successfully!"))
+            } else {
+                _uiEvent.send(UiEvent.ShowToast("Client sync failed. Check logs for details."))
+            }
         }
     }
 
     fun onAddFakePaymentClicked() {
         viewModelScope.launch {
             receiptRepository.addFakePayment()
+        }
+    }
+
+    fun onCreateClientAndIssueReceiptClicked(state: PaymentProcessingState) {
+        viewModelScope.launch {
+            val wasSuccessful = receiptRepository.createClientAndIssueReceipt(state.payment)
+            if (!wasSuccessful) {
+                _uiEvent.send(UiEvent.ShowError("Failed to create client or issue receipt. Please check internet connection and try again."))
+            }
         }
     }
 }

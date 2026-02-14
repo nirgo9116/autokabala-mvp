@@ -49,6 +49,27 @@ data class CreateDocumentResponse(
     @SerialName("doc_number") val docNumber: String? = null
 )
 
+// --- Data classes for Client Creation ---
+
+@Serializable
+data class CreateClientRequest(
+    @SerialName("cid") val cid: String,
+    @SerialName("user") val user: String,
+    @SerialName("pass") val pass: String,
+    @SerialName("client_name") val clientName: String,
+    @SerialName("email") val email: String? = null,
+    @SerialName("phone") val phone: String? = null,
+    @SerialName("active") val active: Int = 1
+)
+
+@Serializable
+data class CreateClientResponse(
+    @SerialName("status") val status: Boolean,
+    @SerialName("error") val error: String? = null,
+    @SerialName("client_id") val clientId: String? = null
+)
+
+
 // --- Data classes for Client List ---
 
 @Serializable
@@ -68,12 +89,17 @@ data class ClientData(
     @SerialName("phone") val phone: String? = null
 )
 
+// =======================================================================================
+// ====> FIX #1: Corrected GetClientsResponse data class <====
+// =======================================================================================
 @Serializable
 data class GetClientsResponse(
     @SerialName("status") val status: Boolean,
-    @SerialName("clients") val clients: Map<String, ClientData>? = null,
+    @SerialName("clients") val clients: Map<String, ClientData> = emptyMap(), // More robust: Defaults to an empty map instead of null
     @SerialName("error") val error: String? = null
 )
+// =======================================================================================
+
 
 object ReceiptApiClient {
 
@@ -118,6 +144,9 @@ object ReceiptApiClient {
         }
     }
 
+    // =======================================================================================
+    // ====> FIX #2: Reverted getClients function to use BuildConfig <====
+    // =======================================================================================
     suspend fun getClients(): List<ClientData>? {
         Log.i("AutoKabalaAPI", "--- Fetching client list ---")
         return try {
@@ -130,18 +159,53 @@ object ReceiptApiClient {
                 contentType(ContentType.Application.Json)
                 setBody(requestBody)
             }
+
             val getClientsResponse = response.body<GetClientsResponse>()
 
-            if (getClientsResponse.status && getClientsResponse.clients != null) {
+            if (getClientsResponse.status) {
+                // This check is safe now because of the default emptyMap() in the data class
                 val clientList = getClientsResponse.clients.values.toList()
                 Log.i("AutoKabalaAPI", "Successfully fetched and parsed ${clientList.size} clients.")
                 clientList
             } else {
-                Log.e("AutoKabalaAPI", "Failed to fetch clients: ${getClientsResponse.error}")
+                Log.e("AutoKabalaAPI", "API returned failure. Error message: ${getClientsResponse.error}")
                 null
             }
         } catch (e: Exception) {
             Log.e("AutoKabalaAPI", "Exception while fetching clients: ${e.message}", e)
+            null
+        }
+    }
+    // =======================================================================================
+
+
+    suspend fun createClient(clientName: String, email: String? = null, phone: String? = null): String? {
+        Log.i("AutoKabalaAPI", "--- Creating new client: $clientName ---")
+        return try {
+            val requestBody = CreateClientRequest(
+                cid = BuildConfig.ICOUNT_CID,
+                user = BuildConfig.ICOUNT_USER,
+                pass = BuildConfig.ICOUNT_PASS,
+                clientName = clientName,
+                email = email,
+                phone = phone
+            )
+            Log.d("AutoKabalaAPI", "Sending request to /client/add with body: $requestBody")
+            val response = client.post("$BASE_URL/client/add") {
+                contentType(ContentType.Application.Json)
+                setBody(requestBody)
+            }
+            val createResponse = response.body<CreateClientResponse>()
+
+            if (createResponse.status && createResponse.clientId != null) {
+                Log.i("AutoKabalaAPI", "##### SUCCESS! Created client '$clientName' with ID: ${createResponse.clientId} #####")
+                createResponse.clientId
+            } else {
+                Log.e("AutoKabalaAPI", "##### FAILED to create client: ${createResponse.error} #####")
+                null
+            }
+        } catch (e: Exception) {
+            Log.e("AutoKabalaAPI", "##### EXCEPTION during client creation: ${e.message} #####", e)
             null
         }
     }

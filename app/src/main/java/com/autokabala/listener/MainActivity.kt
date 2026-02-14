@@ -1,19 +1,22 @@
 package com.autokabala.listener
 
+import android.Manifest
 import android.content.Intent
+import android.content.pm.PackageManager
+import android.os.Build
 import android.os.Bundle
 import android.provider.Settings
 import android.util.Log
+import android.widget.Toast
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
 import androidx.activity.enableEdgeToEdge
-import androidx.compose.foundation.clickable
+import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
-import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
@@ -21,7 +24,6 @@ import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Info
-import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
@@ -33,7 +35,6 @@ import androidx.compose.material3.SnackbarHost
 import androidx.compose.material3.SnackbarHostState
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
-import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
@@ -43,12 +44,9 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
-import androidx.compose.ui.platform.LocalLifecycleOwner
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
-import androidx.core.app.NotificationManagerCompat
-import androidx.lifecycle.Lifecycle
-import androidx.lifecycle.LifecycleEventObserver
+import androidx.core.content.ContextCompat
 import androidx.lifecycle.ViewModelProvider
 import androidx.lifecycle.viewmodel.compose.viewModel
 import com.autokabala.listener.ui.theme.AutoKabalaListenerTheme
@@ -59,13 +57,25 @@ import java.util.Locale
 
 class MainActivity : ComponentActivity() {
 
+    private val requestPermissionLauncher = registerForActivityResult(
+        ActivityResultContracts.RequestPermission()
+    ) { isGranted: Boolean ->
+        if (isGranted) {
+            // Permission is granted. You can now show notifications.
+        } else {
+            // Explain to the user that the feature is unavailable because the
+            // feature requires a permission that the user has denied.
+        }
+    }
+
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         Log.d("AutoKabalaNL", "MAIN ACTIVITY CREATED")
 
+        requestNotificationPermission()
+
         enableEdgeToEdge()
         setContent {
-            // Reverting to the stable, working way of creating the ViewModel
             val mainViewModel: MainViewModel = viewModel(factory = viewModelFactory { MainViewModel(application) })
 
             AutoKabalaListenerTheme {
@@ -75,6 +85,18 @@ class MainActivity : ComponentActivity() {
                         startActivity(Intent(Settings.ACTION_NOTIFICATION_LISTENER_SETTINGS))
                     }
                 )
+            }
+        }
+    }
+
+    private fun requestNotificationPermission() {
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
+            if (ContextCompat.checkSelfPermission(
+                    this,
+                    Manifest.permission.POST_NOTIFICATIONS
+                ) != PackageManager.PERMISSION_GRANTED
+            ) {
+                requestPermissionLauncher.launch(Manifest.permission.POST_NOTIFICATIONS)
             }
         }
     }
@@ -97,30 +119,24 @@ fun MainScreen(
     val isEnabled by viewModel.isEnabled.collectAsState()
     val paymentStates by viewModel.paymentProcessingStates.collectAsState()
     val context = LocalContext.current
-    var hasNotificationPermission by remember { mutableStateOf(NotificationManagerCompat.getEnabledListenerPackages(context).contains(context.packageName)) }
-    val lifecycleOwner = LocalLifecycleOwner.current
 
     var showClientSelectionDialogFor by remember { mutableStateOf<PaymentProcessingState?>(null) }
-    // The create client dialog logic is removed as part of the revert
-
-    DisposableEffect(lifecycleOwner) {
-        val observer = LifecycleEventObserver { _, event ->
-            if (event == Lifecycle.Event.ON_RESUME) {
-                hasNotificationPermission = NotificationManagerCompat.getEnabledListenerPackages(context).contains(context.packageName)
-            }
-        }
-        lifecycleOwner.lifecycle.addObserver(observer)
-        onDispose { lifecycleOwner.lifecycle.removeObserver(observer) }
-    }
 
     val snackbarHostState = remember { SnackbarHostState() }
+
     LaunchedEffect(Unit) {
-        viewModel.uiEvent.collectLatest {
-            when (it) {
-                is MainViewModel.UiEvent.ShowError -> snackbarHostState.showSnackbar(message = it.message)
+        viewModel.uiEvent.collectLatest { event ->
+            when (event) {
+                is MainViewModel.UiEvent.ShowError -> {
+                    snackbarHostState.showSnackbar(message = event.message)
+                }
+                is MainViewModel.UiEvent.ShowToast -> {
+                    Toast.makeText(context, event.message, Toast.LENGTH_SHORT).show()
+                }
             }
         }
     }
+
 
     // --- Dialogs ---
     showClientSelectionDialogFor?.let { state ->
@@ -142,13 +158,13 @@ fun MainScreen(
     ) { innerPadding ->
         Column(modifier = Modifier.padding(innerPadding).padding(16.dp)) {
             SectionTitle(text = "AutoKabala MVP")
-            ControlSection(isEnabled, hasNotificationPermission, onOpenSettingsClicked) { viewModel.onEnableDisableClicked() }
+            ControlSection(isEnabled, true, onOpenSettingsClicked) { viewModel.onEnableDisableClicked() } // Always pass true
             TestSection(onSyncClients = { viewModel.onSyncClientsClicked() }, onAddFakePayment = { viewModel.onAddFakePaymentClicked() })
             PaymentsSection(
                 paymentStates = paymentStates,
                 viewModel = viewModel,
                 onSelectClientClicked = { showClientSelectionDialogFor = it },
-                onCreateClientClicked = { /* For now, does nothing */ }
+                onCreateClientClicked = { viewModel.onCreateClientAndIssueReceiptClicked(it) }
             )
         }
     }
@@ -201,7 +217,7 @@ fun PaymentCard(state: PaymentProcessingState, viewModel: MainViewModel, onSelec
     val payment = state.payment
     Card(elevation = CardDefaults.cardElevation(defaultElevation = 4.dp)) {
         Column(modifier = Modifier.padding(16.dp)) {
-            ParsedPaymentInfo(payment)
+            ParsedPaymentInfo(payment, state.matchResult)
             Spacer(modifier = Modifier.height(16.dp))
             SmartActionArea(state, viewModel, onSelectClientClicked, onCreateClientClicked)
         }
@@ -240,8 +256,7 @@ fun SmartActionArea(state: PaymentProcessingState, viewModel: MainViewModel, onS
                 Text("No matching client found in iCount.", style = MaterialTheme.typography.bodyMedium)
                 Spacer(modifier = Modifier.height(8.dp))
                 Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                    // Button is now disabled as the logic is being reverted
-                    Button(onClick = { /* TODO: Re-implement create client */ }, enabled = false) { Text("Create Client & Issue") }
+                    Button(onClick = { onCreateClientClicked(state) }) { Text("Create Client & Issue") }
                     OutlinedButton(onClick = { viewModel.onDeletePaymentClicked(state.payment) }) { Text("Ignore (Friend)") }
                 }
             }
@@ -259,7 +274,7 @@ fun SectionTitle(text: String) {
 }
 
 @Composable
-fun ParsedPaymentInfo(payment: PaymentEntity) {
+fun ParsedPaymentInfo(payment: PaymentEntity, matchResult: MatchResult) {
     val formattedDate = remember(payment.timestamp) { SimpleDateFormat("dd/MM/yyyy HH:mm", Locale.getDefault()).format(Date(payment.timestamp)) }
     Column {
         Row(verticalAlignment = Alignment.CenterVertically) {
@@ -270,5 +285,9 @@ fun ParsedPaymentInfo(payment: PaymentEntity) {
         Spacer(modifier = Modifier.height(8.dp))
         Text("From: ${payment.senderName}", style = MaterialTheme.typography.bodyLarge, fontWeight = FontWeight.Bold)
         Text("Amount: ${payment.amount} ILS", style = MaterialTheme.typography.bodyLarge)
+        Spacer(modifier = Modifier.height(8.dp))
+        if (matchResult is MatchResult.SingleMatch) {
+            Text("Matched iCount Client: ${matchResult.client.name}", style = MaterialTheme.typography.bodySmall)
+        }
     }
 }
