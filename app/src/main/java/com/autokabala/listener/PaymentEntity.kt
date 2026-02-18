@@ -12,6 +12,5 @@ data class PaymentEntity(
     val amount: Double,
     val isConfirmed: Boolean,
     val timestamp: Long,
-    val rawText: String,
     val status: String = "pending" // e.g., "pending", "processed", "ignored"
 )

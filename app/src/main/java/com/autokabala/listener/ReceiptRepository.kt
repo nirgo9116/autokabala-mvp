@@ -19,8 +19,7 @@ class ReceiptRepository(private val paymentDao: PaymentDao, private val clientDa
                     senderName = paymentData.senderName,
                     amount = paymentData.amount,
                     isConfirmed = paymentData.isConfirmed,
-                    timestamp = paymentData.timestamp,
-                    rawText = paymentData.rawText
+                    timestamp = paymentData.timestamp
                 )
                 paymentDao.insertPayment(paymentEntity)
             }
@@ -33,8 +32,7 @@ class ReceiptRepository(private val paymentDao: PaymentDao, private val clientDa
             senderName = payment.senderName,
             amount = payment.amount,
             isConfirmed = payment.isConfirmed,
-            timestamp = payment.timestamp,
-            rawText = payment.rawText
+            timestamp = payment.timestamp
         )
         val wasSuccessful = ReceiptApiClient.issueReceipt(paymentData, clientId)
         if (wasSuccessful) {
@@ -73,8 +71,7 @@ class ReceiptRepository(private val paymentDao: PaymentDao, private val clientDa
             senderName = randomName,
             amount = 1.0, // Set to 1 NIS for easier testing
             isConfirmed = true,
-            timestamp = System.currentTimeMillis(),
-            rawText = "Fake payment for testing"
+            timestamp = System.currentTimeMillis()
         )
         paymentDao.insertPayment(fakePayment)
         Log.d("Repository", "Added fake payment for $randomName")

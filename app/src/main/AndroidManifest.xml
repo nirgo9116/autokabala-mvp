@@ -4,6 +4,8 @@
 
     <!-- Request permission to access the internet -->
     <uses-permission android:name="android.permission.INTERNET" />
+    <!-- Required for showing notifications on Android 13+ -->
+    <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
 
     <!-- The android:name attribute registers the Application class with the system -->
     <application

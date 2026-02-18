@@ -5,8 +5,8 @@ import androidx.room.Database
 import androidx.room.Room
 import androidx.room.RoomDatabase
 
-// Increment the version number to 2 because we added the ClientEntity table.
-@Database(entities = [PaymentEntity::class, ClientEntity::class], version = 2, exportSchema = false)
+// Increment the version number to 3 because the PaymentEntity schema changed.
+@Database(entities = [PaymentEntity::class, ClientEntity::class], version = 3, exportSchema = false)
 abstract class AppDatabase : RoomDatabase() {
 
     abstract fun paymentDao(): PaymentDao
