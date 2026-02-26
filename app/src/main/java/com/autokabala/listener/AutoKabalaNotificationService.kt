@@ -10,12 +10,19 @@ import androidx.core.app.NotificationCompat
 import androidx.core.app.NotificationManagerCompat
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.cancel
 import kotlinx.coroutines.launch
 
 class AutoKabalaNotificationService : NotificationListenerService() {
 
     // Create a coroutine scope for this service.
     private val serviceScope = CoroutineScope(Dispatchers.IO)
+
+    override fun onDestroy() {
+        super.onDestroy()
+        serviceScope.cancel()
+        Log.d("AutoKabalaNL", "Service destroyed and coroutine scope cancelled.")
+    }
 
     override fun onNotificationPosted(sbn: StatusBarNotification) {
         val packageName = sbn.packageName
@@ -41,7 +48,7 @@ class AutoKabalaNotificationService : NotificationListenerService() {
             serviceScope.launch {
                 ListenerManager.onPaymentParsed(paymentData)
             }
-            Log.d("AutoKabalaNL", "Attempting to show confirmation notification...") // <-- THIS IS THE ADDED LOG
+            Log.d("AutoKabalaNL", "Attempting to show confirmation notification...") 
             showConfirmationNotification(paymentData)
         } else {
             if (packageName in setOf("com.bnhp.payments.paymentsapp", "com.payboxapp")) {
@@ -65,7 +72,9 @@ class AutoKabalaNotificationService : NotificationListenerService() {
             .setAutoCancel(true)
 
         with(NotificationManagerCompat.from(this)) {
-            notify(System.currentTimeMillis().toInt(), builder.build())
+            // Use a safer ID generation based on the payment's unique timestamp
+            val notificationId = (paymentData.timestamp % Int.MAX_VALUE).toInt()
+            notify(notificationId, builder.build())
         }
     }
 

@@ -64,7 +64,7 @@ class ReceiptRepository(private val paymentDao: PaymentDao, private val clientDa
 
     // --- Test Function ---
     suspend fun addFakePayment() {
-        val names = listOf("Danny", "Moshe", "Yossi", "ניר", "סמדר בדיקה", "Elad")
+        val names = listOf("Danny", "Moshe", "Yossi", "ניר", "סמדר בדיקה", "Elad", "בלהבלה", "ניר")
         val randomName = names.random()
         val fakePayment = PaymentEntity(
             source = "bit",
@@ -93,9 +93,9 @@ class ReceiptRepository(private val paymentDao: PaymentDao, private val clientDa
                     phone = clientData.phone
                 )
             }
-            clientDao.deleteAll()
-            clientDao.insertAll(clientEntities)
-            Log.d("SyncClients", "Database updated successfully.")
+            // Use the new, atomic sync function
+            clientDao.syncAll(clientEntities)
+            Log.d("SyncClients", "Database updated successfully using atomic transaction.")
         } else {
             Log.e("SyncClients", "Failed to fetch clients from API.")
         }

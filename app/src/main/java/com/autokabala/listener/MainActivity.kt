@@ -10,6 +10,8 @@ import androidx.activity.compose.setContent
 import androidx.activity.enableEdgeToEdge
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.ExperimentalLayoutApi
+import androidx.compose.foundation.layout.FlowRow
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
@@ -19,8 +21,12 @@ import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.CheckCircle
+import androidx.compose.material.icons.filled.HelpOutline
 import androidx.compose.material.icons.filled.Info
+import androidx.compose.material.icons.filled.People
 import androidx.compose.material3.Button
+import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.Icon
@@ -40,6 +46,8 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalLifecycleOwner
 import androidx.compose.ui.text.font.FontWeight
@@ -77,7 +85,7 @@ class MainActivity : ComponentActivity() {
             val factory = remember { MainViewModelFactory(application) }
             val mainViewModel: MainViewModel = viewModel(factory = factory)
 
-            AutoKabalaListenerTheme {
+            AutoKabalaListenerTheme(dynamicColor = false) {
                 MainScreen(
                     viewModel = mainViewModel,
                     onOpenSettingsClicked = {
@@ -162,7 +170,7 @@ fun MainScreen(
                 paymentStates = paymentStates,
                 viewModel = viewModel,
                 onSelectClientClicked = { showClientSelectionDialogFor = it },
-                onCreateClientClicked = { showCreateClientDialogFor = it } // Connect the click handler
+                onCreateClientClicked = { showCreateClientDialogFor = it } 
             )
         }
     }
@@ -221,41 +229,72 @@ fun PaymentCard(state: PaymentProcessingState, viewModel: MainViewModel, onSelec
     }
 }
 
+@OptIn(ExperimentalLayoutApi::class)
 @Composable
-fun SmartActionArea(state: PaymentProcessingState, viewModel: MainViewModel, onSelectClientClicked: (PaymentProcessingState) -> Unit, onCreateClientClicked: (PaymentProcessingState) -> Unit) {
-    when (val matchResult = state.matchResult) {
-        is MatchResult.SingleMatch -> {
-            Column(horizontalAlignment = Alignment.Start) {
-                Text("Suggestion: Issue receipt for client ${matchResult.client.name}?", style = MaterialTheme.typography.bodyMedium, fontWeight = FontWeight.Bold)
-                Spacer(modifier = Modifier.height(8.dp))
-                Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                    Button(onClick = { viewModel.onIssueReceiptForClientClicked(state.payment, matchResult.client.id) }) {
-                        Text("Yes, Issue for ${matchResult.client.name}")
-                    }
-                    OutlinedButton(onClick = { viewModel.onDeletePaymentClicked(state.payment) }) {
-                        Text("Ignore (Friend)")
-                    }
-                }
+fun SmartActionArea(
+    state: PaymentProcessingState,
+    viewModel: MainViewModel,
+    onSelectClientClicked: (PaymentProcessingState) -> Unit,
+    onCreateClientClicked: (PaymentProcessingState) -> Unit
+) {
+    val matchResult = state.matchResult
+
+    Column {
+        // --- Status Row ---
+        val statusIcon: ImageVector
+        val statusText: String
+        val statusColor: Color
+
+        when (matchResult) {
+            is MatchResult.SingleMatch -> {
+                statusIcon = Icons.Default.CheckCircle
+                statusText = "Suggestion: Issue for ${matchResult.client.name}"
+                statusColor = Color(0xFF008000) // Green
+            }
+            is MatchResult.MultipleMatches -> {
+                statusIcon = Icons.Default.People
+                statusText = "${matchResult.clients.size} clients found"
+                statusColor = MaterialTheme.colorScheme.primary
+            }
+            is MatchResult.NoMatch -> {
+                statusIcon = Icons.Default.HelpOutline
+                statusText = "No matching client found"
+                statusColor = MaterialTheme.colorScheme.error
             }
         }
-        is MatchResult.MultipleMatches -> {
-            Column(horizontalAlignment = Alignment.Start) {
-                Text("${matchResult.clients.size} matching clients found.", style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.primary)
-                Spacer(modifier = Modifier.height(8.dp))
-                Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                    Button(onClick = { onSelectClientClicked(state) }) { Text("Select Client & Issue") }
-                    OutlinedButton(onClick = { viewModel.onDeletePaymentClicked(state.payment) }) { Text("Ignore") }
+
+        Row(verticalAlignment = Alignment.CenterVertically) {
+            Icon(statusIcon, contentDescription = "Status", tint = statusColor, modifier = Modifier.size(20.dp))
+            Spacer(modifier = Modifier.padding(4.dp))
+            Text(statusText, style = MaterialTheme.typography.bodyMedium, fontWeight = FontWeight.Bold, color = statusColor)
+        }
+
+        Spacer(modifier = Modifier.height(12.dp))
+
+        // --- Actions Row ---
+        FlowRow(horizontalArrangement = Arrangement.spacedBy(8.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+            val primaryButtonText = if (matchResult is MatchResult.SingleMatch) "Issue Receipt" else "Select Client"
+            val onPrimaryClick = {
+                when (matchResult) {
+                    is MatchResult.SingleMatch -> viewModel.onIssueReceiptForClientClicked(state.payment, matchResult.client.id)
+                    is MatchResult.MultipleMatches -> onSelectClientClicked(state)
+                    else -> { /* Do nothing for NoMatch as button is disabled */ }
                 }
             }
-        }
-        is MatchResult.NoMatch -> {
-            Column(horizontalAlignment = Alignment.Start) {
-                Text("No matching client found in iCount.", style = MaterialTheme.typography.bodyMedium)
-                Spacer(modifier = Modifier.height(8.dp))
-                Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                    Button(onClick = { onCreateClientClicked(state) }) { Text("Create Client & Issue") }
-                    OutlinedButton(onClick = { viewModel.onDeletePaymentClicked(state.payment) }) { Text("Ignore (Friend)") }
-                }
+
+            Button(onClick = onPrimaryClick, enabled = matchResult !is MatchResult.NoMatch) {
+                Text(primaryButtonText)
+            }
+
+            Button(
+                colors = ButtonDefaults.buttonColors(containerColor = MaterialTheme.colorScheme.secondary),
+                onClick = { onCreateClientClicked(state) }
+            ) {
+                Text("New Client")
+            }
+
+            OutlinedButton(onClick = { viewModel.onDeletePaymentClicked(state.payment) }) {
+                Text("Ignore")
             }
         }
     }
