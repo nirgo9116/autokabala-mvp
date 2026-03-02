@@ -2,40 +2,56 @@ package com.autokabala.listener
 
 import android.app.Application
 import android.content.Intent
+import android.net.Uri
 import android.os.Bundle
 import android.provider.Settings
-import android.util.Log
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
 import androidx.activity.enableEdgeToEdge
+import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
-import androidx.compose.foundation.layout.ExperimentalLayoutApi
-import androidx.compose.foundation.layout.FlowRow
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.automirrored.filled.ArrowBack
+import androidx.compose.material.icons.filled.Add
 import androidx.compose.material.icons.filled.CheckCircle
 import androidx.compose.material.icons.filled.HelpOutline
-import androidx.compose.material.icons.filled.Info
-import androidx.compose.material.icons.filled.People
+import androidx.compose.material.icons.filled.KeyboardArrowDown
+import androidx.compose.material.icons.filled.List
+import androidx.compose.material.icons.filled.Settings
 import androidx.compose.material3.Button
-import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
+import androidx.compose.material3.CircularProgressIndicator
+import androidx.compose.material3.ExperimentalMaterial3Api
+import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.ModalBottomSheet
+import androidx.compose.material3.NavigationBar
+import androidx.compose.material3.NavigationBarItem
 import androidx.compose.material3.OutlinedButton
+import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.SnackbarHost
 import androidx.compose.material3.SnackbarHostState
+import androidx.compose.material3.Surface
+import androidx.compose.material3.Switch
 import androidx.compose.material3.Text
+import androidx.compose.material3.TextButton
+import androidx.compose.material3.rememberModalBottomSheetState
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
@@ -78,13 +94,10 @@ class MainActivity : ComponentActivity() {
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
-        Log.d("AutoKabalaNL", "MAIN ACTIVITY CREATED")
-
         enableEdgeToEdge()
         setContent {
             val factory = remember { MainViewModelFactory(application) }
             val mainViewModel: MainViewModel = viewModel(factory = factory)
-
             AutoKabalaListenerTheme(dynamicColor = false) {
                 MainScreen(
                     viewModel = mainViewModel,
@@ -94,27 +107,74 @@ class MainActivity : ComponentActivity() {
                 )
             }
         }
+        handleShareIntent(intent)
+    }
+
+    override fun onNewIntent(intent: Intent) {
+        super.onNewIntent(intent)
+        handleShareIntent(intent)
+    }
+
+    private fun handleShareIntent(intent: Intent?) {
+        if (intent?.action == Intent.ACTION_SEND && intent.type?.startsWith("image/") == true) {
+            @Suppress("DEPRECATION")
+            val uri = intent.getParcelableExtra<Uri>(Intent.EXTRA_STREAM)
+            if (uri != null) {
+                val viewModel = ViewModelProvider(
+                    this, MainViewModelFactory(application)
+                )[MainViewModel::class.java]
+                viewModel.onShareIntentReceived(uri)
+            }
+        }
     }
 }
 
+// ─────────────────────────────────────────────────────────────────────────────
+// Chip style constants
+// ─────────────────────────────────────────────────────────────────────────────
+
+private val ChipGreenBg     = Color(0xFFE8F5E9)
+private val ChipGreenText   = Color(0xFF1B5E20)
+private val ChipGreenBorder = Color(0xFF4CAF50)
+
+private val ChipAmberBg     = Color(0xFFFFF8E1)
+private val ChipAmberText   = Color(0xFFBF360C)
+private val ChipAmberBorder = Color(0xFFFF9800)
+
+private val ChipGrayBg      = Color(0xFFF5F5F5)
+private val ChipGrayText    = Color(0xFF616161)
+private val ChipGrayBorder  = Color(0xFFBDBDBD)
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Root screen
+// ─────────────────────────────────────────────────────────────────────────────
+
+@OptIn(ExperimentalMaterial3Api::class)
 @Composable
-fun MainScreen(
-    viewModel: MainViewModel,
-    onOpenSettingsClicked: () -> Unit
-) {
+fun MainScreen(viewModel: MainViewModel, onOpenSettingsClicked: () -> Unit) {
     val isEnabled by viewModel.isEnabled.collectAsState()
     val paymentStates by viewModel.paymentProcessingStates.collectAsState()
+    val allClients by viewModel.allClients.collectAsState()
+    val isProcessingShare by viewModel.isProcessingShare.collectAsState()
     val context = LocalContext.current
-    var hasNotificationPermission by remember { mutableStateOf(NotificationManagerCompat.getEnabledListenerPackages(context).contains(context.packageName)) }
     val lifecycleOwner = LocalLifecycleOwner.current
 
-    var showClientSelectionDialogFor by remember { mutableStateOf<PaymentProcessingState?>(null) }
-    var showCreateClientDialogFor by remember { mutableStateOf<PaymentProcessingState?>(null) }
+    var selectedTab by remember { mutableStateOf(0) }
+    var hasNotificationPermission by remember {
+        mutableStateOf(
+            NotificationManagerCompat.getEnabledListenerPackages(context).contains(context.packageName)
+        )
+    }
+    // Map of paymentId → explicitly chosen client (overrides MatchResult in the UI)
+    var selectedClientsMap by remember { mutableStateOf<Map<Int, ClientEntity>>(emptyMap()) }
+    // Which payment's sheet is open
+    var clientSheetFor by remember { mutableStateOf<PaymentProcessingState?>(null) }
 
     DisposableEffect(lifecycleOwner) {
         val observer = LifecycleEventObserver { _, event ->
             if (event == Lifecycle.Event.ON_RESUME) {
-                hasNotificationPermission = NotificationManagerCompat.getEnabledListenerPackages(context).contains(context.packageName)
+                hasNotificationPermission = NotificationManagerCompat
+                    .getEnabledListenerPackages(context).contains(context.packageName)
             }
         }
         lifecycleOwner.lifecycle.addObserver(observer)
@@ -123,203 +183,673 @@ fun MainScreen(
 
     val snackbarHostState = remember { SnackbarHostState() }
     LaunchedEffect(Unit) {
-        viewModel.uiEvent.collectLatest {
-            when (it) {
-                is MainViewModel.UiEvent.ShowError -> snackbarHostState.showSnackbar(message = it.message)
+        viewModel.uiEvent.collectLatest { event ->
+            when (event) {
+                is MainViewModel.UiEvent.ShowError -> snackbarHostState.showSnackbar(event.message)
             }
         }
     }
 
-    // --- Dialogs ---
-    showClientSelectionDialogFor?.let { state ->
-        if (state.matchResult is MatchResult.MultipleMatches) {
-            ClientSelectionDialog(
-                clients = state.matchResult.clients,
-                onDismiss = { showClientSelectionDialogFor = null },
-                onClientSelected = {
-                    viewModel.onIssueReceiptForClientClicked(state.payment, it.id)
-                    showClientSelectionDialogFor = null
-                }
-            )
-        }
-    }
-
-    showCreateClientDialogFor?.let { state ->
-        CreateNewClientDialog(
-            initialName = state.payment.senderName,
-            onDismiss = { showCreateClientDialogFor = null },
-            onCreateConfirm = { newName ->
-                viewModel.onCreateClientAndIssueReceiptClicked(state.payment, newName)
-                showCreateClientDialogFor = null
+    // ── Bottom Sheet ─────────────────────────────────────────────────────────
+    clientSheetFor?.let { state ->
+        ClientSelectionSheet(
+            state = state,
+            allClients = allClients,
+            onDismiss = { clientSheetFor = null },
+            // Selecting from the sheet ONLY updates the chip — receipt is issued via button
+            onClientSelected = { client ->
+                selectedClientsMap = selectedClientsMap + (state.payment.id to client)
+                clientSheetFor = null
+            },
+            // Creating a new client issues immediately (create + issue in one step)
+            onCreateClient = { firstName, lastName ->
+                val fullName = if (lastName.isBlank()) firstName else "$firstName $lastName"
+                viewModel.onCreateClientAndIssueReceiptClicked(state.payment, fullName)
+                selectedClientsMap = selectedClientsMap - state.payment.id
+                clientSheetFor = null
             }
         )
     }
 
     Scaffold(
-        modifier = Modifier.fillMaxSize(),
-        snackbarHost = { SnackbarHost(snackbarHostState) }
+        snackbarHost = { SnackbarHost(snackbarHostState) },
+        bottomBar = {
+            NavigationBar {
+                NavigationBarItem(
+                    selected = selectedTab == 0,
+                    onClick = { selectedTab = 0 },
+                    icon = { Icon(Icons.Default.List, contentDescription = "תשלומים") },
+                    label = { Text("תשלומים") }
+                )
+                NavigationBarItem(
+                    selected = selectedTab == 1,
+                    onClick = { selectedTab = 1 },
+                    icon = { Icon(Icons.Default.Settings, contentDescription = "הגדרות") },
+                    label = { Text("הגדרות") }
+                )
+            }
+        }
     ) { innerPadding ->
-        Column(modifier = Modifier.padding(innerPadding).padding(16.dp)) {
-            SectionTitle(text = "AutoKabala MVP")
-            ControlSection(isEnabled, hasNotificationPermission, onOpenSettingsClicked) { viewModel.onEnableDisableClicked() }
-            TestSection(
+        when (selectedTab) {
+            0 -> PaymentsTab(
+                modifier = Modifier.padding(innerPadding),
+                paymentStates = paymentStates,
+                selectedClientsMap = selectedClientsMap,
+                isProcessingShare = isProcessingShare,
+                onIssueReceipt = { payment, clientId ->
+                    viewModel.onIssueReceiptForClientClicked(payment, clientId)
+                    selectedClientsMap = selectedClientsMap - payment.id
+                },
+                onDeletePayment = { state ->
+                    viewModel.onDeletePaymentClicked(state.payment)
+                    selectedClientsMap = selectedClientsMap - state.payment.id
+                },
+                onOpenClientSheet = { clientSheetFor = it }
+            )
+            1 -> SettingsTab(
+                modifier = Modifier.padding(innerPadding),
+                isEnabled = isEnabled,
+                hasPermission = hasNotificationPermission,
+                onToggleListener = { viewModel.onEnableDisableClicked() },
+                onOpenSettings = onOpenSettingsClicked,
                 onSyncClients = { viewModel.onSyncClientsClicked() },
                 onAddFakePayment = { viewModel.onAddFakePaymentClicked() }
             )
-            PaymentsSection(
-                paymentStates = paymentStates,
-                viewModel = viewModel,
-                onSelectClientClicked = { showClientSelectionDialogFor = it },
-                onCreateClientClicked = { showCreateClientDialogFor = it } 
+        }
+    }
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Payments tab
+// ─────────────────────────────────────────────────────────────────────────────
+
+@Composable
+fun PaymentsTab(
+    modifier: Modifier,
+    paymentStates: List<PaymentProcessingState>,
+    selectedClientsMap: Map<Int, ClientEntity>,
+    isProcessingShare: Boolean,
+    onIssueReceipt: (PaymentEntity, String) -> Unit,
+    onDeletePayment: (PaymentProcessingState) -> Unit,
+    onOpenClientSheet: (PaymentProcessingState) -> Unit
+) {
+    Column(modifier = modifier.fillMaxSize().padding(horizontal = 16.dp)) {
+        Spacer(Modifier.height(16.dp))
+        Text("תשלומים ממתינים", style = MaterialTheme.typography.headlineSmall, fontWeight = FontWeight.Bold)
+        Spacer(Modifier.height(12.dp))
+
+        if (isProcessingShare) {
+            Card(modifier = Modifier.fillMaxWidth()) {
+                Row(
+                    modifier = Modifier.padding(12.dp),
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(12.dp)
+                ) {
+                    CircularProgressIndicator(modifier = Modifier.size(20.dp), strokeWidth = 2.dp)
+                    Text("קורא את תמונת התשלום...")
+                }
+            }
+            Spacer(Modifier.height(12.dp))
+        }
+
+        if (paymentStates.isEmpty()) {
+            Box(modifier = Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
+                Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                    Text(
+                        "אין תשלומים ממתינים",
+                        style = MaterialTheme.typography.titleMedium,
+                        fontWeight = FontWeight.Medium
+                    )
+                    Spacer(Modifier.height(4.dp))
+                    Text(
+                        "תשלומים יופיעו כאן לאחר קבלת התראת ביט\nאו שיתוף תמונת אישור תשלום",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                    )
+                }
+            }
+        } else {
+            LazyColumn(verticalArrangement = Arrangement.spacedBy(12.dp)) {
+                items(paymentStates, key = { it.payment.id }) { state ->
+                    PaymentCard(
+                        state = state,
+                        selectedClient = selectedClientsMap[state.payment.id],
+                        onIssueReceipt = { clientId -> onIssueReceipt(state.payment, clientId) },
+                        onDelete = { onDeletePayment(state) },
+                        onOpenSheet = { onOpenClientSheet(state) }
+                    )
+                }
+                item { Spacer(Modifier.height(8.dp)) }
+            }
+        }
+    }
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Payment card
+// ─────────────────────────────────────────────────────────────────────────────
+
+@Composable
+fun PaymentCard(
+    state: PaymentProcessingState,
+    selectedClient: ClientEntity?,          // explicitly chosen via bottom sheet
+    onIssueReceipt: (clientId: String) -> Unit,
+    onDelete: () -> Unit,
+    onOpenSheet: () -> Unit
+) {
+    val payment = state.payment
+    val dateStr = remember(payment.timestamp) {
+        SimpleDateFormat("dd/MM/yyyy HH:mm", Locale.getDefault()).format(Date(payment.timestamp))
+    }
+    val amountStr = if (payment.amount % 1.0 == 0.0) "₪${payment.amount.toInt()}"
+                    else "₪${"%.2f".format(payment.amount)}"
+    val sourceStr = when (payment.source) {
+        "bit_share" -> "Bit (שיתוף)"
+        "bit"       -> "Bit (התראה)"
+        else        -> payment.source
+    }
+
+    // The client that will be used when "הפק קבלה" is pressed:
+    //  • user picked one from the sheet  → selectedClient
+    //  • auto strong/weak single match   → matchResult.client
+    //  • multiple / no match             → null (button stays disabled)
+    val effectiveClient: ClientEntity? = selectedClient
+        ?: (state.matchResult as? MatchResult.SingleMatch)?.client
+
+    Card(
+        modifier = Modifier.fillMaxWidth(),
+        elevation = CardDefaults.cardElevation(defaultElevation = 2.dp)
+    ) {
+        Column(
+            modifier = Modifier.padding(16.dp),
+            verticalArrangement = Arrangement.spacedBy(6.dp)
+        ) {
+            // ── Receipt-style fields ──────────────────────────────────────────
+            PaymentField("שם", payment.senderName)
+            PaymentField("סכום", amountStr)
+            PaymentField("תאריך", dateStr)
+            PaymentField("מקור", sourceStr)
+
+            HorizontalDivider(modifier = Modifier.padding(vertical = 6.dp))
+
+            // ── Client selection field ────────────────────────────────────────
+            ClientChipField(
+                state = state,
+                selectedClient = selectedClient,
+                onClick = onOpenSheet
+            )
+            Text(
+                text = "לחץ לשנות לקוח או ליצור לקוח חדש",
+                style = MaterialTheme.typography.labelSmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant
+            )
+
+            Spacer(Modifier.height(4.dp))
+
+            // ── Action buttons ────────────────────────────────────────────────
+            Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                Button(
+                    onClick = { effectiveClient?.let { onIssueReceipt(it.id) } },
+                    enabled = effectiveClient != null,
+                    modifier = Modifier.weight(1f)
+                ) {
+                    Text("הפק קבלה")
+                }
+                OutlinedButton(onClick = onDelete) {
+                    Text("מחק")
+                }
+            }
+        }
+    }
+}
+
+@Composable
+private fun PaymentField(label: String, value: String) {
+    Row(verticalAlignment = Alignment.CenterVertically) {
+        Text(
+            text = "$label:",
+            style = MaterialTheme.typography.bodySmall,
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
+            modifier = Modifier.width(52.dp)
+        )
+        Text(
+            text = value,
+            style = MaterialTheme.typography.bodyMedium,
+            fontWeight = FontWeight.Medium
+        )
+    }
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Client chip / selection field
+// ─────────────────────────────────────────────────────────────────────────────
+
+@Composable
+private fun ClientChipField(
+    state: PaymentProcessingState,
+    selectedClient: ClientEntity?,
+    onClick: () -> Unit
+) {
+    // Resolve what to show in the chip
+    val isFromSheet = selectedClient != null
+    val mr = state.matchResult
+
+    val displayClient: ClientEntity?
+    val chipBg: Color
+    val chipText: Color
+    val chipBorder: Color
+    val leadingIcon: ImageVector
+
+    when {
+        isFromSheet -> {
+            // User explicitly confirmed a client → always green
+            displayClient = selectedClient
+            chipBg = ChipGreenBg; chipText = ChipGreenText; chipBorder = ChipGreenBorder
+            leadingIcon = Icons.Default.CheckCircle
+        }
+        mr is MatchResult.SingleMatch && mr.isStrong -> {
+            displayClient = mr.client
+            chipBg = ChipGreenBg; chipText = ChipGreenText; chipBorder = ChipGreenBorder
+            leadingIcon = Icons.Default.CheckCircle
+        }
+        mr is MatchResult.SingleMatch && !mr.isStrong -> {
+            displayClient = mr.client
+            chipBg = ChipAmberBg; chipText = ChipAmberText; chipBorder = ChipAmberBorder
+            leadingIcon = Icons.Default.HelpOutline
+        }
+        mr is MatchResult.MultipleMatches -> {
+            // Show first matched client as a suggestion (amber = needs confirmation)
+            displayClient = mr.clients.first()
+            chipBg = ChipAmberBg; chipText = ChipAmberText; chipBorder = ChipAmberBorder
+            leadingIcon = Icons.Default.HelpOutline
+        }
+        else -> {
+            displayClient = null
+            chipBg = ChipGrayBg; chipText = ChipGrayText; chipBorder = ChipGrayBorder
+            leadingIcon = Icons.Default.Add
+        }
+    }
+
+    val chipLabel = displayClient?.name ?: "לחץ לבחור לקוח"
+
+    Surface(
+        onClick = onClick,
+        modifier = Modifier.fillMaxWidth(),
+        shape = RoundedCornerShape(8.dp),
+        color = chipBg,
+        border = BorderStroke(1.dp, chipBorder)
+    ) {
+        Row(
+            modifier = Modifier.padding(horizontal = 12.dp, vertical = 10.dp),
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.SpaceBetween
+        ) {
+            Row(
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.spacedBy(8.dp)
+            ) {
+                Icon(
+                    imageVector = leadingIcon,
+                    contentDescription = null,
+                    tint = chipText,
+                    modifier = Modifier.size(18.dp)
+                )
+                Text(
+                    text = chipLabel,
+                    color = chipText,
+                    style = MaterialTheme.typography.bodyMedium,
+                    fontWeight = FontWeight.SemiBold
+                )
+            }
+            Icon(
+                imageVector = Icons.Default.KeyboardArrowDown,
+                contentDescription = "בחר לקוח",
+                tint = chipText,
+                modifier = Modifier.size(20.dp)
             )
         }
     }
 }
 
-@Composable
-fun ControlSection(isEnabled: Boolean, hasPermission: Boolean, onOpenSettings: () -> Unit, onToggle: () -> Unit) {
-    Column {
-        SectionTitle(text = "1. Controls")
-        Text("Permission Granted: $hasPermission", color = if (hasPermission) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.error)
-        Text("Listener Status: ${if (isEnabled) "Active" else "Inactive"}")
-        Spacer(modifier = Modifier.height(8.dp))
-        Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-            Button(onClick = onOpenSettings) { Text("Permissions") }
-            Button(onClick = onToggle) { Text(if (isEnabled) "Disable" else "Enable") }
-        }
-    }
-}
+// ─────────────────────────────────────────────────────────────────────────────
+// Client selection bottom sheet
+// ─────────────────────────────────────────────────────────────────────────────
 
-@Composable
-fun TestSection(onSyncClients: () -> Unit, onAddFakePayment: () -> Unit) {
-    Column {
-        SectionTitle(text = "2. Testing")
-        Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-            OutlinedButton(onClick = onSyncClients) { Text("Sync Clients") }
-            OutlinedButton(onClick = onAddFakePayment) { Text("Add Fake Payment") }
-        }
-    }
-}
+private enum class SheetView { QUICK, FULL_SEARCH, CREATE_FORM }
 
+@OptIn(ExperimentalMaterial3Api::class)
 @Composable
-fun PaymentsSection(paymentStates: List<PaymentProcessingState>, viewModel: MainViewModel, onSelectClientClicked: (PaymentProcessingState) -> Unit, onCreateClientClicked: (PaymentProcessingState) -> Unit) {
-    Column {
-        SectionTitle(text = "3. Pending Payments")
-        if (paymentStates.isEmpty()) {
-            Text("No pending payments.")
-        } else {
-            LazyColumn(verticalArrangement = Arrangement.spacedBy(12.dp)) {
-                items(paymentStates, key = { it.payment.id }) { state ->
-                    PaymentCard(state = state, viewModel = viewModel, onSelectClientClicked = onSelectClientClicked, onCreateClientClicked = onCreateClientClicked)
-                }
-            }
-        }
-    }
-}
-
-@Composable
-fun PaymentCard(state: PaymentProcessingState, viewModel: MainViewModel, onSelectClientClicked: (PaymentProcessingState) -> Unit, onCreateClientClicked: (PaymentProcessingState) -> Unit) {
-    val payment = state.payment
-    Card(elevation = CardDefaults.cardElevation(defaultElevation = 4.dp)) {
-        Column(modifier = Modifier.padding(16.dp)) {
-            ParsedPaymentInfo(payment)
-            Spacer(modifier = Modifier.height(16.dp))
-            SmartActionArea(state, viewModel, onSelectClientClicked, onCreateClientClicked)
-        }
-    }
-}
-
-@OptIn(ExperimentalLayoutApi::class)
-@Composable
-fun SmartActionArea(
+fun ClientSelectionSheet(
     state: PaymentProcessingState,
-    viewModel: MainViewModel,
-    onSelectClientClicked: (PaymentProcessingState) -> Unit,
-    onCreateClientClicked: (PaymentProcessingState) -> Unit
+    allClients: List<ClientEntity>,
+    onDismiss: () -> Unit,
+    onClientSelected: (ClientEntity) -> Unit,
+    onCreateClient: (firstName: String, lastName: String) -> Unit
 ) {
-    val matchResult = state.matchResult
+    val sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true)
 
-    Column {
-        // --- Status Row ---
-        val statusIcon: ImageVector
-        val statusText: String
-        val statusColor: Color
+    // Matched clients (non-empty for SingleMatch / MultipleMatches)
+    val matchedClients: List<ClientEntity> = when (val mr = state.matchResult) {
+        is MatchResult.SingleMatch     -> listOf(mr.client)
+        is MatchResult.MultipleMatches -> mr.clients
+        is MatchResult.NoMatch         -> emptyList()
+    }
 
-        when (matchResult) {
-            is MatchResult.SingleMatch -> {
-                statusIcon = Icons.Default.CheckCircle
-                statusText = "Suggestion: Issue for ${matchResult.client.name}"
-                statusColor = Color(0xFF008000) // Green
-            }
-            is MatchResult.MultipleMatches -> {
-                statusIcon = Icons.Default.People
-                statusText = "${matchResult.clients.size} clients found"
-                statusColor = MaterialTheme.colorScheme.primary
-            }
-            is MatchResult.NoMatch -> {
-                statusIcon = Icons.Default.HelpOutline
-                statusText = "No matching client found"
-                statusColor = MaterialTheme.colorScheme.error
-            }
+    val senderFirst = remember(state) {
+        state.payment.senderName.trim().split(Regex("\\s+")).filter { it.isNotBlank() }.firstOrNull() ?: ""
+    }
+    val senderWords = remember(state) {
+        state.payment.senderName.trim().split(Regex("\\s+")).filter { it.isNotBlank() }
+    }
+
+    // Start in QUICK mode when there are matches; go straight to FULL_SEARCH for no match.
+    // Always pre-populate searchQuery with senderFirst so that when the user opens full search
+    // (either from NoMatch or via "חיפוש ברשימת הלקוחות"), the closest names appear first.
+    var view by remember {
+        mutableStateOf(if (matchedClients.isNotEmpty()) SheetView.QUICK else SheetView.FULL_SEARCH)
+    }
+    var searchQuery by remember { mutableStateOf(senderFirst) }
+
+    ModalBottomSheet(onDismissRequest = onDismiss, sheetState = sheetState) {
+        when (view) {
+            SheetView.QUICK -> QuickMatchContent(
+                matchedClients = matchedClients,
+                onClientSelected = onClientSelected,
+                onCreateNew = { view = SheetView.CREATE_FORM },
+                onSearchAll = { view = SheetView.FULL_SEARCH }
+            )
+            SheetView.FULL_SEARCH -> FullSearchContent(
+                allClients = allClients,
+                searchQuery = searchQuery,
+                hasQuickBack = matchedClients.isNotEmpty(),
+                onSearchChange = { searchQuery = it },
+                onClientSelected = onClientSelected,
+                onCreateNew = { view = SheetView.CREATE_FORM },
+                onBack = { view = SheetView.QUICK }
+            )
+            SheetView.CREATE_FORM -> CreateClientForm(
+                initialFirstName = senderWords.firstOrNull() ?: "",
+                initialLastName = senderWords.drop(1).joinToString(" "),
+                onBack = { view = if (matchedClients.isNotEmpty()) SheetView.QUICK else SheetView.FULL_SEARCH },
+                onSubmit = { firstName, lastName -> onCreateClient(firstName, lastName) }
+            )
         }
+    }
+}
 
-        Row(verticalAlignment = Alignment.CenterVertically) {
-            Icon(statusIcon, contentDescription = "Status", tint = statusColor, modifier = Modifier.size(20.dp))
-            Spacer(modifier = Modifier.padding(4.dp))
-            Text(statusText, style = MaterialTheme.typography.bodyMedium, fontWeight = FontWeight.Bold, color = statusColor)
-        }
-
-        Spacer(modifier = Modifier.height(12.dp))
-
-        // --- Actions Row ---
-        FlowRow(horizontalArrangement = Arrangement.spacedBy(8.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
-            val primaryButtonText = if (matchResult is MatchResult.SingleMatch) "Issue Receipt" else "Select Client"
-            val onPrimaryClick = {
-                when (matchResult) {
-                    is MatchResult.SingleMatch -> viewModel.onIssueReceiptForClientClicked(state.payment, matchResult.client.id)
-                    is MatchResult.MultipleMatches -> onSelectClientClicked(state)
-                    else -> { /* Do nothing for NoMatch as button is disabled */ }
+/** Quick mode: shows only the matched clients + create new + search all */
+@Composable
+private fun QuickMatchContent(
+    matchedClients: List<ClientEntity>,
+    onClientSelected: (ClientEntity) -> Unit,
+    onCreateNew: () -> Unit,
+    onSearchAll: () -> Unit
+) {
+    Column(modifier = Modifier.padding(horizontal = 16.dp)) {
+        Text("התאמות שנמצאו", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Bold)
+        Spacer(Modifier.height(8.dp))
+        matchedClients.forEach { client ->
+            TextButton(
+                onClick = { onClientSelected(client) },
+                modifier = Modifier.fillMaxWidth()
+            ) {
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(8.dp)
+                ) {
+                    Icon(
+                        Icons.Default.CheckCircle,
+                        contentDescription = null,
+                        tint = ChipGreenText,
+                        modifier = Modifier.size(18.dp)
+                    )
+                    Text(
+                        text = client.name,
+                        style = MaterialTheme.typography.bodyLarge,
+                        modifier = Modifier.fillMaxWidth()
+                    )
                 }
             }
-
-            Button(onClick = onPrimaryClick, enabled = matchResult !is MatchResult.NoMatch) {
-                Text(primaryButtonText)
-            }
-
-            Button(
-                colors = ButtonDefaults.buttonColors(containerColor = MaterialTheme.colorScheme.secondary),
-                onClick = { onCreateClientClicked(state) }
+            HorizontalDivider()
+        }
+        Spacer(Modifier.height(8.dp))
+        // Create new client
+        TextButton(onClick = onCreateNew, modifier = Modifier.fillMaxWidth()) {
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.spacedBy(8.dp)
             ) {
-                Text("New Client")
+                Icon(Icons.Default.Add, contentDescription = null)
+                Text("צור לקוח חדש", fontWeight = FontWeight.Medium)
             }
+        }
+        HorizontalDivider()
+        // Search all clients
+        OutlinedButton(
+            onClick = onSearchAll,
+            modifier = Modifier.fillMaxWidth().padding(top = 8.dp)
+        ) {
+            Text("חיפוש ברשימת הלקוחות")
+        }
+        Spacer(Modifier.height(16.dp))
+    }
+}
 
-            OutlinedButton(onClick = { viewModel.onDeletePaymentClicked(state.payment) }) {
-                Text("Ignore")
+/** Full search: all clients with search field */
+@Composable
+private fun FullSearchContent(
+    allClients: List<ClientEntity>,
+    searchQuery: String,
+    hasQuickBack: Boolean,
+    onSearchChange: (String) -> Unit,
+    onClientSelected: (ClientEntity) -> Unit,
+    onCreateNew: () -> Unit,
+    onBack: () -> Unit
+) {
+    val filtered = remember(allClients, searchQuery) {
+        val q = searchQuery.trim()
+        if (q.isBlank()) {
+            allClients.sortedBy { it.name }
+        } else {
+            allClients
+                .filter { client ->
+                    client.name.contains(q, ignoreCase = true) ||
+                    client.name.trim().split(Regex("\\s+")).any { word ->
+                        word.startsWith(q, ignoreCase = true) || q.startsWith(word, ignoreCase = true)
+                    }
+                }
+                .sortedWith(
+                    compareByDescending<ClientEntity> { client ->
+                        val words = client.name.trim().split(Regex("\\s+"))
+                        when {
+                            // Exact word match — highest relevance
+                            words.any { it.equals(q, ignoreCase = true) }       -> 3
+                            // Word starts with query — e.g. "ניר" matches "ניר אברהם"
+                            words.any { it.startsWith(q, ignoreCase = true) }   -> 2
+                            // Name starts with query
+                            client.name.startsWith(q, ignoreCase = true)        -> 1
+                            else                                                 -> 0
+                        }
+                    }.thenBy { it.name }  // alphabetical within the same relevance score
+                )
+        }
+    }
+
+    Column(modifier = Modifier.padding(horizontal = 16.dp)) {
+        if (hasQuickBack) {
+            TextButton(onClick = onBack) {
+                Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = "חזור", modifier = Modifier.size(18.dp))
+                Spacer(Modifier.width(4.dp))
+                Text("חזור להתאמות")
+            }
+        }
+        Text("חיפוש לקוח", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Bold)
+        Spacer(Modifier.height(8.dp))
+        OutlinedTextField(
+            value = searchQuery,
+            onValueChange = onSearchChange,
+            modifier = Modifier.fillMaxWidth(),
+            placeholder = { Text("חפש לקוח...") },
+            singleLine = true
+        )
+        Spacer(Modifier.height(4.dp))
+        LazyColumn {
+            items(filtered, key = { it.id }) { client ->
+                TextButton(
+                    onClick = { onClientSelected(client) },
+                    modifier = Modifier.fillMaxWidth()
+                ) {
+                    Text(
+                        text = client.name,
+                        modifier = Modifier.fillMaxWidth(),
+                        style = MaterialTheme.typography.bodyLarge
+                    )
+                }
+                HorizontalDivider()
+            }
+            item {
+                TextButton(onClick = onCreateNew, modifier = Modifier.fillMaxWidth()) {
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.spacedBy(8.dp)
+                    ) {
+                        Icon(Icons.Default.Add, contentDescription = null)
+                        Text("צור לקוח חדש", fontWeight = FontWeight.Medium)
+                    }
+                }
+                Spacer(Modifier.height(16.dp))
             }
         }
     }
 }
 
 @Composable
-fun SectionTitle(text: String) {
-    Column {
-        Spacer(modifier = Modifier.height(24.dp))
-        Text(text = text, style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.Bold)
-        Spacer(modifier = Modifier.height(8.dp))
+private fun CreateClientForm(
+    initialFirstName: String,
+    initialLastName: String,
+    onBack: () -> Unit,
+    onSubmit: (String, String) -> Unit
+) {
+    var firstName by remember { mutableStateOf(initialFirstName) }
+    var lastName by remember { mutableStateOf(initialLastName) }
+
+    Column(
+        modifier = Modifier.padding(horizontal = 16.dp),
+        verticalArrangement = Arrangement.spacedBy(12.dp)
+    ) {
+        TextButton(onClick = onBack) {
+            Icon(
+                Icons.AutoMirrored.Filled.ArrowBack,
+                contentDescription = "חזור",
+                modifier = Modifier.size(18.dp)
+            )
+            Spacer(Modifier.width(4.dp))
+            Text("חזור לרשימה")
+        }
+        Text("לקוח חדש", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Bold)
+        OutlinedTextField(
+            value = firstName,
+            onValueChange = { firstName = it },
+            modifier = Modifier.fillMaxWidth(),
+            label = { Text("שם פרטי") },
+            singleLine = true
+        )
+        OutlinedTextField(
+            value = lastName,
+            onValueChange = { lastName = it },
+            modifier = Modifier.fillMaxWidth(),
+            label = { Text("שם משפחה (אופציונלי)") },
+            singleLine = true
+        )
+        Button(
+            onClick = { onSubmit(firstName, lastName) },
+            modifier = Modifier.fillMaxWidth(),
+            enabled = firstName.isNotBlank()
+        ) {
+            Text("צור לקוח והפק קבלה")
+        }
+        Spacer(Modifier.height(16.dp))
     }
 }
 
+// ─────────────────────────────────────────────────────────────────────────────
+// Settings tab
+// ─────────────────────────────────────────────────────────────────────────────
+
 @Composable
-fun ParsedPaymentInfo(payment: PaymentEntity) {
-    val formattedDate = remember(payment.timestamp) { SimpleDateFormat("dd/MM/yyyy HH:mm", Locale.getDefault()).format(Date(payment.timestamp)) }
-    Column {
-        Row(verticalAlignment = Alignment.CenterVertically) {
-            Icon(Icons.Default.Info, contentDescription = "Source", modifier = Modifier.size(16.dp), tint = MaterialTheme.colorScheme.onSurfaceVariant)
-            Spacer(modifier = Modifier.padding(4.dp))
-            Text("Source: ${payment.source.replaceFirstChar { it.titlecase() }} | Date: $formattedDate", style = MaterialTheme.typography.labelMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
+fun SettingsTab(
+    modifier: Modifier,
+    isEnabled: Boolean,
+    hasPermission: Boolean,
+    onToggleListener: () -> Unit,
+    onOpenSettings: () -> Unit,
+    onSyncClients: () -> Unit,
+    onAddFakePayment: () -> Unit
+) {
+    Column(
+        modifier = modifier.fillMaxSize().padding(16.dp),
+        verticalArrangement = Arrangement.spacedBy(16.dp)
+    ) {
+        Text("הגדרות", style = MaterialTheme.typography.headlineSmall, fontWeight = FontWeight.Bold)
+
+        // Listener card
+        Card(modifier = Modifier.fillMaxWidth()) {
+            Column(
+                modifier = Modifier.padding(16.dp),
+                verticalArrangement = Arrangement.spacedBy(10.dp)
+            ) {
+                Text(
+                    "האזנה להתראות",
+                    style = MaterialTheme.typography.titleMedium,
+                    fontWeight = FontWeight.Bold
+                )
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.SpaceBetween,
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Column {
+                        Text(
+                            "סטטוס: ${if (isEnabled) "פעיל" else "לא פעיל"}",
+                            style = MaterialTheme.typography.bodyMedium
+                        )
+                        Text(
+                            "הרשאה: ${if (hasPermission) "מאושרת" else "לא מאושרת"}",
+                            style = MaterialTheme.typography.bodySmall,
+                            color = if (hasPermission) ChipGreenText else MaterialTheme.colorScheme.error
+                        )
+                    }
+                    Switch(checked = isEnabled, onCheckedChange = { onToggleListener() })
+                }
+                OutlinedButton(onClick = onOpenSettings, modifier = Modifier.fillMaxWidth()) {
+                    Text("הגדרות הרשאות")
+                }
+            }
         }
-        Spacer(modifier = Modifier.height(8.dp))
-        Text("From: ${payment.senderName}", style = MaterialTheme.typography.bodyLarge, fontWeight = FontWeight.Bold)
-        Text("Amount: ${payment.amount} ILS", style = MaterialTheme.typography.bodyLarge)
+
+        Button(onClick = onSyncClients, modifier = Modifier.fillMaxWidth()) {
+            Text("סנכרן לקוחות")
+        }
+
+        // Dev tools separator
+        Row(
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.spacedBy(8.dp)
+        ) {
+            HorizontalDivider(modifier = Modifier.weight(1f))
+            Text(
+                "כלי פיתוח",
+                style = MaterialTheme.typography.labelMedium,
+                color = MaterialTheme.colorScheme.onSurfaceVariant
+            )
+            HorizontalDivider(modifier = Modifier.weight(1f))
+        }
+
+        OutlinedButton(onClick = onAddFakePayment, modifier = Modifier.fillMaxWidth()) {
+            Text("הוסף תשלום לדוגמה")
+        }
     }
 }

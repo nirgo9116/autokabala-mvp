@@ -80,6 +80,12 @@ dependencies {
     implementation(libs.ktor.client.content.negotiation)
     implementation(libs.ktor.serialization.kotlinx.json)
 
+    // Tesseract OCR — Hebrew text (names)
+    implementation("cz.adaptech.tesseract4android:tesseract4android:4.7.0")
+
+    // ML Kit Text Recognition — Latin script for numbers & dates (LTR, no digit-flip)
+    implementation("com.google.mlkit:text-recognition:16.0.0")
+
     // Room for local database
     implementation("androidx.room:room-runtime:2.6.1")
     implementation("androidx.room:room-ktx:2.6.1")
