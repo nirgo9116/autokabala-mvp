@@ -83,7 +83,7 @@ dependencies {
     // Tesseract OCR — Hebrew text (names)
     implementation("cz.adaptech.tesseract4android:tesseract4android:4.7.0")
 
-    // ML Kit Text Recognition — Latin script for numbers & dates (LTR, no digit-flip)
+    // ML Kit Text Recognition — Latin script for numbers & dates
     implementation("com.google.mlkit:text-recognition:16.0.0")
 
     // Room for local database

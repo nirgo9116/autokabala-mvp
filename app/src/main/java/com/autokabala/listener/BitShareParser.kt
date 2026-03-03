@@ -12,6 +12,9 @@ object BitShareParser {
     // Names: 1–3 Hebrew words (supports business names like "גלית אלי טיפול").
     // \s* after מ handles OCR that may insert a space between the preposition and the name.
     private val nameReceivedPattern = Pattern.compile("""נשלחו לך מ\s*([א-ת]{2,15}(?:\s+[א-ת]{2,15}){0,2})""")
+
+    // Matches any Hebrew word of 2–15 characters (used to extract all name words from a line)
+    private val hebrewWordPattern   = Pattern.compile("""[א-ת]{2,15}""")
     private val nameSentYouPattern   = Pattern.compile("""([א-ת]{2,15}(?:\s+[א-ת]{2,15}){0,2})\s+שלח[ה]?\s+לך""")
 
     // Amount patterns ─────────────────────────────────────────────────────────
@@ -47,7 +50,7 @@ object BitShareParser {
      *
      * When only one engine is available, pass the same text for both parameters.
      */
-    fun parse(hebrewText: String, latinText: String = hebrewText): PaymentData? {
+    fun parse(hebrewText: String, latinText: String = hebrewText, mlKitAmount: Double? = null): PaymentData? {
         Log.d(TAG, "=== BitShareParser START ===")
         Log.d(TAG, "Tesseract (Hebrew):\n$hebrewText")
         if (latinText !== hebrewText) Log.d(TAG, "ML Kit (Latin):\n$latinText")
@@ -61,11 +64,16 @@ object BitShareParser {
             Log.w(TAG, "Cannot extract sender name"); return null
         }
 
-        // Amount: prefer ML Kit (LTR, no digit-flip), fall back to Tesseract
-        val amount = if (latinLines !== hebrewLines) {
+        // Amount: prefer ML Kit bounding-box result (most reliable — picks the largest
+        // numeric text block in the image, which is always the payment amount in Bit).
+        // Fall back to regex-based extraction from OCR text if bounding-box gave nothing.
+        val amount = if (mlKitAmount != null) {
+            Log.d(TAG, "Amount from ML Kit bounding-box: $mlKitAmount")
+            mlKitAmount
+        } else if (latinLines !== hebrewLines) {
             extractAmountFromLatinOcr(latinLines).also { v ->
-                if (v != null) Log.d(TAG, "Amount from ML Kit: $v")
-                else Log.w(TAG, "ML Kit amount extraction failed — falling back to Tesseract")
+                if (v != null) Log.d(TAG, "Amount from ML Kit text: $v")
+                else Log.w(TAG, "ML Kit text amount failed — falling back to Tesseract")
             } ?: extractAmount(hebrewLines)
         } else {
             extractAmount(hebrewLines)
@@ -91,12 +99,39 @@ object BitShareParser {
     // ── Name ──────────────────────────────────────────────────────────────────
 
     private fun extractSenderName(lines: List<String>): String? {
-        for (line in lines) {
+        for ((idx, line) in lines.withIndex()) {
             val m = nameReceivedPattern.matcher(line)
             if (m.find()) {
-                val name = m.group(1)?.trim()
-                    ?.replace(Regex("""[\d₪.,]+$"""), "")?.trim()
-                    ?.takeIf { it.length >= 2 }
+                // Start extracting from where the captured group begins (right after "נשלחו לך מ\s*").
+                val nameSection = line.substring(m.start(1))
+                val words = mutableListOf<String>()
+                hebrewWordPattern.matcher(nameSection).let { hw ->
+                    while (hw.find()) words.add(hw.group())
+                }
+
+                // The Bit UI sometimes wraps the sender description onto a second line
+                // (e.g. "נשלחו לך משני החשמונאים 8 קג" / "פנחס").
+                // Only look at the next line when the regex captured < 3 words:
+                // nameReceivedPattern allows up to 3 words — if 3 were captured the name
+                // is already complete and the next line is payment purpose text (e.g. "תשל").
+                val capturedWordCount = (m.group(1) ?: "")
+                    .trim().split(Regex("\\s+")).filter { it.isNotBlank() }.size
+                if (capturedWordCount < 3) {
+                    val nextLine = lines.getOrNull(idx + 1)
+                    if (nextLine != null &&
+                        nextLine.isNotBlank() &&
+                        !nextLine.any { it.isDigit() } &&
+                        !nextLine.contains("₪") &&
+                        !datePattern.matcher(nextLine).find()
+                    ) {
+                        hebrewWordPattern.matcher(nextLine).let { hw ->
+                            while (hw.find()) words.add(hw.group())
+                        }
+                    }
+                }
+
+                if (words.isEmpty()) continue
+                val name = words.joinToString(" ")
                 Log.d(TAG, "Name [received]: '$name'")
                 return name
             }
@@ -194,10 +229,13 @@ object BitShareParser {
     /**
      * Extract amount from ML Kit Latin OCR output.
      * ML Kit reads LTR so digits are never reversed (59 stays 59, not 95).
-     * Zeros are preserved because modern deep-learning OCR handles bold fonts well.
      *
-     * Strategy A: ₪ symbol present in output (ML Kit may or may not recognise it).
-     * Strategy B: standalone number on a non-date / non-time / non-reference line.
+     * Strategy A only: requires the ₪ symbol to be present in ML Kit output.
+     * Strategy B (standalone-number scan) was removed because ML Kit cannot read Hebrew,
+     * so it cannot locate the amount line by proximity to the sender name — it would
+     * instead pick up stray numbers from the contact address or reference codes.
+     * If ₪ is absent (common with Latin-only OCR), returns null so the caller falls
+     * back to Tesseract's name-proximity approach.
      */
     private fun extractAmountFromLatinOcr(lines: List<String>): Double? {
         // Log all candidate lines for debugging
@@ -206,30 +244,12 @@ object BitShareParser {
             if (nums.isNotEmpty()) Log.d(TAG, "  MlKit[$i] nums=$nums | '$line'")
         }
 
-        // Strategy A — ₪ present (same patterns as Tesseract strategies 1+2)
+        // Strategy A — ₪ symbol must be present
         for ((i, line) in lines.withIndex()) {
             if (skipAmountWords.any { line.contains(it) }) continue
             tryExtractMerged(line, i, "mlkit-merged")?.let { return it }
             tryExtractWithShekel(line, i, "mlkit-shekel")?.let { return it }
             tryExtractReversed(line, i, "mlkit-reversed")?.let { return it }
-        }
-
-        // Strategy B — standalone number (no ₪ recognised by ML Kit)
-        // Skip: date lines (dd.MM.yy), pure time lines (HH:mm), reference lines (contain "-")
-        for ((i, line) in lines.withIndex()) {
-            if (skipAmountWords.any { line.contains(it) }) continue
-            if (line.contains("-")) continue                       // reference numbers
-            if (datePattern.matcher(line).find()) continue         // date lines
-            if (line.trim().matches(Regex("\\d{1,2}:\\d{2}"))) continue  // pure time
-
-            val m = anyNumber.matcher(line)
-            while (m.find()) {
-                val v = m.group(1)?.replace(",", "")?.toDoubleOrNull()
-                if (v != null && v in 1.0..99_999.0) {
-                    Log.d(TAG, "Amount [mlkit-standalone] line $i: $v  '$line'")
-                    return v
-                }
-            }
         }
 
         return null

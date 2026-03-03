@@ -65,9 +65,8 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         payments.map { payment ->
             val senderWords = payment.senderName.trim().split(Regex("\\s+")).filter { it.isNotBlank() }
             val senderFirst = senderWords.firstOrNull() ?: ""
-            val senderRest  = senderWords.drop(1)  // last name words (empty for notifications)
 
-            // Step 1: all clients where senderFirst matches any word in client name
+            // Step 1: clients where senderFirst matches any word in the client name
             val firstNameMatches = if (senderFirst.isBlank()) emptyList() else {
                 clients.filter { client ->
                     val clientWords = client.name.trim().split(Regex("\\s+")).filter { it.isNotBlank() }
@@ -75,20 +74,23 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                 }
             }
 
-            // Step 2: among those, find clients where ALL sender words (incl. last name) match
-            val fullNameMatches = if (senderRest.isNotEmpty()) {
+            // Step 2: among those, clients where ALL client-name words appear in senderWords.
+            // Direction is intentionally reversed vs. the old logic: we check that every word
+            // of the CLIENT's name is found somewhere in the (possibly noisy) sender word list,
+            // rather than requiring every sender word to appear in the client name.
+            // This handles bit_share OCR lines like "יריב באייר 126 קג טגנסקי" correctly:
+            // client "יריב טגנסקי" matches because both its words exist in the sender list.
+            val fullNameMatches = if (senderWords.size >= 2) {
                 firstNameMatches.filter { client ->
                     val clientWords = client.name.trim().split(Regex("\\s+")).filter { it.isNotBlank() }
-                    senderRest.all { sw -> clientWords.any { it.equals(sw, ignoreCase = true) } }
+                    clientWords.size >= 2 && clientWords.all { cw ->
+                        senderWords.any { sw -> sw.equals(cw, ignoreCase = true) }
+                    }
                 }
             } else emptyList()
 
-            // Use full-name matches when found; otherwise fall back to first-name matches.
-            // This lets "דורון" (with OCR noise "טיפול") still match "מיכל דורון" / "רונית דורון".
             val matchingClients = fullNameMatches.ifEmpty { firstNameMatches }
-            val isStrong = fullNameMatches.isNotEmpty() // green only when last name confirmed
-
-            // isStrong = green: full name confirmed (bit_share); amber: first-name only
+            val isStrong = fullNameMatches.isNotEmpty() // green only when full name confirmed
             val matchResult = when {
                 matchingClients.isEmpty() -> MatchResult.NoMatch
                 matchingClients.size == 1 -> MatchResult.SingleMatch(matchingClients.first(), isStrong)
@@ -179,7 +181,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                 // Run both engines in parallel:
                 //   ML Kit  → original bitmap (handles dark backgrounds natively, reads LTR)
                 //   Tesseract → preprocessed copy (inverted, 2× scaled, Hebrew model)
-                var mlKitText: String? = null
+                var mlKitResult: MlKitResult? = null
                 var tesseractText: String? = null
                 coroutineScope {
                     val mlKitJob = async {
@@ -197,15 +199,20 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                             withContext(Dispatchers.IO) { preprocessed.recycle() }
                         }
                     }
-                    mlKitText = mlKitJob.await()
+                    mlKitResult = mlKitJob.await()
                     tesseractText = tesseractJob.await()
                 }
                 originalBitmap.recycle()
 
+                val mlKitText   = mlKitResult?.text
+                val mlKitAmount = mlKitResult?.amount
+
                 Log.d("OCR_MLKIT",  "ML Kit  output:\n${mlKitText  ?: "(empty)"}")
+                Log.d("OCR_MLKIT",  "ML Kit  amount (bounding-box): $mlKitAmount")
                 Log.d("OCR_TESS",   "Tesseract output:\n${tesseractText ?: "(empty)"}")
 
-                // Expired check uses Tesseract output (Hebrew badge text)
+                // Tesseract → Hebrew names (primary for name extraction)
+                // ML Kit Latin → amount via bounding-box (primary for amount)
                 val combinedText = "${tesseractText ?: ""}\n${mlKitText ?: ""}"
                 if (BitShareParser.isExpired(combinedText)) {
                     _uiEvent.send(UiEvent.ShowError("תשלום זה פג תוקף — לא ניתן להפיק עבורו קבלה."))
@@ -218,8 +225,9 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                 }
 
                 val paymentData = BitShareParser.parse(
-                    hebrewText = tesseractText!!,
-                    latinText  = mlKitText ?: tesseractText!!
+                    hebrewText  = tesseractText!!,
+                    latinText   = mlKitText ?: tesseractText!!,
+                    mlKitAmount = mlKitAmount
                 )
                 if (paymentData == null) {
                     _uiEvent.send(UiEvent.ShowError("לא נמצאו פרטי תשלום בתמונה. ודא שמדובר בתמונת אישור תשלום ביט."))
@@ -235,14 +243,65 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
 
     // ── ML Kit: Latin script, LTR — accurate numbers & dates ─────────────────
 
-    private suspend fun runMlKitOcr(bitmap: Bitmap): String? =
+    private data class MlKitResult(val text: String, val amount: Double?)
+
+    private suspend fun runMlKitOcr(bitmap: Bitmap): MlKitResult? =
         suspendCancellableCoroutine { cont ->
             try {
                 val image      = InputImage.fromBitmap(bitmap, 0)
+                // Hebrew recognizer reads both Hebrew text and numbers from the same image.
                 val recognizer = TextRecognition.getClient(TextRecognizerOptions.Builder().build())
                 recognizer.process(image)
                     .addOnSuccessListener { result ->
-                        if (cont.isActive) cont.resume(result.text.takeIf { it.isNotBlank() })
+                        if (result.text.isBlank()) {
+                            if (cont.isActive) cont.resume(null)
+                            return@addOnSuccessListener
+                        }
+
+                        // ── Amount: find the "amount block" without relying on ₪ ──────────
+                        // ML Kit Latin recogniser does not reliably output the ₪ symbol —
+                        // it is either absent or misread (e.g. „160 instead of ₪160).
+                        // The amount is still readable as a block of digits.
+                        // Strategy:
+                        //  1. For every block, strip one optional leading non-alphanumeric
+                        //     character (handles „, ₪, •, etc.).
+                        //  2. Keep blocks whose remaining text is purely digits, 2–5 chars,
+                        //     with no dots (dates) or colons (times).
+                        //  3. Among candidates pick the one with the largest bounding box —
+                        //     the amount is always displayed in the biggest font on screen.
+                        //  4. Validate the result is in the range 10–99 999.
+                        // O/o → 0 normalization handles common OCR digit misreads.
+                        fun String.normDigits() = replace('O', '0').replace('o', '0')
+
+                        Log.d("MlKitOcr", "Blocks: ${result.textBlocks.map { "'${it.text}' box=${it.boundingBox}" }}")
+
+                        val candidateBlocks = result.textBlocks.filter { block ->
+                            val text = block.text.normDigits().trim()
+                            // Strip one leading non-alphanumeric char (misread ₪ → „ etc.)
+                            val core = if (text.isNotEmpty() && !text.first().isLetterOrDigit())
+                                text.drop(1) else text
+                            // Strip commas to handle thousand-separator format (e.g. "1,000")
+                            val coreDigits = core.replace(",", "")
+                            coreDigits.length in 2..5 &&
+                                coreDigits.all { it.isDigit() } &&
+                                !text.contains('.') &&
+                                !text.contains(':')
+                        }
+
+                        Log.d("MlKitOcr", "Candidate blocks: ${candidateBlocks.map { "'${it.text}' box=${it.boundingBox}" }}")
+
+                        val amount = candidateBlocks
+                            .maxByOrNull { block ->
+                                val bb = block.boundingBox
+                                if (bb != null) bb.height() * bb.width() else 0
+                            }
+                            ?.let { block ->
+                                block.text.normDigits().filter { it.isDigit() }
+                                    .toDoubleOrNull()?.takeIf { it in 10.0..99_999.0 }
+                            }
+
+                        Log.d("MlKitOcr", "Final amount: $amount")
+                        if (cont.isActive) cont.resume(MlKitResult(result.text, amount))
                     }
                     .addOnFailureListener { e ->
                         Log.w("MlKitOcr", "Recognition failed", e)
