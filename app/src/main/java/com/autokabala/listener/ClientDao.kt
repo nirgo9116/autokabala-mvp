@@ -35,13 +35,19 @@ interface ClientDao {
     @Query("DELETE FROM clients")
     suspend fun deleteAll()
 
+    @Query("SELECT id FROM clients WHERE autoSend = 1")
+    suspend fun getAutoSendIds(): List<String>
+
     /**
-     * Safely replaces all clients in the database with a new list.
-     * The @Transaction annotation ensures this happens atomically.
+     * Safely replaces all clients in the database with a new list,
+     * preserving the autoSend flag for existing clients.
      */
     @Transaction
     suspend fun syncAll(clients: List<ClientEntity>) {
+        val autoSendIds = getAutoSendIds().toSet()
         deleteAll()
-        insertAll(clients)
+        insertAll(clients.map { client ->
+            if (client.id in autoSendIds) client.copy(autoSend = true) else client
+        })
     }
 }

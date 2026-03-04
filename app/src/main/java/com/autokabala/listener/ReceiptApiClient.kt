@@ -38,10 +38,27 @@ data class CreateDocumentWithClientIdRequest(
     @SerialName("pass") val pass: String,
     @SerialName("doctype") val docType: String,
     @SerialName("client_id") val clientId: Int,
-    @SerialName("email") val email: String? = null,
     @SerialName("currency_code") val currencyCode: String? = "ILS",
     @SerialName("items") val items: List<DocumentItem>,
     @SerialName("cash") val cash: CashPayment
+)
+
+data class IssuedDocument(val docUrl: String, val docNum: String)
+
+@Serializable
+data class SendEmailRequest(
+    @SerialName("cid") val cid: String,
+    @SerialName("user") val user: String,
+    @SerialName("pass") val pass: String,
+    @SerialName("doctype") val docType: String,
+    @SerialName("docnum") val docNum: Int,
+    @SerialName("email_to_client") val emailToClient: Boolean
+)
+
+@Serializable
+data class SendEmailResponse(
+    @SerialName("status") val status: Boolean,
+    @SerialName("error") val error: String? = null
 )
 
 @Serializable
@@ -135,7 +152,7 @@ object ReceiptApiClient {
         }
     }
 
-    suspend fun issueReceipt(paymentData: PaymentData, clientId: String, email: String? = null): String? {
+    suspend fun issueReceipt(paymentData: PaymentData, clientId: String): IssuedDocument? {
         Log.i("AutoKabalaAPI", "--- Starting Document Issuance for client ID: $clientId ---")
         return try {
             val requestBody = CreateDocumentWithClientIdRequest(
@@ -144,7 +161,6 @@ object ReceiptApiClient {
                 pass = BuildConfig.ICOUNT_PASS,
                 docType = "receipt",
                 clientId = clientId.toInt(),
-                email = email?.ifBlank { null },
                 currencyCode = "ILS",
                 items = listOf(DocumentItem("קבלה עבור ${paymentData.senderName}", paymentData.amount)),
                 cash = CashPayment(sum = paymentData.amount)
@@ -157,7 +173,7 @@ object ReceiptApiClient {
             val createResponse = response.body<CreateDocumentResponse>()
             if (createResponse.status) {
                 Log.i("AutoKabalaAPI", "##### SUCCESS! doc=${createResponse.docNum} url=${createResponse.docUrl} #####")
-                createResponse.docUrl ?: ""
+                IssuedDocument(docUrl = createResponse.docUrl ?: "", docNum = createResponse.docNum ?: "")
             } else {
                 Log.e("AutoKabalaAPI", "##### FAILED to issue document: ${createResponse.error} #####")
                 null
@@ -165,6 +181,34 @@ object ReceiptApiClient {
         } catch (e: Exception) {
             Log.e("AutoKabalaAPI", "##### EXCEPTION during document creation: ${e.message} #####", e)
             null
+        }
+    }
+
+    suspend fun sendDocumentByEmail(docNum: String): Boolean {
+        val num = docNum.toIntOrNull() ?: return false
+        return try {
+            val requestBody = SendEmailRequest(
+                cid = BuildConfig.ICOUNT_CID,
+                user = BuildConfig.ICOUNT_USER,
+                pass = BuildConfig.ICOUNT_PASS,
+                docType = "receipt",
+                docNum = num,
+                emailToClient = true
+            )
+            Log.d("AutoKabalaAPI", "sendDocumentByEmail request: $requestBody")
+            val response = client.post("$BASE_URL/doc/email") {
+                contentType(ContentType.Application.Json)
+                setBody(requestBody)
+            }
+            val rawBody = response.body<String>()
+            Log.d("AutoKabalaAPI", "sendDocumentByEmail($docNum) raw: $rawBody")
+            val result = Json { ignoreUnknownKeys = true; isLenient = true }
+                .decodeFromString<SendEmailResponse>(rawBody)
+            Log.i("AutoKabalaAPI", "sendDocumentByEmail($docNum) status=${result.status} error=${result.error}")
+            result.status
+        } catch (e: Exception) {
+            Log.w("AutoKabalaAPI", "sendDocumentByEmail failed", e)
+            false
         }
     }
 

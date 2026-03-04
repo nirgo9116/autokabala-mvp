@@ -169,8 +169,8 @@ fun MainScreen(viewModel: MainViewModel, onOpenSettingsClicked: () -> Unit) {
             NotificationManagerCompat.getEnabledListenerPackages(context).contains(context.packageName)
         )
     }
-    // Map of paymentId → explicitly chosen client (overrides MatchResult in the UI)
-    var selectedClientsMap by remember { mutableStateOf<Map<Int, ClientEntity>>(emptyMap()) }
+    // Map of paymentId → chosen client ID (store ID only so effectiveClient always reflects DB)
+    var selectedClientIdsMap by remember { mutableStateOf<Map<Int, String>>(emptyMap()) }
     // Which payment's sheet is open
     var clientSheetFor by remember { mutableStateOf<PaymentProcessingState?>(null) }
 
@@ -185,15 +185,22 @@ fun MainScreen(viewModel: MainViewModel, onOpenSettingsClicked: () -> Unit) {
         onDispose { lifecycleOwner.lifecycle.removeObserver(observer) }
     }
 
+    // Clean up stale map entries when payments disappear from DB
+    val currentPaymentIds = remember(paymentStates) { paymentStates.map { it.payment.id }.toSet() }
+    LaunchedEffect(currentPaymentIds) {
+        selectedClientIdsMap = selectedClientIdsMap.filterKeys { it in currentPaymentIds }
+    }
+
     val snackbarHostState = remember { SnackbarHostState() }
     LaunchedEffect(Unit) {
         viewModel.uiEvent.collectLatest { event ->
             when (event) {
                 is MainViewModel.UiEvent.ShowError -> snackbarHostState.showSnackbar(event.message)
                 is MainViewModel.UiEvent.ReceiptIssued -> {
+                    val message = if (event.emailSent) "קבלה הופקה ונשלחה במייל ✓" else "קבלה הופקה בהצלחה ✓"
                     val actionLabel = if (event.docUrl != null) "שלח בוואטסאפ" else null
                     val result = snackbarHostState.showSnackbar(
-                        message = "קבלה הופקה בהצלחה ✓",
+                        message = message,
                         actionLabel = actionLabel,
                         duration = SnackbarDuration.Long
                     )
@@ -213,14 +220,14 @@ fun MainScreen(viewModel: MainViewModel, onOpenSettingsClicked: () -> Unit) {
             onDismiss = { clientSheetFor = null },
             // Selecting from the sheet ONLY updates the chip — receipt is issued via button
             onClientSelected = { client ->
-                selectedClientsMap = selectedClientsMap + (state.payment.id to client)
+                selectedClientIdsMap = selectedClientIdsMap + (state.payment.id to client.id)
                 clientSheetFor = null
             },
             // Creating a new client issues immediately (create + issue in one step)
             onCreateClient = { firstName, lastName ->
                 val fullName = if (lastName.isBlank()) firstName else "$firstName $lastName"
                 viewModel.onCreateClientAndIssueReceiptClicked(state.payment, fullName)
-                selectedClientsMap = selectedClientsMap - state.payment.id
+                selectedClientIdsMap = selectedClientIdsMap - state.payment.id
                 clientSheetFor = null
             }
         )
@@ -249,15 +256,14 @@ fun MainScreen(viewModel: MainViewModel, onOpenSettingsClicked: () -> Unit) {
             0 -> PaymentsTab(
                 modifier = Modifier.padding(innerPadding),
                 paymentStates = paymentStates,
-                selectedClientsMap = selectedClientsMap,
+                allClients = allClients,
+                selectedClientIdsMap = selectedClientIdsMap,
                 isProcessingShare = isProcessingShare,
                 onIssueReceipt = { payment, client ->
                     viewModel.onIssueReceiptForClientClicked(payment, client)
-                    selectedClientsMap = selectedClientsMap - payment.id
                 },
                 onDeletePayment = { state ->
                     viewModel.onDeletePaymentClicked(state.payment)
-                    selectedClientsMap = selectedClientsMap - state.payment.id
                 },
                 onOpenClientSheet = { clientSheetFor = it },
                 onToggleAutoSend = { client -> viewModel.onToggleAutoSend(client) },
@@ -284,7 +290,8 @@ fun MainScreen(viewModel: MainViewModel, onOpenSettingsClicked: () -> Unit) {
 fun PaymentsTab(
     modifier: Modifier,
     paymentStates: List<PaymentProcessingState>,
-    selectedClientsMap: Map<Int, ClientEntity>,
+    allClients: List<ClientEntity>,
+    selectedClientIdsMap: Map<Int, String>,
     isProcessingShare: Boolean,
     onIssueReceipt: (PaymentEntity, ClientEntity) -> Unit,
     onDeletePayment: (PaymentProcessingState) -> Unit,
@@ -330,9 +337,12 @@ fun PaymentsTab(
         } else {
             LazyColumn(verticalArrangement = Arrangement.spacedBy(12.dp)) {
                 items(paymentStates, key = { it.payment.id }) { state ->
+                    // Derive selectedClient from the reactive allClients (not a stale snapshot)
+                    val selectedClient = selectedClientIdsMap[state.payment.id]
+                        ?.let { id -> allClients.find { it.id == id } }
                     PaymentCard(
                         state = state,
-                        selectedClient = selectedClientsMap[state.payment.id],
+                        selectedClient = selectedClient,
                         onIssueReceipt = { client -> onIssueReceipt(state.payment, client) },
                         onDelete = { onDeletePayment(state) },
                         onOpenSheet = { onOpenClientSheet(state) },
@@ -407,40 +417,42 @@ fun PaymentCard(
                 color = MaterialTheme.colorScheme.onSurfaceVariant
             )
 
-            // ── Auto-send email toggle ────────────────────────────────────────
-            effectiveClient?.let { client ->
+            // ── Auto-send email toggle (always visible for design consistency) ─
+            val hasEmail = !effectiveClient?.email.isNullOrBlank()
+            val toggleEnabled = effectiveClient != null && hasEmail
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.SpaceBetween
+            ) {
                 Row(
-                    modifier = Modifier.fillMaxWidth(),
                     verticalAlignment = Alignment.CenterVertically,
-                    horizontalArrangement = Arrangement.SpaceBetween
+                    horizontalArrangement = Arrangement.spacedBy(8.dp)
                 ) {
-                    Row(
-                        verticalAlignment = Alignment.CenterVertically,
-                        horizontalArrangement = Arrangement.spacedBy(8.dp)
-                    ) {
-                        Icon(
-                            imageVector = Icons.Default.Email,
-                            contentDescription = null,
-                            modifier = Modifier.size(18.dp),
-                            tint = if (client.email != null) MaterialTheme.colorScheme.onSurface
-                                   else MaterialTheme.colorScheme.onSurfaceVariant
-                        )
-                        Text(
-                            text = "שלח קבלה במייל",
-                            style = MaterialTheme.typography.bodyMedium,
-                            color = if (client.email != null) MaterialTheme.colorScheme.onSurface
-                                    else MaterialTheme.colorScheme.onSurfaceVariant
-                        )
-                    }
-                    Box {
-                        Switch(
-                            checked = client.autoSend && client.email != null,
-                            onCheckedChange = { if (client.email != null) onToggleAutoSend(client) },
-                            enabled = client.email != null
-                        )
-                        if (client.email == null) {
-                            Box(modifier = Modifier.matchParentSize().clickable { onNoEmailTapped() })
-                        }
+                    Icon(
+                        imageVector = Icons.Default.Email,
+                        contentDescription = null,
+                        modifier = Modifier.size(18.dp),
+                        tint = if (toggleEnabled) MaterialTheme.colorScheme.onSurface
+                               else MaterialTheme.colorScheme.onSurfaceVariant
+                    )
+                    Text(
+                        text = "שלח קבלה במייל",
+                        style = MaterialTheme.typography.bodyMedium,
+                        color = if (toggleEnabled) MaterialTheme.colorScheme.onSurface
+                                else MaterialTheme.colorScheme.onSurfaceVariant
+                    )
+                }
+                Box {
+                    Switch(
+                        checked = effectiveClient?.autoSend == true && hasEmail,
+                        onCheckedChange = { if (toggleEnabled) onToggleAutoSend(effectiveClient!!) },
+                        enabled = toggleEnabled
+                    )
+                    if (!toggleEnabled) {
+                        Box(modifier = Modifier.matchParentSize().clickable {
+                            if (effectiveClient != null) onNoEmailTapped()
+                        })
                     }
                 }
             }

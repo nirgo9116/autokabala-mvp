@@ -26,7 +26,9 @@ class ReceiptRepository(private val paymentDao: PaymentDao, private val clientDa
             .launchIn(scope)
     }
 
-    suspend fun issueReceiptForClient(payment: PaymentEntity, client: ClientEntity): String? {
+    data class ReceiptOutcome(val docUrl: String?, val emailSent: Boolean)
+
+    suspend fun issueReceiptForClient(payment: PaymentEntity, client: ClientEntity): ReceiptOutcome? {
         val paymentData = PaymentData(
             source = payment.source,
             senderName = payment.senderName,
@@ -34,12 +36,12 @@ class ReceiptRepository(private val paymentDao: PaymentDao, private val clientDa
             isConfirmed = payment.isConfirmed,
             timestamp = payment.timestamp
         )
-        val email = if (client.autoSend) client.email else null
-        val docUrl = ReceiptApiClient.issueReceipt(paymentData, client.id, email)
-        if (docUrl != null) {
-            paymentDao.updatePaymentStatus(payment.id, "processed")
-        }
-        return docUrl
+        val doc = ReceiptApiClient.issueReceipt(paymentData, client.id) ?: return null
+        paymentDao.updatePaymentStatus(payment.id, "processed")
+        val emailSent = if (client.autoSend && doc.docNum.isNotBlank()) {
+            ReceiptApiClient.sendDocumentByEmail(doc.docNum)
+        } else false
+        return ReceiptOutcome(docUrl = doc.docUrl.ifBlank { null }, emailSent = emailSent)
     }
 
     suspend fun toggleAutoSend(client: ClientEntity) {
@@ -60,7 +62,7 @@ class ReceiptRepository(private val paymentDao: PaymentDao, private val clientDa
                 val newClientId = result.data
                 Log.d("Repository", "Client created successfully with ID: $newClientId. Now issuing receipt.")
                 val newClient = ClientEntity(id = newClientId.toString(), name = newClientName, email = null, phone = null)
-                return issueReceiptForClient(payment, newClient)
+                return issueReceiptForClient(payment, newClient)?.docUrl
             }
             is ApiResult.Failure -> {
                 Log.e("Repository", "Failed to create new client: ${result.reason}. Aborting receipt issuance.")

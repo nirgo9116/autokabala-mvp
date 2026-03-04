@@ -114,7 +114,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
 
     sealed class UiEvent {
         data class ShowError(val message: String) : UiEvent()
-        data class ReceiptIssued(val docUrl: String?, val clientPhone: String?) : UiEvent()
+        data class ReceiptIssued(val docUrl: String?, val clientPhone: String?, val emailSent: Boolean = false) : UiEvent()
     }
 
     // --- Event Handlers ---
@@ -129,11 +129,10 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
 
     fun onIssueReceiptForClientClicked(payment: PaymentEntity, client: ClientEntity) {
         viewModelScope.launch {
-            val docUrl = receiptRepository.issueReceiptForClient(payment, client)
-            if (docUrl != null) {
-                val phone = client.phone
-                    ?: receiptRepository.fetchAndCachePhone(client.id)
-                _uiEvent.send(UiEvent.ReceiptIssued(docUrl.ifBlank { null }, phone))
+            val outcome = receiptRepository.issueReceiptForClient(payment, client)
+            if (outcome != null) {
+                val phone = client.phone ?: receiptRepository.fetchAndCachePhone(client.id)
+                _uiEvent.send(UiEvent.ReceiptIssued(outcome.docUrl, phone, outcome.emailSent))
             } else {
                 _uiEvent.send(UiEvent.ShowError("שגיאה בהפקת קבלה. בדוק חיבור לאינטרנט ונסה שוב."))
             }
