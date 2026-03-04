@@ -282,7 +282,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                                 text.drop(1) else text
                             // Strip commas to handle thousand-separator format (e.g. "1,000")
                             val coreDigits = core.replace(",", "")
-                            coreDigits.length in 2..5 &&
+                            coreDigits.length in 1..5 &&
                                 coreDigits.all { it.isDigit() } &&
                                 !text.contains('.') &&
                                 !text.contains(':')
@@ -297,7 +297,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                             }
                             ?.let { block ->
                                 block.text.normDigits().filter { it.isDigit() }
-                                    .toDoubleOrNull()?.takeIf { it in 10.0..99_999.0 }
+                                    .toDoubleOrNull()?.takeIf { it in 1.0..99_999.0 }
                             }
 
                         Log.d("MlKitOcr", "Final amount: $amount")
