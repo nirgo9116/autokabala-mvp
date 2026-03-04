@@ -23,6 +23,12 @@ interface ClientDao {
     @Query("SELECT * FROM clients ORDER BY name ASC")
     fun getAllClients(): Flow<List<ClientEntity>>
 
+    @Query("UPDATE clients SET autoSend = :autoSend WHERE id = :clientId")
+    suspend fun updateAutoSend(clientId: String, autoSend: Boolean)
+
+    @Query("UPDATE clients SET phone = :phone WHERE id = :clientId")
+    suspend fun updatePhone(clientId: String, phone: String)
+
     /**
      * Deletes all clients from the table.
      */

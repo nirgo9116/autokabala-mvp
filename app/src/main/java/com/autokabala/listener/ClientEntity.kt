@@ -9,5 +9,6 @@ data class ClientEntity(
     val id: String, // The ID from iCount
     val name: String,
     val email: String?,
-    val phone: String?
+    val phone: String?,
+    val autoSend: Boolean = false
 )

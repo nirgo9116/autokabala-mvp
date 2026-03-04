@@ -9,6 +9,7 @@ import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
 import androidx.activity.enableEdgeToEdge
 import androidx.compose.foundation.BorderStroke
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -27,6 +28,7 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.filled.Add
 import androidx.compose.material.icons.filled.CheckCircle
+import androidx.compose.material.icons.filled.Email
 import androidx.compose.material.icons.filled.HelpOutline
 import androidx.compose.material.icons.filled.KeyboardArrowDown
 import androidx.compose.material.icons.filled.List
@@ -45,8 +47,10 @@ import androidx.compose.material3.NavigationBarItem
 import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Scaffold
+import androidx.compose.material3.SnackbarDuration
 import androidx.compose.material3.SnackbarHost
 import androidx.compose.material3.SnackbarHostState
+import androidx.compose.material3.SnackbarResult
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Switch
 import androidx.compose.material3.Text
@@ -186,6 +190,17 @@ fun MainScreen(viewModel: MainViewModel, onOpenSettingsClicked: () -> Unit) {
         viewModel.uiEvent.collectLatest { event ->
             when (event) {
                 is MainViewModel.UiEvent.ShowError -> snackbarHostState.showSnackbar(event.message)
+                is MainViewModel.UiEvent.ReceiptIssued -> {
+                    val actionLabel = if (event.docUrl != null) "שלח בוואטסאפ" else null
+                    val result = snackbarHostState.showSnackbar(
+                        message = "קבלה הופקה בהצלחה ✓",
+                        actionLabel = actionLabel,
+                        duration = SnackbarDuration.Long
+                    )
+                    if (result == SnackbarResult.ActionPerformed && event.docUrl != null) {
+                        launchWhatsApp(context, event.docUrl, event.clientPhone)
+                    }
+                }
             }
         }
     }
@@ -236,15 +251,17 @@ fun MainScreen(viewModel: MainViewModel, onOpenSettingsClicked: () -> Unit) {
                 paymentStates = paymentStates,
                 selectedClientsMap = selectedClientsMap,
                 isProcessingShare = isProcessingShare,
-                onIssueReceipt = { payment, clientId ->
-                    viewModel.onIssueReceiptForClientClicked(payment, clientId)
+                onIssueReceipt = { payment, client ->
+                    viewModel.onIssueReceiptForClientClicked(payment, client)
                     selectedClientsMap = selectedClientsMap - payment.id
                 },
                 onDeletePayment = { state ->
                     viewModel.onDeletePaymentClicked(state.payment)
                     selectedClientsMap = selectedClientsMap - state.payment.id
                 },
-                onOpenClientSheet = { clientSheetFor = it }
+                onOpenClientSheet = { clientSheetFor = it },
+                onToggleAutoSend = { client -> viewModel.onToggleAutoSend(client) },
+                onNoEmailTapped = { viewModel.onNoEmailForAutoSend() }
             )
             1 -> SettingsTab(
                 modifier = Modifier.padding(innerPadding),
@@ -269,9 +286,11 @@ fun PaymentsTab(
     paymentStates: List<PaymentProcessingState>,
     selectedClientsMap: Map<Int, ClientEntity>,
     isProcessingShare: Boolean,
-    onIssueReceipt: (PaymentEntity, String) -> Unit,
+    onIssueReceipt: (PaymentEntity, ClientEntity) -> Unit,
     onDeletePayment: (PaymentProcessingState) -> Unit,
-    onOpenClientSheet: (PaymentProcessingState) -> Unit
+    onOpenClientSheet: (PaymentProcessingState) -> Unit,
+    onToggleAutoSend: (ClientEntity) -> Unit,
+    onNoEmailTapped: () -> Unit
 ) {
     Column(modifier = modifier.fillMaxSize().padding(horizontal = 16.dp)) {
         Spacer(Modifier.height(16.dp))
@@ -314,9 +333,11 @@ fun PaymentsTab(
                     PaymentCard(
                         state = state,
                         selectedClient = selectedClientsMap[state.payment.id],
-                        onIssueReceipt = { clientId -> onIssueReceipt(state.payment, clientId) },
+                        onIssueReceipt = { client -> onIssueReceipt(state.payment, client) },
                         onDelete = { onDeletePayment(state) },
-                        onOpenSheet = { onOpenClientSheet(state) }
+                        onOpenSheet = { onOpenClientSheet(state) },
+                        onToggleAutoSend = onToggleAutoSend,
+                        onNoEmailTapped = onNoEmailTapped
                     )
                 }
                 item { Spacer(Modifier.height(8.dp)) }
@@ -333,9 +354,11 @@ fun PaymentsTab(
 fun PaymentCard(
     state: PaymentProcessingState,
     selectedClient: ClientEntity?,          // explicitly chosen via bottom sheet
-    onIssueReceipt: (clientId: String) -> Unit,
+    onIssueReceipt: (ClientEntity) -> Unit,
     onDelete: () -> Unit,
-    onOpenSheet: () -> Unit
+    onOpenSheet: () -> Unit,
+    onToggleAutoSend: (ClientEntity) -> Unit,
+    onNoEmailTapped: () -> Unit
 ) {
     val payment = state.payment
     val dateStr = remember(payment.timestamp) {
@@ -384,12 +407,50 @@ fun PaymentCard(
                 color = MaterialTheme.colorScheme.onSurfaceVariant
             )
 
+            // ── Auto-send email toggle ────────────────────────────────────────
+            effectiveClient?.let { client ->
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.SpaceBetween
+                ) {
+                    Row(
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.spacedBy(8.dp)
+                    ) {
+                        Icon(
+                            imageVector = Icons.Default.Email,
+                            contentDescription = null,
+                            modifier = Modifier.size(18.dp),
+                            tint = if (client.email != null) MaterialTheme.colorScheme.onSurface
+                                   else MaterialTheme.colorScheme.onSurfaceVariant
+                        )
+                        Text(
+                            text = "שלח קבלה במייל",
+                            style = MaterialTheme.typography.bodyMedium,
+                            color = if (client.email != null) MaterialTheme.colorScheme.onSurface
+                                    else MaterialTheme.colorScheme.onSurfaceVariant
+                        )
+                    }
+                    Box {
+                        Switch(
+                            checked = client.autoSend && client.email != null,
+                            onCheckedChange = { if (client.email != null) onToggleAutoSend(client) },
+                            enabled = client.email != null
+                        )
+                        if (client.email == null) {
+                            Box(modifier = Modifier.matchParentSize().clickable { onNoEmailTapped() })
+                        }
+                    }
+                }
+            }
+
             Spacer(Modifier.height(4.dp))
 
             // ── Action buttons ────────────────────────────────────────────────
             Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                 Button(
-                    onClick = { effectiveClient?.let { onIssueReceipt(it.id) } },
+                    onClick = { effectiveClient?.let { onIssueReceipt(it) } },
                     enabled = effectiveClient != null,
                     modifier = Modifier.weight(1f)
                 ) {
@@ -851,5 +912,41 @@ fun SettingsTab(
         OutlinedButton(onClick = onAddFakePayment, modifier = Modifier.fillMaxWidth()) {
             Text("הוסף תשלום לדוגמה")
         }
+    }
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// WhatsApp sharing utilities
+// ─────────────────────────────────────────────────────────────────────────────
+
+private fun launchWhatsApp(context: android.content.Context, docUrl: String, clientPhone: String?) {
+    val text = "קבלה עבורך 🧾\n$docUrl"
+    val intent = if (clientPhone != null) {
+        val normalized = normalizeIsraeliPhone(clientPhone)
+        Intent(Intent.ACTION_VIEW, Uri.parse("whatsapp://send?phone=$normalized&text=${Uri.encode(text)}"))
+    } else {
+        Intent(Intent.ACTION_SEND).apply {
+            type = "text/plain"
+            putExtra(Intent.EXTRA_TEXT, text)
+            setPackage("com.whatsapp")
+        }
+    }
+    try {
+        context.startActivity(intent)
+    } catch (e: android.content.ActivityNotFoundException) {
+        val fallback = Intent(Intent.ACTION_SEND).apply {
+            type = "text/plain"
+            putExtra(Intent.EXTRA_TEXT, text)
+        }
+        context.startActivity(Intent.createChooser(fallback, null))
+    }
+}
+
+private fun normalizeIsraeliPhone(phone: String): String {
+    val digits = phone.filter { it.isDigit() }
+    return when {
+        digits.startsWith("972") -> digits
+        digits.startsWith("0")   -> "972${digits.drop(1)}"
+        else                     -> "972$digits"
     }
 }

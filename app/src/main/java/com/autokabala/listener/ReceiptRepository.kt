@@ -26,7 +26,7 @@ class ReceiptRepository(private val paymentDao: PaymentDao, private val clientDa
             .launchIn(scope)
     }
 
-    suspend fun issueReceiptForClient(payment: PaymentEntity, clientId: String): Boolean {
+    suspend fun issueReceiptForClient(payment: PaymentEntity, client: ClientEntity): String? {
         val paymentData = PaymentData(
             source = payment.source,
             senderName = payment.senderName,
@@ -34,26 +34,37 @@ class ReceiptRepository(private val paymentDao: PaymentDao, private val clientDa
             isConfirmed = payment.isConfirmed,
             timestamp = payment.timestamp
         )
-        val wasSuccessful = ReceiptApiClient.issueReceipt(paymentData, clientId)
-        if (wasSuccessful) {
+        val email = if (client.autoSend) client.email else null
+        val docUrl = ReceiptApiClient.issueReceipt(paymentData, client.id, email)
+        if (docUrl != null) {
             paymentDao.updatePaymentStatus(payment.id, "processed")
         }
-        return wasSuccessful
+        return docUrl
     }
 
-    suspend fun createClientAndIssueReceipt(payment: PaymentEntity, newClientName: String): Boolean {
+    suspend fun toggleAutoSend(client: ClientEntity) {
+        clientDao.updateAutoSend(client.id, !client.autoSend)
+    }
+
+    suspend fun fetchAndCachePhone(clientId: String): String? {
+        val mobile = ReceiptApiClient.getClientMobile(clientId) ?: return null
+        clientDao.updatePhone(clientId, mobile)
+        return mobile
+    }
+
+    suspend fun createClientAndIssueReceipt(payment: PaymentEntity, newClientName: String): String? {
         Log.d("Repository", "Attempting to create client '$newClientName' and issue receipt.")
 
         when (val result = ReceiptApiClient.createClient(newClientName)) {
             is ApiResult.Success -> {
                 val newClientId = result.data
                 Log.d("Repository", "Client created successfully with ID: $newClientId. Now issuing receipt.")
-                // If client creation was successful, issue the receipt with the new ID
-                return issueReceiptForClient(payment, newClientId.toString())
+                val newClient = ClientEntity(id = newClientId.toString(), name = newClientName, email = null, phone = null)
+                return issueReceiptForClient(payment, newClient)
             }
             is ApiResult.Failure -> {
                 Log.e("Repository", "Failed to create new client: ${result.reason}. Aborting receipt issuance.")
-                return false
+                return null
             }
         }
     }
@@ -90,7 +101,7 @@ class ReceiptRepository(private val paymentDao: PaymentDao, private val clientDa
                     id = clientData.id,
                     name = clientData.name,
                     email = clientData.email,
-                    phone = clientData.phone
+                    phone = clientData.phone ?: clientData.mobile
                 )
             }
             // Use the new, atomic sync function

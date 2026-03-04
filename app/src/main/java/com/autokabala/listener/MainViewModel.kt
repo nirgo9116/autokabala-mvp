@@ -114,6 +114,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
 
     sealed class UiEvent {
         data class ShowError(val message: String) : UiEvent()
+        data class ReceiptIssued(val docUrl: String?, val clientPhone: String?) : UiEvent()
     }
 
     // --- Event Handlers ---
@@ -126,20 +127,38 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         }
     }
 
-    fun onIssueReceiptForClientClicked(payment: PaymentEntity, clientId: String) {
+    fun onIssueReceiptForClientClicked(payment: PaymentEntity, client: ClientEntity) {
         viewModelScope.launch {
-            val wasSuccessful = receiptRepository.issueReceiptForClient(payment, clientId)
-            if (!wasSuccessful) {
-                _uiEvent.send(UiEvent.ShowError("Failed to issue receipt. Please check internet connection and try again."))
+            val docUrl = receiptRepository.issueReceiptForClient(payment, client)
+            if (docUrl != null) {
+                val phone = client.phone
+                    ?: receiptRepository.fetchAndCachePhone(client.id)
+                _uiEvent.send(UiEvent.ReceiptIssued(docUrl.ifBlank { null }, phone))
+            } else {
+                _uiEvent.send(UiEvent.ShowError("שגיאה בהפקת קבלה. בדוק חיבור לאינטרנט ונסה שוב."))
             }
+        }
+    }
+
+    fun onToggleAutoSend(client: ClientEntity) {
+        viewModelScope.launch {
+            receiptRepository.toggleAutoSend(client)
+        }
+    }
+
+    fun onNoEmailForAutoSend() {
+        viewModelScope.launch {
+            _uiEvent.send(UiEvent.ShowError("יש להזין כתובת מייל ללקוח כדי לאפשר שליחה אוטומטית"))
         }
     }
 
     fun onCreateClientAndIssueReceiptClicked(payment: PaymentEntity, newClientName: String) {
         viewModelScope.launch {
-            val wasSuccessful = receiptRepository.createClientAndIssueReceipt(payment, newClientName)
-            if (!wasSuccessful) {
-                _uiEvent.send(UiEvent.ShowError("Failed to create client or issue receipt."))
+            val docUrl = receiptRepository.createClientAndIssueReceipt(payment, newClientName)
+            if (docUrl != null) {
+                _uiEvent.send(UiEvent.ReceiptIssued(docUrl.ifBlank { null }, null))
+            } else {
+                _uiEvent.send(UiEvent.ShowError("שגיאה ביצירת לקוח או הפקת קבלה."))
             }
         }
     }

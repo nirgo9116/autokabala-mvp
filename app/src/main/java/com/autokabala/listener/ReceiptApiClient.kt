@@ -13,6 +13,8 @@ import io.ktor.serialization.kotlinx.json.json
 import kotlinx.serialization.SerialName
 import kotlinx.serialization.Serializable
 import kotlinx.serialization.json.Json
+import kotlinx.serialization.json.buildJsonObject
+import kotlinx.serialization.json.put
 
 // --- Data classes for Document Creation ---
 
@@ -44,9 +46,11 @@ data class CreateDocumentWithClientIdRequest(
 
 @Serializable
 data class CreateDocumentResponse(
-    @SerialName("status") val status: Boolean,
-    @SerialName("error") val error: String? = null,
-    @SerialName("doc_number") val docNumber: String? = null
+    @SerialName("status")       val status: Boolean,
+    @SerialName("error")        val error: String? = null,
+    @SerialName("docnum")       val docNum: String? = null,
+    @SerialName("doc_url")      val docUrl: String? = null,
+    @SerialName("doc_copy_url") val docCopyUrl: String? = null
 )
 
 // --- Data classes for Client Creation ---
@@ -80,7 +84,9 @@ data class GetClientsRequest(
     @SerialName("user") val user: String,
     @SerialName("pass") val pass: String,
     @SerialName("sid") val sid: String = "",
-    @SerialName("list_type") val listType: String = "array"
+    @SerialName("list_type") val listType: String = "array",
+    @SerialName("detail_level") val detailLevel: Int = 10,
+    @SerialName("client_id") val clientId: Int? = null
 )
 
 @Serializable
@@ -88,7 +94,8 @@ data class ClientData(
     @SerialName("client_id") val id: String,
     @SerialName("client_name") val name: String,
     @SerialName("email") val email: String? = null,
-    @SerialName("phone") val phone: String? = null
+    @SerialName("phone") val phone: String? = null,
+    @SerialName("mobile") val mobile: String? = null
 )
 
 @Serializable
@@ -96,6 +103,20 @@ data class GetClientsResponse(
     @SerialName("status") val status: Boolean,
     @SerialName("clients") val clients: Map<String, ClientData>? = null,
     @SerialName("error") val error: String? = null
+)
+
+// --- Data classes for Client Info ---
+
+@Serializable
+data class ClientInfoData(
+    @SerialName("mobile") val mobile: String? = null,
+    @SerialName("phone")  val phone:  String? = null
+)
+
+@Serializable
+data class ClientInfoResponse(
+    @SerialName("status")      val status:     Boolean,
+    @SerialName("client_info") val clientInfo: ClientInfoData? = null
 )
 
 // API RESULT WRAPPER
@@ -114,7 +135,7 @@ object ReceiptApiClient {
         }
     }
 
-    suspend fun issueReceipt(paymentData: PaymentData, clientId: String): Boolean {
+    suspend fun issueReceipt(paymentData: PaymentData, clientId: String, email: String? = null): String? {
         Log.i("AutoKabalaAPI", "--- Starting Document Issuance for client ID: $clientId ---")
         return try {
             val requestBody = CreateDocumentWithClientIdRequest(
@@ -123,7 +144,7 @@ object ReceiptApiClient {
                 pass = BuildConfig.ICOUNT_PASS,
                 docType = "receipt",
                 clientId = clientId.toInt(),
-                email = null,
+                email = email?.ifBlank { null },
                 currencyCode = "ILS",
                 items = listOf(DocumentItem("קבלה עבור ${paymentData.senderName}", paymentData.amount)),
                 cash = CashPayment(sum = paymentData.amount)
@@ -135,15 +156,15 @@ object ReceiptApiClient {
             }
             val createResponse = response.body<CreateDocumentResponse>()
             if (createResponse.status) {
-                Log.i("AutoKabalaAPI", "##### SUCCESS! Issued document for client ID: $clientId #####")
-                true
+                Log.i("AutoKabalaAPI", "##### SUCCESS! doc=${createResponse.docNum} url=${createResponse.docUrl} #####")
+                createResponse.docUrl ?: ""
             } else {
                 Log.e("AutoKabalaAPI", "##### FAILED to issue document: ${createResponse.error} #####")
-                false
+                null
             }
         } catch (e: Exception) {
             Log.e("AutoKabalaAPI", "##### EXCEPTION during document creation: ${e.message} #####", e)
-            false
+            null
         }
     }
 
@@ -162,7 +183,6 @@ object ReceiptApiClient {
             }
 
             val rawBody = response.body<String>()
-            Log.d("AutoKabalaAPI", "GetClients raw response: $rawBody")
 
             val parsed = Json {
                 ignoreUnknownKeys = true
@@ -172,6 +192,7 @@ object ReceiptApiClient {
             if (parsed.status && parsed.clients != null) {
                 val clients = parsed.clients.values.toList()
                 Log.i("AutoKabalaAPI", "Fetched ${clients.size} clients successfully.")
+
                 clients
             } else {
                 Log.e("AutoKabalaAPI", "API returned error: ${parsed.error}")
@@ -222,6 +243,30 @@ object ReceiptApiClient {
             val errorMsg = e.message ?: "Exception during client creation"
             Log.e("AutoKabalaAPI", "EXCEPTION during client creation: $errorMsg", e)
             ApiResult.Failure(errorMsg)
+        }
+    }
+
+    suspend fun getClientMobile(clientId: String): String? {
+        return try {
+            val response = client.post("$BASE_URL/client/info") {
+                contentType(ContentType.Application.Json)
+                setBody(buildJsonObject {
+                    put("cid",          BuildConfig.ICOUNT_CID)
+                    put("user",         BuildConfig.ICOUNT_USER)
+                    put("pass",         BuildConfig.ICOUNT_PASS)
+                    put("client_id",    clientId.toInt())
+                    put("get_contacts", true)
+                })
+            }
+            val parsed = Json { ignoreUnknownKeys = true; isLenient = true }
+                .decodeFromString<ClientInfoResponse>(response.body<String>())
+            val mobile = parsed.clientInfo?.mobile?.ifBlank { null }
+                ?: parsed.clientInfo?.phone?.ifBlank { null }
+            Log.d("AutoKabalaAPI", "getClientMobile($clientId) = $mobile")
+            mobile
+        } catch (e: Exception) {
+            Log.w("AutoKabalaAPI", "getClientMobile failed", e)
+            null
         }
     }
 }
