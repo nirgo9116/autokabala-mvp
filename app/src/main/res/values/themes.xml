@@ -2,6 +2,7 @@
 <resources>
 
     <style name="Theme.AutoKabalaListener" parent="android:Theme.Material.Light.NoActionBar">
-        <item name="android:windowBackground">@color/m3_background</item>
+        <item name="android:windowBackground">@android:color/transparent</item>
+        <item name="android:windowIsTranslucent">true</item>
     </style>
 </resources>

@@ -16,9 +16,7 @@ import com.google.mlkit.vision.common.InputImage
 import com.google.mlkit.vision.text.TextRecognition
 import com.google.mlkit.vision.text.latin.TextRecognizerOptions
 import com.googlecode.tesseract.android.TessBaseAPI
-import kotlinx.coroutines.async
 import kotlinx.coroutines.channels.Channel
-import kotlinx.coroutines.coroutineScope
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.SharingStarted
@@ -186,7 +184,6 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
             try {
                 val context = getApplication<Application>()
 
-                // Load original bitmap once — shared between both OCR engines
                 val originalBitmap = withContext(Dispatchers.IO) {
                     context.contentResolver.openInputStream(imageUri)?.use {
                         BitmapFactory.decodeStream(it)
@@ -196,63 +193,64 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                     return@launch
                 }
 
-                // Run both engines in parallel:
-                //   ML Kit  → original bitmap (handles dark backgrounds natively, reads LTR)
-                //   Tesseract → preprocessed copy (inverted, 2× scaled, Hebrew model)
-                var mlKitResult: MlKitResult? = null
-                var tesseractText: String? = null
-                coroutineScope {
-                    val mlKitJob = async {
-                        runMlKitOcr(originalBitmap)
-                    }
-                    val tesseractJob = async {
-                        val preprocessed = withContext(Dispatchers.IO) {
-                            preprocessForOcr(
-                                originalBitmap.copy(
-                                    originalBitmap.config ?: Bitmap.Config.ARGB_8888, false
-                                )
-                            )
-                        }
-                        runTesseractOcr(context, preprocessed).also {
-                            withContext(Dispatchers.IO) { preprocessed.recycle() }
-                        }
-                    }
-                    mlKitResult = mlKitJob.await()
-                    tesseractText = tesseractJob.await()
-                }
-                originalBitmap.recycle()
-
+                // Step 1: ML Kit always runs first — needed for source detection + amount.
+                val mlKitResult = runMlKitOcr(originalBitmap)
                 val mlKitText   = mlKitResult?.text
                 val mlKitAmount = mlKitResult?.amount
+                Log.d("OCR_MLKIT", "ML Kit output:\n${mlKitText ?: "(empty)"}")
+                Log.d("OCR_MLKIT", "ML Kit amount (bounding-box): $mlKitAmount")
 
-                Log.d("OCR_MLKIT",  "ML Kit  output:\n${mlKitText  ?: "(empty)"}")
-                Log.d("OCR_MLKIT",  "ML Kit  amount (bounding-box): $mlKitAmount")
-                Log.d("OCR_TESS",   "Tesseract output:\n${tesseractText ?: "(empty)"}")
+                // Step 2: Detect source from ML Kit output, then run Tesseract with the
+                // appropriate preprocessing:
+                //   Paybox — white background → scale 2× only (no inversion)
+                //   Bit    — dark background  → invert + scale 2× (existing behaviour)
+                val isPaybox = mlKitText != null && PayboxShareParser.isPaybox(mlKitText)
+                Log.d("OCR_DETECT", "Detected source: ${if (isPaybox) "Paybox" else "Bit"}")
 
-                // Tesseract → Hebrew names (primary for name extraction)
-                // ML Kit Latin → amount via bounding-box (primary for amount)
-                val combinedText = "${tesseractText ?: ""}\n${mlKitText ?: ""}"
-                if (BitShareParser.isExpired(combinedText)) {
-                    _uiEvent.send(UiEvent.ShowError("תשלום זה פג תוקף — לא ניתן להפיק עבורו קבלה."))
-                    return@launch
+                val preprocessed = withContext(Dispatchers.IO) {
+                    val copy = originalBitmap.copy(originalBitmap.config ?: Bitmap.Config.ARGB_8888, false)
+                    if (isPaybox) preprocessForPayboxOcr(copy) else preprocessForOcr(copy)
                 }
-
-                if (tesseractText == null) {
-                    _uiEvent.send(UiEvent.ShowError("לא ניתן לקרוא טקסט מהתמונה. נסה תמונה ברורה יותר."))
-                    return@launch
+                val tesseractText = runTesseractOcr(context, preprocessed).also {
+                    withContext(Dispatchers.IO) { preprocessed.recycle() }
                 }
+                originalBitmap.recycle()
+                Log.d("OCR_TESS", "Tesseract output:\n${tesseractText ?: "(empty)"}")
 
-                val paymentData = BitShareParser.parse(
-                    hebrewText  = tesseractText!!,
-                    latinText   = mlKitText ?: tesseractText!!,
-                    mlKitAmount = mlKitAmount
-                )
-                if (paymentData == null) {
-                    _uiEvent.send(UiEvent.ShowError("לא נמצאו פרטי תשלום בתמונה. ודא שמדובר בתמונת אישור תשלום ביט."))
-                    return@launch
+                // Step 3: Parse with the appropriate parser.
+                if (isPaybox) {
+                    if (tesseractText == null) {
+                        _uiEvent.send(UiEvent.ShowError("לא ניתן לקרוא טקסט מהתמונה."))
+                        return@launch
+                    }
+                    val paymentData = PayboxShareParser.parse(tesseractText, mlKitText ?: tesseractText, mlKitAmount, mlKitResult?.nameAboveAmount) ?: run {
+                        _uiEvent.send(UiEvent.ShowError("לא נמצאו פרטי תשלום. ודא שמדובר באישור תשלום PayBox."))
+                        return@launch
+                    }
+                    ListenerManager.onPaymentParsed(paymentData)
+                } else {
+                    val combinedText = "${tesseractText ?: ""}\n${mlKitText ?: ""}"
+                    if (BitShareParser.isExpired(combinedText)) {
+                        _uiEvent.send(UiEvent.ShowError("תשלום זה פג תוקף — לא ניתן להפיק עבורו קבלה."))
+                        return@launch
+                    }
+                    if (tesseractText == null) {
+                        _uiEvent.send(UiEvent.ShowError("לא ניתן לקרוא טקסט מהתמונה. נסה תמונה ברורה יותר."))
+                        return@launch
+                    }
+                    val paymentData = BitShareParser.parse(
+                        hebrewText  = tesseractText,
+                        latinText   = mlKitText ?: tesseractText,
+                        mlKitAmount = mlKitAmount
+                    ) ?: run {
+                        _uiEvent.send(UiEvent.ShowError("לא נמצאו פרטי תשלום בתמונה. ודא שמדובר בתמונת אישור תשלום ביט."))
+                        return@launch
+                    }
+                    ListenerManager.onPaymentParsed(paymentData)
                 }
-
-                ListenerManager.onPaymentParsed(paymentData)
+            } catch (e: Exception) {
+                Log.e("ShareOCR", "Unexpected exception during share processing", e)
+                _uiEvent.send(UiEvent.ShowError("שגיאה בעיבוד התמונה: ${e.message}"))
             } finally {
                 _isProcessingShare.value = false
             }
@@ -261,7 +259,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
 
     // ── ML Kit: Latin script, LTR — accurate numbers & dates ─────────────────
 
-    private data class MlKitResult(val text: String, val amount: Double?)
+    private data class MlKitResult(val text: String, val amount: Double?, val nameAboveAmount: String?)
 
     private suspend fun runMlKitOcr(bitmap: Bitmap): MlKitResult? =
         suspendCancellableCoroutine { cont ->
@@ -310,18 +308,29 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
 
                         Log.d("MlKitOcr", "Candidate blocks: ${candidateBlocks.map { "'${it.text}' box=${it.boundingBox}" }}")
 
-                        val amount = candidateBlocks
-                            .maxByOrNull { block ->
-                                val bb = block.boundingBox
-                                if (bb != null) bb.height() * bb.width() else 0
-                            }
-                            ?.let { block ->
-                                block.text.normDigits().filter { it.isDigit() }
-                                    .toDoubleOrNull()?.takeIf { it in 1.0..99_999.0 }
-                            }
+                        val amountBlock = candidateBlocks.maxByOrNull { block ->
+                            val bb = block.boundingBox
+                            if (bb != null) bb.height() * bb.width() else 0
+                        }
+                        val amount = amountBlock?.let { block ->
+                            block.text.normDigits().filter { it.isDigit() }
+                                .toDoubleOrNull()?.takeIf { it in 1.0..99_999.0 }
+                        }
+
+                        // Collect text from all blocks spatially ABOVE the amount block.
+                        // For Paybox: this is the sender's contact name (e.g. "Hanita").
+                        // For Bit: this is the name line (e.g. "נשלחו לך מ ...").
+                        val nameAboveAmount = amountBlock?.boundingBox?.let { amountBb ->
+                            result.textBlocks
+                                .filter { block -> block.boundingBox?.bottom?.let { it < amountBb.top } == true }
+                                .sortedBy { it.boundingBox?.top ?: 0 }
+                                .joinToString(" ") { it.text.trim() }
+                                .trim().ifBlank { null }
+                        }
 
                         Log.d("MlKitOcr", "Final amount: $amount")
-                        if (cont.isActive) cont.resume(MlKitResult(result.text, amount))
+                        Log.d("MlKitOcr", "Name above amount: $nameAboveAmount")
+                        if (cont.isActive) cont.resume(MlKitResult(result.text, amount, nameAboveAmount))
                     }
                     .addOnFailureListener { e ->
                         Log.w("MlKitOcr", "Recognition failed", e)
@@ -373,6 +382,14 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         canvas.drawBitmap(scaled, 0f, 0f, paint)
         scaled.recycle()
         return out
+    }
+
+    // Paybox uses white background with dark text — Tesseract works natively.
+    // Scale 2× for accuracy; no colour inversion needed.
+    private fun preprocessForPayboxOcr(src: Bitmap): Bitmap {
+        val scaled = Bitmap.createScaledBitmap(src, src.width * 2, src.height * 2, true)
+        src.recycle()
+        return scaled
     }
 
     private fun ensureTessData(context: Context): String {

@@ -406,25 +406,29 @@ object BitShareParser {
             }
         }
 
-        if (dateRaw == null || time == null) {
-            Log.w(TAG, "Date/time not found (date='$dateRaw', time='$time') — using now")
+        if (dateRaw == null) {
+            Log.w(TAG, "Date not found — using now")
             return System.currentTimeMillis()
+        }
+        val resolvedTime = time ?: run {
+            Log.w(TAG, "Time not found for '$dateRaw' — defaulting to 00:00")
+            "00:00"
         }
 
         val dateNorm = dateRaw.replace('/', '.')
         val yearPart = dateNorm.substringAfterLast('.')
         return try {
             val fmt = if (yearPart.length == 4) dateTimeFormatLong else dateTimeFormatShort
-            val parsed = fmt.parse("$dateNorm $time")
+            val parsed = fmt.parse("$dateNorm $resolvedTime")
             if (parsed != null) {
-                Log.d(TAG, "Parsed date: '$dateNorm $time' → ${parsed.time}")
+                Log.d(TAG, "Parsed date: '$dateNorm $resolvedTime' → ${parsed.time}")
                 parsed.time
             } else {
-                Log.w(TAG, "Date parse returned null for '$dateNorm $time'")
+                Log.w(TAG, "Date parse returned null for '$dateNorm $resolvedTime'")
                 System.currentTimeMillis()
             }
         } catch (e: Exception) {
-            Log.w(TAG, "Date parse exception '$dateNorm $time': ${e.message}")
+            Log.w(TAG, "Date parse exception '$dateNorm $resolvedTime': ${e.message}")
             System.currentTimeMillis()
         }
     }
