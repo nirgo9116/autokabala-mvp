@@ -295,9 +295,11 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
 
                         val candidateBlocks = result.textBlocks.filter { block ->
                             val text = block.text.normDigits().trim()
-                            // Strip one leading non-alphanumeric char (misread ₪ → „ etc.)
-                            val core = if (text.isNotEmpty() && !text.first().isLetterOrDigit())
-                                text.drop(1) else text
+                            // Strip one leading non-digit char (handles misread ₪ → „, B, etc.)
+                            val core = if (text.isNotEmpty() && !text.first().isDigit()) {
+                                val rest = text.drop(1).replace(",", "")
+                                if (rest.isNotEmpty() && rest.all { it.isDigit() }) text.drop(1) else text
+                            } else text
                             // Strip commas to handle thousand-separator format (e.g. "1,000")
                             val coreDigits = core.replace(",", "")
                             coreDigits.length in 1..5 &&

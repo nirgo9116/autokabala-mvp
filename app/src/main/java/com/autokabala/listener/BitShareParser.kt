@@ -192,20 +192,18 @@ object BitShareParser {
                 mixedWordPattern.matcher(nameSection).let { hw ->
                     while (hw.find()) words.add(hw.group())
                 }
-                // Check next line if fewer than 3 words captured
-                val capturedWordCount = (m.group(1) ?: "")
-                    .trim().split(Regex("\\s+")).filter { it.isNotBlank() }.size
-                if (capturedWordCount < 3) {
-                    val nextLine = lines.getOrNull(idx + 1)
-                    if (nextLine != null &&
-                        nextLine.isNotBlank() &&
-                        !nextLine.any { it.isDigit() } &&
-                        !nextLine.contains("₪") &&
-                        !datePattern.matcher(nextLine).find()
-                    ) {
-                        mixedWordPattern.matcher(nextLine).let { hw ->
-                            while (hw.find()) words.add(hw.group())
-                        }
+                // Always check the next line — Bit wraps long display names onto a second line
+                // (e.g. "יריב ה' באייר 126 ק3" / "טגנסקי", "שני החשמונאים 8 קג" / "פנחס").
+                // We include it unconditionally as long as it contains no digits, ₪, or date.
+                val nextLine = lines.getOrNull(idx + 1)
+                if (nextLine != null &&
+                    nextLine.isNotBlank() &&
+                    !nextLine.any { it.isDigit() } &&
+                    !nextLine.contains("₪") &&
+                    !datePattern.matcher(nextLine).find()
+                ) {
+                    mixedWordPattern.matcher(nextLine).let { hw ->
+                        while (hw.find()) words.add(hw.group())
                     }
                 }
                 if (words.isEmpty()) continue
