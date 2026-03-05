@@ -68,7 +68,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
             val firstNameMatches = if (senderFirst.isBlank()) emptyList() else {
                 clients.filter { client ->
                     val clientWords = client.name.trim().split(Regex("\\s+")).filter { it.isNotBlank() }
-                    clientWords.any { it.equals(senderFirst, ignoreCase = true) }
+                    clientWords.any { wordsMatch(it, senderFirst) }
                 }
             }
 
@@ -82,7 +82,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                 firstNameMatches.filter { client ->
                     val clientWords = client.name.trim().split(Regex("\\s+")).filter { it.isNotBlank() }
                     clientWords.size >= 2 && clientWords.all { cw ->
-                        senderWords.any { sw -> sw.equals(cw, ignoreCase = true) }
+                        senderWords.any { sw -> wordsMatch(sw, cw) }
                     }
                 }
             } else emptyList()
@@ -255,6 +255,20 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                 _isProcessingShare.value = false
             }
         }
+    }
+
+    // ── Name matching ─────────────────────────────────────────────────────────
+
+    // Exact match for Hebrew; prefix match for Latin words (handles OCR artifact מ → n,
+    // e.g. "Hanitan" matches "Hanita", "lazarn" matches "lazar").
+    private fun wordsMatch(a: String, b: String): Boolean {
+        if (a.equals(b, ignoreCase = true)) return true
+        val isLatin = a.any { it in 'A'..'Z' || it in 'a'..'z' } &&
+                      b.any { it in 'A'..'Z' || it in 'a'..'z' }
+        if (!isLatin) return false
+        val shorter = if (a.length <= b.length) a else b
+        val longer  = if (a.length <= b.length) b else a
+        return shorter.length >= 3 && longer.startsWith(shorter, ignoreCase = true)
     }
 
     // ── ML Kit: Latin script, LTR — accurate numbers & dates ─────────────────
