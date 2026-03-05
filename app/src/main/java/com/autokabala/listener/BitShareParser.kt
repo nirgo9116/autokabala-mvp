@@ -9,13 +9,25 @@ object BitShareParser {
 
     private const val TAG = "BitShareParser"
 
-    // Names: 1–3 Hebrew words (supports business names like "גלית אלי טיפול").
-    // \s* after מ handles OCR that may insert a space between the preposition and the name.
-    private val nameReceivedPattern = Pattern.compile("""נשלחו לך מ\s*([א-ת]{2,15}(?:\s+[א-ת]{2,15}){0,2})""")
+    // Names: 1–3 Hebrew OR Latin words (supports mixed-language names like "Reut Lazar").
+    // [A-Za-z]{0,3} after מ handles OCR artifact where Tesseract inserts a stray Latin char
+    // (e.g. "נשלחו לך מm מיכאל" — the "m" is a misread of the leading letter of the name).
+    private val nameReceivedPattern = Pattern.compile(
+        """נשלחו לך מ\s*[A-Za-z]{0,3}\s*([\u05D0-\u05EAA-Za-z]{2,}(?:\s+[\u05D0-\u05EAA-Za-z']{2,}){0,2})"""
+    )
 
-    // Matches any Hebrew word of 2–15 characters (used to extract all name words from a line)
+    // "ביקשת מ [name]" — payment request you sent; captured when they pay you back.
+    private val nameRequestedPattern = Pattern.compile(
+        """ביקשת מ\s*([\u05D0-\u05EAA-Za-z]{2,}(?:\s+[\u05D0-\u05EAA-Za-z']{2,}){0,2})"""
+    )
+
+    // Matches any Hebrew OR Latin word of 2+ characters (used to extract name words from a line)
+    private val mixedWordPattern    = Pattern.compile("""[\u05D0-\u05EAA-Za-z']{2,}""")
+    // Keep Hebrew-only pattern for amount-line exclusion logic
     private val hebrewWordPattern   = Pattern.compile("""[א-ת]{2,15}""")
-    private val nameSentYouPattern   = Pattern.compile("""([א-ת]{2,15}(?:\s+[א-ת]{2,15}){0,2})\s+שלח[ה]?\s+לך""")
+    private val nameSentYouPattern  = Pattern.compile(
+        """([\u05D0-\u05EAA-Za-z]{2,}(?:\s+[\u05D0-\u05EAA-Za-z']{2,}){0,2})\s+שלח[ה]?\s+לך"""
+    )
 
     // Amount patterns ─────────────────────────────────────────────────────────
     // Merged: collects all digit/comma/space chars before ₪ — handles OCR splitting "59₪" → "5 9₪".
@@ -60,7 +72,7 @@ object BitShareParser {
 
         Log.d(TAG, "Hebrew lines: ${hebrewLines.joinToString(" | ")}")
 
-        val senderName = extractSenderName(hebrewLines) ?: run {
+        val senderName = extractSenderName(hebrewLines, latinLines) ?: run {
             Log.w(TAG, "Cannot extract sender name"); return null
         }
 
@@ -98,22 +110,89 @@ object BitShareParser {
 
     // ── Name ──────────────────────────────────────────────────────────────────
 
-    private fun extractSenderName(lines: List<String>): String? {
+    // Try Tesseract lines first; fall back to ML Kit lines for Latin names.
+    private fun extractSenderName(lines: List<String>, fallbackLines: List<String> = emptyList()): String? {
+        val tessName = tryExtractNameFromLines(lines)
+
+        if (tessName != null) {
+            // If the Tesseract name is composed entirely of Hebrew characters, Tesseract may have
+            // garbled a Latin name (e.g. "Maya Wayn" → "חעץהולץ העבוא").
+            // When Bit context is confirmed and ML Kit has a valid Latin name, prefer it.
+            val isAllHebrew = tessName.all {
+                it in '\u05D0'..'\u05EA' || it in '\u05F0'..'\u05F4' || it == ' '
+            }
+            val hasBitContext = lines.any { it.startsWith("נשלחו לך מ") || it.startsWith("ביקשת מ") }
+            if (isAllHebrew && hasBitContext && fallbackLines !== lines) {
+                tryExtractLatinName(fallbackLines)?.let { latinName ->
+                    // Require at least 2 words (first + last name).
+                    // Single-word matches like "bit" (the app logo) are OCR noise, not names.
+                    if (latinName.contains(' ')) {
+                        Log.d(TAG, "Preferring ML Kit Latin '$latinName' over garbled Tesseract Hebrew '$tessName'")
+                        return latinName
+                    }
+                }
+            }
+            return tessName
+        }
+
+        // Tesseract found nothing — try ML Kit patterns
+        if (fallbackLines !== lines) tryExtractNameFromLines(fallbackLines)?.let { return it }
+
+        // Last resort: Tesseract found Bit context but garbled the Latin name →
+        // extract leading Latin words from ML Kit's first line.
+        val hasBitContext = lines.any { it.startsWith("נשלחו לך מ") || it.startsWith("ביקשת מ") }
+        if (hasBitContext) tryExtractLatinName(fallbackLines)?.let { return it }
+        return null
+    }
+
+    // Extracts "FirstName LastName" from ML Kit output when the name is Latin.
+    // Accepts both ProperCase ("Maya Waynn") and lowercase-first ("michal Shpiegel").
+    // Also handles hyphenated names ("Anne-Marie") and apostrophe names ("O'Connor" prefix).
+    // Stops at the first token that isn't pure letters/hyphen/apostrophe (digits, Hebrew, etc.).
+    private fun tryExtractLatinName(lines: List<String>): String? {
+        val firstLine = lines.firstOrNull() ?: return null
+        // All words may start with upper or lower case (handles "michal Shpiegel").
+        // Separator between words: space, hyphen, or apostrophe.
+        val m = Pattern.compile("""^([A-Za-z][a-z]+(?:[ '\-][A-Za-z][a-z]+)*)""").matcher(firstLine)
+        if (m.find()) {
+            var name = m.group(1)?.trim() ?: return null
+
+            // Strip trailing short all-lowercase words — OCR garbage from Hebrew content
+            // (e.g. "Reut Lazarn inu" → "Reut Lazarn"; "inu" is 3 chars, all-lowercase).
+            // Legitimate names: ProperCase ("Cohen", "Dan") or long enough ("shpiegel" = 8 chars).
+            // We never remove the first word (size > 1 guard).
+            val words = name.split(" ").toMutableList()
+            while (words.size > 1) {
+                val last = words.last()
+                if (last.length <= 4 && last.all { it.isLowerCase() }) words.removeAt(words.lastIndex)
+                else break
+            }
+            name = words.joinToString(" ")
+
+            // Collapse doubled trailing letter per word — ML Kit OCR artifact (e.g. "Waynn" → "Wayn").
+            name = name.split(" ").joinToString(" ") { word ->
+                word.replace(Regex("([A-Za-z])\\1$")) { it.groupValues[1] }
+            }
+
+            if (name.isNotBlank()) {
+                Log.d(TAG, "Name [latin-fallback]: '$name'")
+                return name
+            }
+        }
+        return null
+    }
+
+    private fun tryExtractNameFromLines(lines: List<String>): String? {
         for ((idx, line) in lines.withIndex()) {
+            // "נשלחו לך מ [name]" — payment received
             val m = nameReceivedPattern.matcher(line)
             if (m.find()) {
-                // Start extracting from where the captured group begins (right after "נשלחו לך מ\s*").
                 val nameSection = line.substring(m.start(1))
                 val words = mutableListOf<String>()
-                hebrewWordPattern.matcher(nameSection).let { hw ->
+                mixedWordPattern.matcher(nameSection).let { hw ->
                     while (hw.find()) words.add(hw.group())
                 }
-
-                // The Bit UI sometimes wraps the sender description onto a second line
-                // (e.g. "נשלחו לך משני החשמונאים 8 קג" / "פנחס").
-                // Only look at the next line when the regex captured < 3 words:
-                // nameReceivedPattern allows up to 3 words — if 3 were captured the name
-                // is already complete and the next line is payment purpose text (e.g. "תשל").
+                // Check next line if fewer than 3 words captured
                 val capturedWordCount = (m.group(1) ?: "")
                     .trim().split(Regex("\\s+")).filter { it.isNotBlank() }.size
                 if (capturedWordCount < 3) {
@@ -124,20 +203,34 @@ object BitShareParser {
                         !nextLine.contains("₪") &&
                         !datePattern.matcher(nextLine).find()
                     ) {
-                        hebrewWordPattern.matcher(nextLine).let { hw ->
+                        mixedWordPattern.matcher(nextLine).let { hw ->
                             while (hw.find()) words.add(hw.group())
                         }
                     }
                 }
-
                 if (words.isEmpty()) continue
+                // Remove leading OCR artifact: a ≤2-char word before a longer name word
+                // (e.g. "וח מיכאל יובל" → "מיכאל יובל", caused by Tesseract misreading Latin 'm')
+                if (words.size >= 2 && words[0].length <= 2 && words[1].length >= 3) words.removeAt(0)
                 val name = words.joinToString(" ")
                 Log.d(TAG, "Name [received]: '$name'")
                 return name
             }
-            val m2 = nameSentYouPattern.matcher(line)
+
+            // "ביקשת מ [name]" — payment request you sent (captured when they pay)
+            val m2 = nameRequestedPattern.matcher(line)
             if (m2.find()) {
                 val name = m2.group(1)?.trim()
+                if (!name.isNullOrBlank()) {
+                    Log.d(TAG, "Name [requested]: '$name'")
+                    return name
+                }
+            }
+
+            // "[name] שלח/ה לך"
+            val m3 = nameSentYouPattern.matcher(line)
+            if (m3.find()) {
+                val name = m3.group(1)?.trim()
                 Log.d(TAG, "Name [sentYou]: '$name'")
                 return name
             }
@@ -149,7 +242,9 @@ object BitShareParser {
 
     private fun extractAmount(lines: List<String>): Double? {
         val nameIdx = lines.indexOfFirst {
-            nameReceivedPattern.matcher(it).find() || nameSentYouPattern.matcher(it).find()
+            nameReceivedPattern.matcher(it).find() ||
+            nameRequestedPattern.matcher(it).find() ||
+            nameSentYouPattern.matcher(it).find()
         }
 
         // Log all numbers per line for debugging
