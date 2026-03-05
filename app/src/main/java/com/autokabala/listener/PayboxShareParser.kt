@@ -147,11 +147,12 @@ object PayboxShareParser {
     }
 
     // Extract Latin words from ML Kit's spatial bounding-box hint (blocks above the amount).
+    // Require uppercase-first + at least 2 lowercase (≥3 chars total) to avoid OCR artifacts
+    // where Hebrew letters are misread as short Latin sequences (e.g. "ל"→"l", "ט"→"T" → "Ty").
     private fun extractLatinFromHint(hint: String?): String? {
         if (hint.isNullOrBlank()) return null
-        val words = Regex("""[A-Za-z][a-z]+""").findAll(hint)
+        val words = Regex("""[A-Z][a-z]{2,}""").findAll(hint)
             .map { it.value }
-            .filter { it.length >= 2 }
             .toList()
         return if (words.isNotEmpty()) words.joinToString(" ").also {
             Log.d(TAG, "Latin from bbox hint: '$it'")

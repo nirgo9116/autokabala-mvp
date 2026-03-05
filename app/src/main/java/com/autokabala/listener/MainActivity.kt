@@ -120,9 +120,12 @@ class MainActivity : ComponentActivity() {
     }
 
     private fun handleShareIntent(intent: Intent?) {
-        if (intent?.action == Intent.ACTION_SEND && intent.type?.startsWith("image/") == true) {
+        if (intent?.action == Intent.ACTION_SEND &&
+            (intent.type?.startsWith("image/") == true || intent.type == "*/*")) {
             @Suppress("DEPRECATION")
+            // Some apps (e.g. WhatsApp) use EXTRA_STREAM; others (e.g. Paybox) use ClipData.
             val uri = intent.getParcelableExtra<Uri>(Intent.EXTRA_STREAM)
+                ?: intent.clipData?.getItemAt(0)?.uri
             if (uri != null) {
                 val viewModel = ViewModelProvider(
                     this, MainViewModelFactory(application)
