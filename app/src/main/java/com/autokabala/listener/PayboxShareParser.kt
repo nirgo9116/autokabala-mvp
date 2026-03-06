@@ -19,7 +19,7 @@ object PayboxShareParser {
     private val anyNumber      = Pattern.compile("""([\d,]+\.?\d*)""")
 
     // Date/time — supports . and / separators
-    private val datePattern         = Pattern.compile("""(\d{1,2}[./]\d{1,2}[./]\d{2,4})""")
+    private val datePattern         = Pattern.compile("""(\d{1,2}[./]\d{1,2}[./]\d{2,4})(?!\d)""")
     private val timePattern         = Pattern.compile("""(\d{1,2}:\d{2})""")
     private val dateTimeFormatShort = SimpleDateFormat("dd.MM.yy HH:mm",   Locale.getDefault())
     private val dateTimeFormatLong  = SimpleDateFormat("dd.MM.yyyy HH:mm", Locale.getDefault())

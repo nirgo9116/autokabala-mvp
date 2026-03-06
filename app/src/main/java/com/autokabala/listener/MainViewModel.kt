@@ -302,6 +302,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                         //  4. Validate the result is in the range 10–99 999.
                         // O/o → 0 normalization handles common OCR digit misreads.
                         fun String.normDigits() = replace('O', '0').replace('o', '0')
+                            .replace('l', '1').replace('I', '1')
 
                         Log.d("MlKitOcr", "Blocks: ${result.textBlocks.map { "'${it.text}' box=${it.boundingBox}" }}")
 

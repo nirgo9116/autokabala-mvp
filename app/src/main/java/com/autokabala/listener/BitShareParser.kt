@@ -48,7 +48,7 @@ object BitShareParser {
 
     // Date / time ─────────────────────────────────────────────────────────────
     // Supports dot (01.03.26) and slash (01/03/26), 1–2 digit day/month
-    private val datePattern         = Pattern.compile("""(\d{1,2}[./]\d{1,2}[./]\d{2,4})""")
+    private val datePattern         = Pattern.compile("""(\d{1,2}[./]\d{1,2}[./]\d{2,4})(?!\d)""")
     private val timePattern         = Pattern.compile("""(\d{1,2}:\d{2})""")
     private val dateTimeFormatShort = SimpleDateFormat("dd.MM.yy HH:mm", Locale.getDefault())
     private val dateTimeFormatLong  = SimpleDateFormat("dd.MM.yyyy HH:mm", Locale.getDefault())
