@@ -151,7 +151,7 @@ object PayboxShareParser {
     // where Hebrew letters are misread as short Latin sequences (e.g. "ל"→"l", "ט"→"T" → "Ty").
     private fun extractLatinFromHint(hint: String?): String? {
         if (hint.isNullOrBlank()) return null
-        val words = Regex("""[A-Z][a-z]{2,}""").findAll(hint)
+        val words = Regex("""[A-Za-z][a-z]{2,}""").findAll(hint)
             .map { it.value }
             .toList()
         return if (words.isNotEmpty()) words.joinToString(" ").also {
