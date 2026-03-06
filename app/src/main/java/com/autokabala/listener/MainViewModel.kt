@@ -23,6 +23,8 @@ import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.combine
+import kotlinx.coroutines.flow.flatMapLatest
+import kotlinx.coroutines.flow.flowOf
 import kotlinx.coroutines.flow.receiveAsFlow
 import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.Dispatchers
@@ -32,6 +34,8 @@ import kotlinx.coroutines.withContext
 import java.io.File
 import java.io.FileOutputStream
 import kotlin.coroutines.resume
+
+data class OverdueClient(val client: ClientEntity, val daysSinceLastPayment: Int)
 
 // Represents the result of matching a payment to existing clients
 sealed class MatchResult {
@@ -46,9 +50,36 @@ data class PaymentProcessingState(
     val matchResult: MatchResult
 )
 
+enum class Screen { MAIN, CLIENT_DETAIL }
+
 class MainViewModel(application: Application) : AndroidViewModel(application) {
 
     private val receiptRepository = (application as AutoKabalaApplication).receiptRepository
+
+    // --- Navigation State ---
+    private val _currentScreen = MutableStateFlow(Screen.MAIN)
+    val currentScreen: StateFlow<Screen> = _currentScreen.asStateFlow()
+
+    private val _selectedClient = MutableStateFlow<ClientEntity?>(null)
+    val selectedClient: StateFlow<ClientEntity?> = _selectedClient.asStateFlow()
+
+    private val _selectedTabIndex = MutableStateFlow(0)
+    val selectedTabIndex: StateFlow<Int> = _selectedTabIndex.asStateFlow()
+
+    fun onTabSelected(index: Int) { _selectedTabIndex.value = index }
+
+    // --- Payment History (last 14 days) ---
+    private val historyWindowStart = System.currentTimeMillis() - 14L * 24 * 3600 * 1000
+    val paymentHistory: StateFlow<List<PaymentEntity>> =
+        receiptRepository.getRecentPayments(since = historyWindowStart)
+            .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), emptyList())
+
+    @OptIn(kotlinx.coroutines.ExperimentalCoroutinesApi::class)
+    val clientPayments: StateFlow<List<PaymentEntity>> =
+        _selectedClient.flatMapLatest { client ->
+            if (client == null) flowOf(emptyList())
+            else receiptRepository.getPaymentsByClientId(client.id)
+        }.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), emptyList())
 
     // --- UI State ---
     private val pendingPayments: StateFlow<List<PaymentEntity>> = receiptRepository.pendingPayments
@@ -56,6 +87,30 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
 
     val allClients: StateFlow<List<ClientEntity>> = receiptRepository.allClients
         .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), emptyList())
+
+    // --- Overdue clients ---
+    private val _overdueFilterDays = MutableStateFlow(7)
+    val overdueFilterDays: StateFlow<Int> = _overdueFilterDays.asStateFlow()
+
+    val overdueClients: StateFlow<List<OverdueClient>> = combine(
+        receiptRepository.getLastPaymentPerClient(),
+        allClients,
+        _overdueFilterDays
+    ) { lastPayments, clients, filterDays ->
+        val now = System.currentTimeMillis()
+        val filterMs = filterDays.toLong() * 24 * 3600 * 1000
+        val clientMap = clients.associateBy { it.id }
+        lastPayments
+            .filter { (now - it.lastPaymentTime) > filterMs }
+            .mapNotNull { lp ->
+                val client = clientMap[lp.clientId] ?: return@mapNotNull null
+                val days = ((now - lp.lastPaymentTime) / (24L * 3600 * 1000)).toInt()
+                OverdueClient(client, days)
+            }
+            .sortedByDescending { it.daysSinceLastPayment }
+    }.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), emptyList())
+
+    fun onOverdueFilterChanged(days: Int) { _overdueFilterDays.value = days }
 
     val paymentProcessingStates: StateFlow<List<PaymentProcessingState>> = combine(
         pendingPayments, allClients
@@ -176,6 +231,24 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         viewModelScope.launch {
             receiptRepository.addFakePayment()
         }
+    }
+
+    fun onOpenClientDetail(client: ClientEntity) {
+        _selectedClient.value = client
+        _currentScreen.value = Screen.CLIENT_DETAIL
+        if (client.phone == null) {
+            viewModelScope.launch {
+                val phone = receiptRepository.fetchAndCachePhone(client.id)
+                if (phone != null) {
+                    _selectedClient.value = _selectedClient.value?.copy(phone = phone)
+                }
+            }
+        }
+    }
+
+    fun onBackToMain() {
+        _currentScreen.value = Screen.MAIN
+        _selectedClient.value = null
     }
 
     fun onShareIntentReceived(imageUri: Uri) {

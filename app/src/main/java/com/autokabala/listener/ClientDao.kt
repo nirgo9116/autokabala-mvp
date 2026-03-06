@@ -35,19 +35,24 @@ interface ClientDao {
     @Query("DELETE FROM clients")
     suspend fun deleteAll()
 
-    @Query("SELECT id FROM clients WHERE autoSend = 1")
-    suspend fun getAutoSendIds(): List<String>
+    @Query("SELECT * FROM clients")
+    suspend fun getAllClientsSnapshot(): List<ClientEntity>
 
     /**
      * Safely replaces all clients in the database with a new list,
-     * preserving the autoSend flag for existing clients.
+     * preserving the autoSend flag and locally-cached phone for existing clients.
      */
     @Transaction
     suspend fun syncAll(clients: List<ClientEntity>) {
-        val autoSendIds = getAutoSendIds().toSet()
+        val existing = getAllClientsSnapshot()
+        val autoSendIds = existing.filter { it.autoSend }.map { it.id }.toSet()
+        val phoneMap = existing.filter { it.phone != null }.associate { it.id to it.phone!! }
         deleteAll()
         insertAll(clients.map { client ->
-            if (client.id in autoSendIds) client.copy(autoSend = true) else client
+            client.copy(
+                autoSend = client.id in autoSendIds,
+                phone = client.phone ?: phoneMap[client.id]
+            )
         })
     }
 }

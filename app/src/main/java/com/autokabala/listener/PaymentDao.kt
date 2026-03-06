@@ -1,10 +1,16 @@
 package com.autokabala.listener
 
+import androidx.room.ColumnInfo
 import androidx.room.Dao
 import androidx.room.Insert
 import androidx.room.OnConflictStrategy
 import androidx.room.Query
 import kotlinx.coroutines.flow.Flow
+
+data class ClientLastPayment(
+    @ColumnInfo(name = "clientId") val clientId: String,
+    @ColumnInfo(name = "lastPaymentTime") val lastPaymentTime: Long
+)
 
 @Dao
 interface PaymentDao {
@@ -34,4 +40,16 @@ interface PaymentDao {
      */
     @Query("UPDATE pending_payments SET status = :newStatus WHERE id = :paymentId")
     suspend fun updatePaymentStatus(paymentId: Int, newStatus: String)
+
+    @Query("UPDATE pending_payments SET clientId=:clientId, clientName=:clientName, docNum=:docNum, docUrl=:docUrl WHERE id=:id")
+    suspend fun updatePaymentReceipt(id: Int, clientId: String, clientName: String, docNum: String?, docUrl: String?)
+
+    @Query("SELECT * FROM pending_payments WHERE status != 'ignored' AND timestamp >= :since ORDER BY timestamp DESC")
+    fun getRecentPayments(since: Long): Flow<List<PaymentEntity>>
+
+    @Query("SELECT * FROM pending_payments WHERE clientId = :clientId ORDER BY timestamp DESC")
+    fun getPaymentsByClientId(clientId: String): Flow<List<PaymentEntity>>
+
+    @Query("SELECT clientId, MAX(timestamp) AS lastPaymentTime FROM pending_payments WHERE clientId IS NOT NULL AND status != 'ignored' GROUP BY clientId")
+    fun getLastPaymentPerClient(): Flow<List<ClientLastPayment>>
 }

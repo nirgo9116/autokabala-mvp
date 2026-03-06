@@ -38,6 +38,13 @@ class ReceiptRepository(private val paymentDao: PaymentDao, private val clientDa
         )
         val doc = ReceiptApiClient.issueReceipt(paymentData, client.id) ?: return null
         paymentDao.updatePaymentStatus(payment.id, "processed")
+        paymentDao.updatePaymentReceipt(
+            id         = payment.id,
+            clientId   = client.id,
+            clientName = client.name,
+            docNum     = doc.docNum.ifBlank { null },
+            docUrl     = doc.docUrl.ifBlank { null }
+        )
         val emailSent = if (client.autoSend && doc.docNum.isNotBlank()) {
             ReceiptApiClient.sendDocumentByEmail(doc.docNum)
         } else false
@@ -89,6 +96,11 @@ class ReceiptRepository(private val paymentDao: PaymentDao, private val clientDa
         paymentDao.insertPayment(fakePayment)
         Log.d("Repository", "Added fake payment for $randomName")
     }
+
+    // --- Payment History ---
+    fun getRecentPayments(since: Long): Flow<List<PaymentEntity>> = paymentDao.getRecentPayments(since)
+    fun getPaymentsByClientId(clientId: String): Flow<List<PaymentEntity>> = paymentDao.getPaymentsByClientId(clientId)
+    fun getLastPaymentPerClient(): Flow<List<ClientLastPayment>> = paymentDao.getLastPaymentPerClient()
 
     // --- Clients ---
     val allClients: Flow<List<ClientEntity>> = clientDao.getAllClients()
