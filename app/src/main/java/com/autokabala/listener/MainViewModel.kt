@@ -233,6 +233,12 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         }
     }
 
+    fun onAddFakeOverduePaymentClicked() {
+        viewModelScope.launch {
+            receiptRepository.addFakeOverduePayment()
+        }
+    }
+
     fun onOpenClientDetail(client: ClientEntity) {
         _selectedClient.value = client
         _currentScreen.value = Screen.CLIENT_DETAIL

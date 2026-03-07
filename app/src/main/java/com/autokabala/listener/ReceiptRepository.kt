@@ -82,19 +82,42 @@ class ReceiptRepository(private val paymentDao: PaymentDao, private val clientDa
         paymentDao.deletePayment(payment.id)
     }
 
-    // --- Test Function ---
+    // --- Test Functions ---
     suspend fun addFakePayment() {
         val names = listOf("Danny", "Moshe", "Yossi", "ניר", "סמדר בדיקה", "Elad", "בלהבלה", "ניר")
         val randomName = names.random()
         val fakePayment = PaymentEntity(
             source = "bit",
             senderName = randomName,
-            amount = 1.0, // Set to 1 NIS for easier testing
+            amount = 1.0,
             isConfirmed = true,
             timestamp = System.currentTimeMillis()
         )
         paymentDao.insertPayment(fakePayment)
         Log.d("Repository", "Added fake payment for $randomName")
+    }
+
+    suspend fun addFakeOverduePayment() {
+        val clients = clientDao.getAllClientsSnapshot()
+        if (clients.isEmpty()) {
+            Log.w("Repository", "No clients — cannot add fake overdue payment")
+            return
+        }
+        val client = clients.random()
+        val daysAgo = listOf(8, 12, 20, 36, 50).random()
+        val fakePayment = PaymentEntity(
+            source = listOf("bit", "paybox").random(),
+            senderName = client.name,
+            amount = listOf(150.0, 200.0, 250.0, 300.0, 350.0).random(),
+            isConfirmed = true,
+            timestamp = System.currentTimeMillis() - daysAgo.toLong() * 24 * 3600 * 1000,
+            status = "processed",
+            clientId = client.id,
+            clientName = client.name,
+            docNum = "TEST-${(1000..9999).random()}"
+        )
+        paymentDao.insertPayment(fakePayment)
+        Log.d("Repository", "Added fake overdue payment: ${client.name}, $daysAgo days ago")
     }
 
     // --- Payment History ---

@@ -343,7 +343,8 @@ private fun MainTabsScreen(
                     onToggleListener = { viewModel.onEnableDisableClicked() },
                     onOpenSettings = onOpenSettingsClicked,
                     onSyncClients = { viewModel.onSyncClientsClicked() },
-                    onAddFakePayment = { viewModel.onAddFakePaymentClicked() }
+                    onAddFakePayment = { viewModel.onAddFakePaymentClicked() },
+                    onAddFakeOverduePayment = { viewModel.onAddFakeOverduePaymentClicked() }
                 )
                 2 -> HistoryScreen(
                     modifier = Modifier.padding(innerPadding),
@@ -1370,7 +1371,8 @@ fun SettingsTab(
     onToggleListener: () -> Unit,
     onOpenSettings: () -> Unit,
     onSyncClients: () -> Unit,
-    onAddFakePayment: () -> Unit
+    onAddFakePayment: () -> Unit,
+    onAddFakeOverduePayment: () -> Unit
 ) {
     Column(
         modifier = modifier.fillMaxSize().padding(16.dp),
@@ -1433,6 +1435,9 @@ fun SettingsTab(
 
         OutlinedButton(onClick = onAddFakePayment, modifier = Modifier.fillMaxWidth()) {
             Text("הוסף תשלום לדוגמה")
+        }
+        OutlinedButton(onClick = onAddFakeOverduePayment, modifier = Modifier.fillMaxWidth()) {
+            Text("הוסף תשלום ישן (בדיקת תזכורות)")
         }
     }
 }
