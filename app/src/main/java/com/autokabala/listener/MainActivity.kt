@@ -84,6 +84,7 @@ import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalLifecycleOwner
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import androidx.core.app.NotificationManagerCompat
 import androidx.lifecycle.Lifecycle
@@ -969,16 +970,19 @@ fun HistoryScreen(
     }
 
     Column(modifier = modifier.fillMaxSize()) {
-        Spacer(Modifier.height(16.dp))
+        Spacer(Modifier.height(28.dp))
         Text(
             "היסטוריית תשלומים",
             style = MaterialTheme.typography.headlineSmall,
             fontWeight = FontWeight.Bold,
-            modifier = Modifier.padding(horizontal = 16.dp)
+            textAlign = TextAlign.Center,
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(horizontal = 16.dp)
         )
-        Spacer(Modifier.height(8.dp))
+        Spacer(Modifier.height(16.dp))
 
-        // Search bar
+        // Search bar — oval shape
         OutlinedTextField(
             value = searchQuery,
             onValueChange = { searchQuery = it },
@@ -987,6 +991,7 @@ fun HistoryScreen(
                 .padding(horizontal = 16.dp),
             placeholder = { Text("חפש לקוח...") },
             singleLine = true,
+            shape = RoundedCornerShape(50),
             leadingIcon = { Icon(Icons.Default.Search, contentDescription = null) },
             trailingIcon = if (searchQuery.isNotEmpty()) {
                 { IconButton(onClick = { searchQuery = "" }) { Icon(Icons.Default.Clear, contentDescription = "נקה") } }

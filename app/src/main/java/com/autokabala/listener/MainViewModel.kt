@@ -68,8 +68,8 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
 
     fun onTabSelected(index: Int) { _selectedTabIndex.value = index }
 
-    // --- Payment History (last 14 days) ---
-    private val historyWindowStart = System.currentTimeMillis() - 14L * 24 * 3600 * 1000
+    // --- Payment History (last 90 days) ---
+    private val historyWindowStart = System.currentTimeMillis() - 90L * 24 * 3600 * 1000
     val paymentHistory: StateFlow<List<PaymentEntity>> =
         receiptRepository.getRecentPayments(since = historyWindowStart)
             .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), emptyList())
