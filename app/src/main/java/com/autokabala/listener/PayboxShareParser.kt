@@ -55,8 +55,8 @@ object PayboxShareParser {
             return null
         }
 
-        // Combine Tesseract + ML Kit lines for timestamp — ML Kit reads dates more accurately
-        val timestamp = extractTimestamp(hebrewLines + latinLines)
+        // ML Kit first for timestamp — more accurate on digits; Tesseract as fallback only
+        val timestamp = extractTimestamp(latinLines, fallbackLines = hebrewLines)
 
         Log.d(TAG, "Result → name='$senderName', amount=$amount, ts=$timestamp")
         Log.d(TAG, "=== PayboxParser END ===")
@@ -185,41 +185,43 @@ object PayboxShareParser {
 
     // ── Timestamp ─────────────────────────────────────────────────────────────
 
-    private fun extractTimestamp(lines: List<String>): Long {
-        // Scan ALL lines and prefer a valid-year date over a garbled one.
-        // Tesseract sometimes adds/swaps digits in the year (e.g. "2025" → "20785"),
-        // while ML Kit reads the date row accurately. Combining both and preferring the
-        // valid-year candidate fixes this.
-        var dateRaw:   String? = null
-        var dateYear:  Int?    = null
-        var time:      String? = null
+    private fun extractTimestamp(primaryLines: List<String>, fallbackLines: List<String> = emptyList()): Long {
+        // Scan ML Kit lines first — accurate on digits/dates.
+        // Only fall back to Tesseract lines if ML Kit yields no valid date.
+        var dateRaw:  String? = null
+        var dateYear: Int?    = null
+        var time:     String? = null
 
-        for (line in lines) {
-            val alreadyValid = dateYear != null && dateYear in 2020..2035
-            if (!alreadyValid) {
-                val m = datePattern.matcher(line)
-                if (m.find()) {
-                    val candidate = m.group(1)!!
-                    val yearStr = candidate.substringAfterLast('/').substringAfterLast('.')
-                    val year = yearStr.toIntOrNull()
-                    if (year != null) {
-                        // Prefer valid-year candidate; keep first candidate if none are valid
-                        if (dateRaw == null || year in 2020..2035) {
+        fun scanLines(lines: List<String>) {
+            for (line in lines) {
+                if (dateRaw == null) {
+                    val m = datePattern.matcher(line)
+                    if (m.find()) {
+                        val candidate = m.group(1)!!
+                        val yearStr = candidate.substringAfterLast('/').substringAfterLast('.')
+                        val year = yearStr.toIntOrNull()
+                        if (year != null) {
                             dateRaw  = candidate
                             dateYear = year
-                            Log.d(TAG, "Date candidate: '$candidate' (year=$year, valid=${year in 2020..2035})")
+                            Log.d(TAG, "Date candidate: '$candidate' (year=$year)")
                         }
                     }
                 }
-            }
-            if (time == null) {
-                val m = timePattern.matcher(line)
-                if (m.find()) {
-                    val c = m.group(1)
-                    val hour = c?.substringBefore(":")?.toIntOrNull() ?: 99
-                    if (hour in 0..23) { time = c; Log.d(TAG, "Time: '$time'") }
+                if (time == null) {
+                    val m = timePattern.matcher(line)
+                    if (m.find()) {
+                        val c = m.group(1)
+                        val hour = c?.substringBefore(":")?.toIntOrNull() ?: 99
+                        if (hour in 0..23) { time = c; Log.d(TAG, "Time: '$time'") }
+                    }
                 }
             }
+        }
+
+        scanLines(primaryLines)
+        if (dateRaw == null) {
+            Log.d(TAG, "Date not found in ML Kit lines — trying Tesseract fallback")
+            scanLines(fallbackLines)
         }
 
         if (dateRaw == null) {
@@ -227,8 +229,7 @@ object PayboxShareParser {
             return System.currentTimeMillis()
         }
         if (dateYear != null && dateYear !in 2020..2035) {
-            Log.w(TAG, "Year '$dateYear' out of expected range — using now")
-            return System.currentTimeMillis()
+            Log.w(TAG, "Year '$dateYear' unusual — using as-is")
         }
 
         val resolvedTime = time ?: run {
