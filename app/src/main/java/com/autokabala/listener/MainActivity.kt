@@ -954,8 +954,14 @@ fun HistoryScreen(
         val q = searchQuery.trim()
         if (q.isBlank()) emptyList()
         else allClients
-            .filter { it.name.contains(q, ignoreCase = true) }
-            .sortedBy { it.name }
+            .filter { client ->
+                // Match only if a word in the name starts with the query (not just contains)
+                client.name.split(" ").any { word -> word.startsWith(q, ignoreCase = true) }
+            }
+            .sortedWith(compareBy(
+                { !it.name.startsWith(q, ignoreCase = true) }, // full name starts with query first
+                { it.name }                                    // then alphabetical
+            ))
     }
 
     // Group payments by month with totals, preserving DESC order from DB

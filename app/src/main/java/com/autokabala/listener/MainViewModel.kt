@@ -478,19 +478,63 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         return out
     }
 
-    // Paybox uses white background with dark text — Tesseract works natively.
-    // Scale 2× for accuracy; no colour inversion needed.
+    // Paybox: white background, dark text.
+    // Pipeline: sharpen at 1x (fewer pixels) → scale 2x → grayscale + contrast boost.
     private fun preprocessForPayboxOcr(src: Bitmap): Bitmap {
-        val scaled = Bitmap.createScaledBitmap(src, src.width * 2, src.height * 2, true)
+        val sharpened = sharpenBitmap(src)
+        val scaled = Bitmap.createScaledBitmap(sharpened, sharpened.width * 2, sharpened.height * 2, true)
+        sharpened.recycle()
+        val out = Bitmap.createBitmap(scaled.width, scaled.height, Bitmap.Config.ARGB_8888)
+        val canvas = Canvas(out)
+        val paint = Paint()
+        val cm = ColorMatrix().apply {
+            setSaturation(0f) // grayscale
+            val c = 1.6f; val t = 128f * (1f - c)
+            postConcat(ColorMatrix(floatArrayOf(
+                c, 0f, 0f, 0f, t,
+                0f, c, 0f, 0f, t,
+                0f, 0f, c, 0f, t,
+                0f, 0f, 0f, 1f, 0f
+            )))
+        }
+        paint.colorFilter = ColorMatrixColorFilter(cm)
+        canvas.drawBitmap(scaled, 0f, 0f, paint)
+        scaled.recycle()
+        return out
+    }
+
+    // 3×3 unsharp-mask kernel (0 -1 0 / -1 5 -1 / 0 -1 0).
+    // Sharpens at 1x before upscaling to keep computation manageable.
+    private fun sharpenBitmap(src: Bitmap): Bitmap {
+        val w = src.width; val h = src.height
+        val pixels = IntArray(w * h)
+        src.getPixels(pixels, 0, w, 0, 0, w, h)
+        val out = pixels.copyOf()
+        for (y in 1 until h - 1) {
+            for (x in 1 until w - 1) {
+                val i = y * w + x
+                fun ch(shift: Int) = (
+                    5 * ((pixels[i]     shr shift) and 0xFF) -
+                        ((pixels[i - w] shr shift) and 0xFF) -
+                        ((pixels[i + w] shr shift) and 0xFF) -
+                        ((pixels[i - 1] shr shift) and 0xFF) -
+                        ((pixels[i + 1] shr shift) and 0xFF)
+                ).coerceIn(0, 255)
+                out[i] = (0xFF shl 24) or (ch(16) shl 16) or (ch(8) shl 8) or ch(0)
+            }
+        }
+        val result = Bitmap.createBitmap(w, h, Bitmap.Config.ARGB_8888)
+        result.setPixels(out, 0, w, 0, 0, w, h)
         src.recycle()
-        return scaled
+        return result
     }
 
     private fun ensureTessData(context: Context): String {
         val tessDir = File(context.filesDir, "tessdata")
         tessDir.mkdirs()
         val destFile = File(tessDir, "heb.traineddata")
-        if (!destFile.exists()) {
+        val assetSize = context.assets.openFd("tessdata/heb.traineddata").length
+        if (!destFile.exists() || destFile.length() != assetSize) {
             context.assets.open("tessdata/heb.traineddata").use { input ->
                 FileOutputStream(destFile).use { output -> input.copyTo(output) }
             }
