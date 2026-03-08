@@ -87,8 +87,8 @@ dependencies {
     // Tesseract OCR — Hebrew text (names)
     implementation("cz.adaptech.tesseract4android:tesseract4android:4.7.0")
 
-    // ML Kit Text Recognition — GMS dynamic model (broader recognition)
-    implementation("com.google.android.gms:play-services-mlkit-text-recognition:19.0.0")
+    // ML Kit Text Recognition — bundled model (included in APK, works without Play Services download)
+    implementation("com.google.mlkit:text-recognition:16.0.1")
 
     // Room for local database
     implementation("androidx.room:room-runtime:2.6.1")
