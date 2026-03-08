@@ -83,7 +83,14 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalLifecycleOwner
+import androidx.compose.foundation.gestures.detectTapGestures
+import androidx.compose.foundation.text.KeyboardActions
+import androidx.compose.foundation.text.KeyboardOptions
+import androidx.compose.ui.input.pointer.pointerInput
+import androidx.compose.ui.platform.LocalFocusManager
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.input.ImeAction
+import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import androidx.core.app.NotificationManagerCompat
@@ -432,7 +439,9 @@ fun PaymentsTab(
                     PaymentCard(
                         state = state,
                         selectedClient = selectedClient,
-                        onIssueReceipt = { client -> onIssueReceipt(state.payment, client) },
+                        onIssueReceipt = { client, amount, ts ->
+                            onIssueReceipt(state.payment.copy(amount = amount, timestamp = ts), client)
+                        },
                         onDelete = { onDeletePayment(state) },
                         onOpenSheet = { onOpenClientSheet(state) },
                         onToggleAutoSend = onToggleAutoSend,
@@ -453,18 +462,24 @@ fun PaymentsTab(
 fun PaymentCard(
     state: PaymentProcessingState,
     selectedClient: ClientEntity?,          // explicitly chosen via bottom sheet
-    onIssueReceipt: (ClientEntity) -> Unit,
+    onIssueReceipt: (ClientEntity, Double, Long) -> Unit,
     onDelete: () -> Unit,
     onOpenSheet: () -> Unit,
     onToggleAutoSend: (ClientEntity) -> Unit,
     onNoEmailTapped: () -> Unit
 ) {
     val payment = state.payment
-    val dateStr = remember(payment.timestamp) {
+    val initialDateStr = remember(payment.timestamp) {
         SimpleDateFormat("dd/MM/yyyy HH:mm", Locale.getDefault()).format(Date(payment.timestamp))
     }
-    val amountStr = if (payment.amount % 1.0 == 0.0) "₪${payment.amount.toInt()}"
-                    else "₪${"%.2f".format(payment.amount)}"
+    val initialAmountStr = remember(payment.amount) {
+        if (payment.amount % 1.0 == 0.0) payment.amount.toInt().toString()
+        else "%.2f".format(payment.amount)
+    }
+    var editedAmountStr by remember(payment.id) { mutableStateOf(initialAmountStr) }
+    var editedDateStr   by remember(payment.id) { mutableStateOf(initialDateStr) }
+    val dateFmt = remember { SimpleDateFormat("dd/MM/yyyy HH:mm", Locale.getDefault()) }
+
     val sourceStr = when (payment.source) {
         "bit_share" -> "Bit (שיתוף)"
         "bit"       -> "Bit (התראה)"
@@ -478,18 +493,32 @@ fun PaymentCard(
     val effectiveClient: ClientEntity? = selectedClient
         ?: (state.matchResult as? MatchResult.SingleMatch)?.client
 
+    val focusManager = LocalFocusManager.current
+
     Card(
         modifier = Modifier.fillMaxWidth(),
         elevation = CardDefaults.cardElevation(defaultElevation = 2.dp)
     ) {
         Column(
-            modifier = Modifier.padding(16.dp),
+            modifier = Modifier
+                .padding(16.dp)
+                .pointerInput(Unit) { detectTapGestures { focusManager.clearFocus() } },
             verticalArrangement = Arrangement.spacedBy(6.dp)
         ) {
             // ── Receipt-style fields ──────────────────────────────────────────
             PaymentField("שם", payment.senderName)
-            PaymentField("סכום", amountStr)
-            PaymentField("תאריך", dateStr)
+            EditablePaymentField(
+                label = "סכום",
+                value = editedAmountStr,
+                onValueChange = { editedAmountStr = it },
+                keyboardType = KeyboardType.Number
+            )
+            EditablePaymentField(
+                label = "תאריך",
+                value = editedDateStr,
+                onValueChange = { editedDateStr = it },
+                keyboardType = KeyboardType.Text
+            )
             PaymentField("מקור", sourceStr)
 
             HorizontalDivider(modifier = Modifier.padding(vertical = 6.dp))
@@ -550,8 +579,16 @@ fun PaymentCard(
 
             // ── Action buttons ────────────────────────────────────────────────
             Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                val parsedAmount = editedAmountStr.replace(",", "").toDoubleOrNull()
+                val parsedTs    = runCatching { dateFmt.parse(editedDateStr)?.time }.getOrNull()
                 Button(
-                    onClick = { effectiveClient?.let { onIssueReceipt(it) } },
+                    onClick = {
+                        effectiveClient?.let { client ->
+                            val amount = parsedAmount ?: payment.amount
+                            val ts     = parsedTs    ?: payment.timestamp
+                            onIssueReceipt(client, amount, ts)
+                        }
+                    },
                     enabled = effectiveClient != null,
                     modifier = Modifier.weight(1f)
                 ) {
@@ -578,6 +615,36 @@ private fun PaymentField(label: String, value: String) {
             text = value,
             style = MaterialTheme.typography.bodyMedium,
             fontWeight = FontWeight.Medium
+        )
+    }
+}
+
+@Composable
+private fun EditablePaymentField(
+    label: String,
+    value: String,
+    onValueChange: (String) -> Unit,
+    keyboardType: KeyboardType = KeyboardType.Text
+) {
+    val focusManager = LocalFocusManager.current
+    Row(verticalAlignment = Alignment.CenterVertically) {
+        Text(
+            text = "$label:",
+            style = MaterialTheme.typography.bodySmall,
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
+            modifier = Modifier.width(52.dp)
+        )
+        OutlinedTextField(
+            value = value,
+            onValueChange = onValueChange,
+            singleLine = true,
+            keyboardOptions = KeyboardOptions(
+                keyboardType = keyboardType,
+                imeAction = ImeAction.Done
+            ),
+            keyboardActions = KeyboardActions(onDone = { focusManager.clearFocus() }),
+            textStyle = MaterialTheme.typography.bodyMedium.copy(fontWeight = FontWeight.Medium),
+            modifier = Modifier.fillMaxWidth()
         )
     }
 }
