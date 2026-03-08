@@ -36,6 +36,8 @@ import java.io.FileOutputStream
 import kotlin.coroutines.resume
 
 data class OverdueClient(val client: ClientEntity, val daysSinceLastPayment: Int)
+data class IssuedReceiptInfo(val docUrl: String?, val clientPhone: String?, val docNum: String? = null)
+data class PendingNewClient(val name: String, val phone: String?, val email: String?)
 
 // Represents the result of matching a payment to existing clients
 sealed class MatchResult {
@@ -66,7 +68,16 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
     private val _selectedTabIndex = MutableStateFlow(0)
     val selectedTabIndex: StateFlow<Int> = _selectedTabIndex.asStateFlow()
 
-    fun onTabSelected(index: Int) { _selectedTabIndex.value = index }
+    fun onTabSelected(index: Int) {
+        _selectedTabIndex.value = index
+        _currentScreen.value = Screen.MAIN
+    }
+
+    private val _justIssuedCards = MutableStateFlow<Map<Int, IssuedReceiptInfo>>(emptyMap())
+    val justIssuedCards: StateFlow<Map<Int, IssuedReceiptInfo>> = _justIssuedCards.asStateFlow()
+
+    private val _pendingNewClients = MutableStateFlow<Map<Int, PendingNewClient>>(emptyMap())
+    val pendingNewClients: StateFlow<Map<Int, PendingNewClient>> = _pendingNewClients.asStateFlow()
 
     // --- Payment History (last 90 days) ---
     private val historyWindowStart = System.currentTimeMillis() - 90L * 24 * 3600 * 1000
@@ -167,7 +178,6 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
 
     sealed class UiEvent {
         data class ShowError(val message: String) : UiEvent()
-        data class ReceiptIssued(val docUrl: String?, val clientPhone: String?, val emailSent: Boolean = false) : UiEvent()
     }
 
     // --- Event Handlers ---
@@ -180,15 +190,51 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         }
     }
 
-    fun onIssueReceiptForClientClicked(payment: PaymentEntity, client: ClientEntity) {
+    fun onIssueReceiptForClientClicked(payment: PaymentEntity, client: ClientEntity, description: String = "") {
         viewModelScope.launch {
-            val outcome = receiptRepository.issueReceiptForClient(payment, client)
-            if (outcome != null) {
-                val phone = client.phone ?: receiptRepository.fetchAndCachePhone(client.id)
-                _uiEvent.send(UiEvent.ReceiptIssued(outcome.docUrl, phone, outcome.emailSent))
+            if (client.id.startsWith("new:")) {
+                val pending = _pendingNewClients.value[payment.id] ?: run {
+                    _uiEvent.send(UiEvent.ShowError("לא נמצא לקוח חדש לתשלום זה."))
+                    return@launch
+                }
+                val docUrl = receiptRepository.createClientAndIssueReceipt(
+                    payment, pending.name, pending.phone, pending.email, description
+                )
+                if (docUrl != null) {
+                    _justIssuedCards.value = _justIssuedCards.value + (payment.id to IssuedReceiptInfo(docUrl, pending.phone))
+                    _pendingNewClients.value = _pendingNewClients.value - payment.id
+                } else {
+                    _uiEvent.send(UiEvent.ShowError("שגיאה ביצירת לקוח או הפקת קבלה."))
+                }
             } else {
-                _uiEvent.send(UiEvent.ShowError("שגיאה בהפקת קבלה. בדוק חיבור לאינטרנט ונסה שוב."))
+                val outcome = receiptRepository.issueReceiptForClient(payment, client, description)
+                if (outcome != null) {
+                    val phone = client.phone ?: receiptRepository.fetchAndCachePhone(client.id)
+                    _justIssuedCards.value = _justIssuedCards.value + (payment.id to IssuedReceiptInfo(outcome.docUrl, phone, outcome.docNum))
+                } else {
+                    _uiEvent.send(UiEvent.ShowError("שגיאה בהפקת קבלה. בדוק חיבור לאינטרנט ונסה שוב."))
+                }
             }
+        }
+    }
+
+    fun onConfirmNewClient(paymentId: Int, name: String, phone: String?, email: String?) {
+        _pendingNewClients.value = _pendingNewClients.value + (paymentId to PendingNewClient(name, phone, email))
+    }
+
+    fun onDismissIssuedCard(paymentId: Int) {
+        _justIssuedCards.value = _justIssuedCards.value - paymentId
+    }
+
+    fun onUpdateClientContact(client: ClientEntity, phone: String?, email: String?) {
+        viewModelScope.launch {
+            receiptRepository.updateClientContact(client.id, phone, email)
+        }
+    }
+
+    fun onUpdateClientWhatsAppMessage(client: ClientEntity, message: String) {
+        viewModelScope.launch {
+            receiptRepository.updateClientWhatsAppMessage(client.id, message)
         }
     }
 
@@ -201,17 +247,6 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
     fun onNoEmailForAutoSend() {
         viewModelScope.launch {
             _uiEvent.send(UiEvent.ShowError("יש להזין כתובת מייל ללקוח כדי לאפשר שליחה אוטומטית"))
-        }
-    }
-
-    fun onCreateClientAndIssueReceiptClicked(payment: PaymentEntity, newClientName: String) {
-        viewModelScope.launch {
-            val docUrl = receiptRepository.createClientAndIssueReceipt(payment, newClientName)
-            if (docUrl != null) {
-                _uiEvent.send(UiEvent.ReceiptIssued(docUrl.ifBlank { null }, null))
-            } else {
-                _uiEvent.send(UiEvent.ShowError("שגיאה ביצירת לקוח או הפקת קבלה."))
-            }
         }
     }
 

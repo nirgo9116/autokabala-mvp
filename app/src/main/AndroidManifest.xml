@@ -37,6 +37,11 @@
             </intent-filter>
         </activity>
 
+        <!-- Trigger GMS ML Kit OCR model download on app install -->
+        <meta-data
+            android:name="com.google.mlkit.vision.DEPENDENCIES"
+            android:value="ocr" />
+
         <!-- Notification Listener Service -->
         <service
             android:name=".AutoKabalaNotificationService"

@@ -26,9 +26,9 @@ class ReceiptRepository(private val paymentDao: PaymentDao, private val clientDa
             .launchIn(scope)
     }
 
-    data class ReceiptOutcome(val docUrl: String?, val emailSent: Boolean)
+    data class ReceiptOutcome(val docUrl: String?, val emailSent: Boolean, val docNum: String? = null)
 
-    suspend fun issueReceiptForClient(payment: PaymentEntity, client: ClientEntity): ReceiptOutcome? {
+    suspend fun issueReceiptForClient(payment: PaymentEntity, client: ClientEntity, description: String = ""): ReceiptOutcome? {
         val paymentData = PaymentData(
             source = payment.source,
             senderName = payment.senderName,
@@ -36,7 +36,7 @@ class ReceiptRepository(private val paymentDao: PaymentDao, private val clientDa
             isConfirmed = payment.isConfirmed,
             timestamp = payment.timestamp
         )
-        val doc = ReceiptApiClient.issueReceipt(paymentData, client.id) ?: return null
+        val doc = ReceiptApiClient.issueReceipt(paymentData, client.id, description) ?: return null
         paymentDao.updatePaymentStatus(payment.id, "processed")
         paymentDao.updatePaymentReceipt(
             id         = payment.id,
@@ -48,7 +48,7 @@ class ReceiptRepository(private val paymentDao: PaymentDao, private val clientDa
         val emailSent = if (client.autoSend && doc.docNum.isNotBlank()) {
             ReceiptApiClient.sendDocumentByEmail(doc.docNum)
         } else false
-        return ReceiptOutcome(docUrl = doc.docUrl.ifBlank { null }, emailSent = emailSent)
+        return ReceiptOutcome(docUrl = doc.docUrl.ifBlank { null }, emailSent = emailSent, docNum = doc.docNum.ifBlank { null })
     }
 
     suspend fun toggleAutoSend(client: ClientEntity) {
@@ -61,21 +61,37 @@ class ReceiptRepository(private val paymentDao: PaymentDao, private val clientDa
         return mobile
     }
 
-    suspend fun createClientAndIssueReceipt(payment: PaymentEntity, newClientName: String): String? {
+    suspend fun createClientAndIssueReceipt(
+        payment: PaymentEntity,
+        newClientName: String,
+        phone: String? = null,
+        email: String? = null,
+        description: String = ""
+    ): String? {
         Log.d("Repository", "Attempting to create client '$newClientName' and issue receipt.")
 
-        when (val result = ReceiptApiClient.createClient(newClientName)) {
+        when (val result = ReceiptApiClient.createClient(newClientName, phone, email)) {
             is ApiResult.Success -> {
                 val newClientId = result.data
                 Log.d("Repository", "Client created successfully with ID: $newClientId. Now issuing receipt.")
-                val newClient = ClientEntity(id = newClientId.toString(), name = newClientName, email = null, phone = null)
-                return issueReceiptForClient(payment, newClient)?.docUrl
+                val newClient = ClientEntity(id = newClientId.toString(), name = newClientName, email = email, phone = phone)
+                clientDao.insertAll(listOf(newClient)) // save locally so history row is clickable immediately
+                return issueReceiptForClient(payment, newClient, description)?.docUrl
             }
             is ApiResult.Failure -> {
                 Log.e("Repository", "Failed to create new client: ${result.reason}. Aborting receipt issuance.")
                 return null
             }
         }
+    }
+
+    suspend fun updateClientContact(clientId: String, phone: String?, email: String?) {
+        if (phone != null) clientDao.updatePhone(clientId, phone)
+        if (email != null) clientDao.updateEmail(clientId, email)
+    }
+
+    suspend fun updateClientWhatsAppMessage(clientId: String, message: String) {
+        clientDao.updateWhatsAppMessage(clientId, message)
     }
 
     suspend fun deletePayment(payment: PaymentEntity) {

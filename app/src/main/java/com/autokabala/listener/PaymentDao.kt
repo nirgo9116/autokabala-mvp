@@ -17,9 +17,10 @@ interface PaymentDao {
 
     /**
      * Inserts a new payment into the table.
-     * If a payment with the same details already exists, it will be replaced.
+     * If a payment with the same unique details already exists, skip the insert
+     * so that a previously-processed receipt is never overwritten.
      */
-    @Insert(onConflict = OnConflictStrategy.REPLACE)
+    @Insert(onConflict = OnConflictStrategy.IGNORE)
     suspend fun insertPayment(payment: PaymentEntity)
 
     /**

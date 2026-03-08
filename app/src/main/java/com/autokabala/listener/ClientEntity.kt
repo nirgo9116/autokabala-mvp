@@ -10,5 +10,6 @@ data class ClientEntity(
     val name: String,
     val email: String?,
     val phone: String?,
-    val autoSend: Boolean = false
+    val autoSend: Boolean = false,
+    val whatsappMessage: String? = null
 )

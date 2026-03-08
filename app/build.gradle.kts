@@ -59,6 +59,10 @@ android {
         compose = true
         buildConfig = true
     }
+    androidResources {
+        // Prevent compression of tessdata so openFd() can read the file size correctly
+        noCompress += "traineddata"
+    }
 }
 
 dependencies {
@@ -83,8 +87,8 @@ dependencies {
     // Tesseract OCR — Hebrew text (names)
     implementation("cz.adaptech.tesseract4android:tesseract4android:4.7.0")
 
-    // ML Kit Text Recognition — Latin script for numbers & dates
-    implementation("com.google.mlkit:text-recognition:16.0.0")
+    // ML Kit Text Recognition — GMS dynamic model (broader recognition)
+    implementation("com.google.android.gms:play-services-mlkit-text-recognition:19.0.0")
 
     // Room for local database
     implementation("androidx.room:room-runtime:2.6.1")

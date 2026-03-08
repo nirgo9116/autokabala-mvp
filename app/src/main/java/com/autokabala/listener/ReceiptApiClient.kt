@@ -77,7 +77,10 @@ data class CreateClientRequest(
     @SerialName("cid") val cid: String,
     @SerialName("user") val user: String,
     @SerialName("pass") val pass: String,
-    @SerialName("client_name") val clientName: String
+    @SerialName("client_name") val clientName: String,
+    @SerialName("phone")  val phone:  String? = null,
+    @SerialName("mobile") val mobile: String? = null,
+    @SerialName("email")  val email:  String? = null
 )
 
 @Serializable
@@ -152,7 +155,7 @@ object ReceiptApiClient {
         }
     }
 
-    suspend fun issueReceipt(paymentData: PaymentData, clientId: String): IssuedDocument? {
+    suspend fun issueReceipt(paymentData: PaymentData, clientId: String, description: String = ""): IssuedDocument? {
         Log.i("AutoKabalaAPI", "--- Starting Document Issuance for client ID: $clientId ---")
         return try {
             val requestBody = CreateDocumentWithClientIdRequest(
@@ -162,7 +165,10 @@ object ReceiptApiClient {
                 docType = "receipt",
                 clientId = clientId.toInt(),
                 currencyCode = "ILS",
-                items = listOf(DocumentItem("קבלה עבור ${paymentData.senderName}", paymentData.amount)),
+                items = listOf(DocumentItem(
+                    description.ifBlank { "קבלה עבור ${paymentData.senderName}" },
+                    paymentData.amount
+                )),
                 cash = CashPayment(sum = paymentData.amount)
             )
             Log.d("AutoKabalaAPI", "Sending request to /doc/create with body: $requestBody")
@@ -252,15 +258,16 @@ object ReceiptApiClient {
         }
     }
 
-    // UPDATED FUNCTION
-    suspend fun createClient(clientName: String): ApiResult<Int> {
+    suspend fun createClient(clientName: String, phone: String? = null, email: String? = null): ApiResult<Int> {
         Log.i("AutoKabalaAPI", "--- Creating new client: $clientName ---")
         return try {
             val requestBody = CreateClientRequest(
                 cid = BuildConfig.ICOUNT_CID,
                 user = BuildConfig.ICOUNT_USER,
                 pass = BuildConfig.ICOUNT_PASS,
-                clientName = clientName
+                clientName = clientName,
+                phone = phone,
+                email = email
             )
             val response = client.post("$BASE_URL/client/create") {
                 contentType(ContentType.Application.Json)

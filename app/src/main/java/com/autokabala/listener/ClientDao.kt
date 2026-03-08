@@ -29,6 +29,12 @@ interface ClientDao {
     @Query("UPDATE clients SET phone = :phone WHERE id = :clientId")
     suspend fun updatePhone(clientId: String, phone: String)
 
+    @Query("UPDATE clients SET email = :email WHERE id = :clientId")
+    suspend fun updateEmail(clientId: String, email: String)
+
+    @Query("UPDATE clients SET whatsappMessage = :msg WHERE id = :clientId")
+    suspend fun updateWhatsAppMessage(clientId: String, msg: String)
+
     /**
      * Deletes all clients from the table.
      */
@@ -47,11 +53,13 @@ interface ClientDao {
         val existing = getAllClientsSnapshot()
         val autoSendIds = existing.filter { it.autoSend }.map { it.id }.toSet()
         val phoneMap = existing.filter { it.phone != null }.associate { it.id to it.phone!! }
+        val whatsappMsgMap = existing.filter { it.whatsappMessage != null }.associate { it.id to it.whatsappMessage!! }
         deleteAll()
         insertAll(clients.map { client ->
             client.copy(
                 autoSend = client.id in autoSendIds,
-                phone = client.phone ?: phoneMap[client.id]
+                phone = client.phone ?: phoneMap[client.id],
+                whatsappMessage = whatsappMsgMap[client.id]
             )
         })
     }
