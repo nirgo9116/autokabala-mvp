@@ -39,6 +39,7 @@ import androidx.compose.material.icons.filled.HelpOutline
 import androidx.compose.material.icons.filled.KeyboardArrowDown
 import androidx.compose.material.icons.filled.List
 import androidx.compose.material.icons.filled.Clear
+import androidx.compose.material.icons.filled.Edit
 import androidx.compose.material.icons.filled.Person
 import androidx.compose.material.icons.filled.Search
 import androidx.compose.material.icons.filled.Settings
@@ -1158,7 +1159,7 @@ fun HistoryScreen(
             val key = cal.get(java.util.Calendar.YEAR) to cal.get(java.util.Calendar.MONTH)
             map.getOrPut(key) { mutableListOf() }.add(p)
         }
-        map.entries.map { (key, list) -> Triple(key, list.toList(), list.sumOf { it.amount }) }
+        map.entries.map { (key, list) -> Triple(key, list.toList(), list.sumOf { it.issuedAmount ?: it.amount }) }
     }
 
     Column(modifier = modifier.fillMaxSize()) {
@@ -1304,8 +1305,10 @@ fun HistoryRow(
     onOpenClientDetail: (ClientEntity) -> Unit
 ) {
     val displayName = payment.clientName ?: payment.senderName
-    val amountStr = if (payment.amount % 1.0 == 0.0) "₪${payment.amount.toInt()}"
-                    else "₪${"%.2f".format(payment.amount)}"
+    val displayAmount = payment.issuedAmount ?: payment.amount
+    val wasAmountEdited = payment.issuedAmount != null && payment.issuedAmount != payment.amount
+    val amountStr = if (displayAmount % 1.0 == 0.0) "₪${displayAmount.toInt()}"
+                    else "₪${"%.2f".format(displayAmount)}"
     val dateStr = remember(payment.timestamp) {
         SimpleDateFormat("dd/MM", Locale.getDefault()).format(Date(payment.timestamp))
     }
@@ -1356,7 +1359,18 @@ fun HistoryRow(
             }
         }
         Column(horizontalAlignment = Alignment.End) {
-            Text(amountStr, fontWeight = FontWeight.Bold, style = MaterialTheme.typography.bodyLarge)
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                Text(amountStr, fontWeight = FontWeight.Bold, style = MaterialTheme.typography.bodyLarge)
+                if (wasAmountEdited) {
+                    Spacer(Modifier.width(3.dp))
+                    Icon(
+                        Icons.Default.Edit,
+                        contentDescription = "סכום עודכן",
+                        modifier = Modifier.size(12.dp),
+                        tint = MaterialTheme.colorScheme.onSurfaceVariant
+                    )
+                }
+            }
             Text(dateStr, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
         }
     }
@@ -1386,7 +1400,7 @@ fun ClientDetailScreen(
             val key = cal.get(java.util.Calendar.YEAR) to cal.get(java.util.Calendar.MONTH)
             map.getOrPut(key) { mutableListOf() }.add(p)
         }
-        map.entries.map { (key, list) -> Triple(key, list.toList(), list.sumOf { it.amount }) }
+        map.entries.map { (key, list) -> Triple(key, list.toList(), list.sumOf { it.issuedAmount ?: it.amount }) }
     }
 
     val defaultWaMsg = "שלום ${client.name}, רצינו להזכירך לגבי תשלום. תודה! 🙏"

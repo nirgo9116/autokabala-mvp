@@ -39,11 +39,12 @@ class ReceiptRepository(private val paymentDao: PaymentDao, private val clientDa
         val doc = ReceiptApiClient.issueReceipt(paymentData, client.id, description) ?: return null
         paymentDao.updatePaymentStatus(payment.id, "processed")
         paymentDao.updatePaymentReceipt(
-            id         = payment.id,
-            clientId   = client.id,
-            clientName = client.name,
-            docNum     = doc.docNum.ifBlank { null },
-            docUrl     = doc.docUrl.ifBlank { null }
+            id           = payment.id,
+            clientId     = client.id,
+            clientName   = client.name,
+            docNum       = doc.docNum.ifBlank { null },
+            docUrl       = doc.docUrl.ifBlank { null },
+            issuedAmount = payment.amount
         )
         val emailSent = if (client.autoSend && doc.docNum.isNotBlank()) {
             ReceiptApiClient.sendDocumentByEmail(doc.docNum)
