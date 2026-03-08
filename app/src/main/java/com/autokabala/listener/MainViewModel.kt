@@ -287,7 +287,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                 Log.d("OCR_DETECT", "Detected source: ${if (isPaybox) "Paybox" else "Bit"}")
 
                 val preprocessed = withContext(Dispatchers.IO) {
-                    val copy = originalBitmap.copy(originalBitmap.config ?: Bitmap.Config.ARGB_8888, false)
+                    val copy = originalBitmap.copy(Bitmap.Config.ARGB_8888, false)
                     if (isPaybox) preprocessForPayboxOcr(copy) else preprocessForOcr(copy)
                 }
                 val tesseractText = runTesseractOcr(context, preprocessed).also {
@@ -298,11 +298,11 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
 
                 // Step 3: Parse with the appropriate parser.
                 if (isPaybox) {
-                    if (tesseractText == null) {
+                    val payboxText = tesseractText ?: mlKitText ?: run {
                         _uiEvent.send(UiEvent.ShowError("לא ניתן לקרוא טקסט מהתמונה."))
                         return@launch
                     }
-                    val paymentData = PayboxShareParser.parse(tesseractText, mlKitText ?: tesseractText, mlKitAmount, mlKitResult?.nameAboveAmount) ?: run {
+                    val paymentData = PayboxShareParser.parse(payboxText, mlKitText ?: payboxText, mlKitAmount, mlKitResult?.nameAboveAmount) ?: run {
                         _uiEvent.send(UiEvent.ShowError("לא נמצאו פרטי תשלום. ודא שמדובר באישור תשלום PayBox."))
                         return@launch
                     }
@@ -313,13 +313,13 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                         _uiEvent.send(UiEvent.ShowError("תשלום זה פג תוקף — לא ניתן להפיק עבורו קבלה."))
                         return@launch
                     }
-                    if (tesseractText == null) {
+                    val bitText = tesseractText ?: mlKitText ?: run {
                         _uiEvent.send(UiEvent.ShowError("לא ניתן לקרוא טקסט מהתמונה. נסה תמונה ברורה יותר."))
                         return@launch
                     }
                     val paymentData = BitShareParser.parse(
-                        hebrewText  = tesseractText,
-                        latinText   = mlKitText ?: tesseractText,
+                        hebrewText  = bitText,
+                        latinText   = mlKitText ?: bitText,
                         mlKitAmount = mlKitAmount
                     ) ?: run {
                         _uiEvent.send(UiEvent.ShowError("לא נמצאו פרטי תשלום בתמונה. ודא שמדובר בתמונת אישור תשלום ביט."))
@@ -427,7 +427,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                         if (cont.isActive) cont.resume(MlKitResult(result.text, amount, nameAboveAmount))
                     }
                     .addOnFailureListener { e ->
-                        Log.w("MlKitOcr", "Recognition failed", e)
+                        Log.e("MlKitOcr", "Recognition failed: ${e.javaClass.simpleName} — ${e.message}", e)
                         if (cont.isActive) cont.resume(null)
                     }
             } catch (e: Exception) {
@@ -533,8 +533,8 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         val tessDir = File(context.filesDir, "tessdata")
         tessDir.mkdirs()
         val destFile = File(tessDir, "heb.traineddata")
-        val assetSize = context.assets.openFd("tessdata/heb.traineddata").length
-        if (!destFile.exists() || destFile.length() != assetSize) {
+        val assetSize = try { context.assets.openFd("tessdata/heb.traineddata").length } catch (_: Exception) { -1L }
+        if (!destFile.exists() || (assetSize > 0 && destFile.length() != assetSize)) {
             context.assets.open("tessdata/heb.traineddata").use { input ->
                 FileOutputStream(destFile).use { output -> input.copyTo(output) }
             }
