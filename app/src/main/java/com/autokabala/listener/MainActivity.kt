@@ -10,6 +10,7 @@ import androidx.activity.compose.BackHandler
 import androidx.activity.compose.setContent
 import androidx.activity.enableEdgeToEdge
 import androidx.compose.animation.AnimatedVisibility
+import androidx.compose.animation.expandVertically
 import androidx.compose.animation.fadeIn
 import androidx.compose.animation.scaleIn
 import androidx.compose.foundation.BorderStroke
@@ -35,6 +36,7 @@ import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.filled.Add
 import androidx.compose.material.icons.filled.CheckCircle
 import androidx.compose.material.icons.filled.Email
+import androidx.compose.material.icons.filled.Message
 import androidx.compose.material.icons.filled.HelpOutline
 import androidx.compose.material.icons.filled.KeyboardArrowDown
 import androidx.compose.material.icons.filled.List
@@ -343,6 +345,7 @@ private fun MainTabsScreen(
                     },
                     onOpenClientSheet = { clientSheetFor = it },
                     onDismissIssuedCard = { paymentId -> viewModel.onDismissIssuedCard(paymentId) },
+                    onFakeIssueReceipt = { payment -> viewModel.onFakeIssueReceiptClicked(payment) },
                     onSendWhatsAppFromCard = { info ->
                         launchWhatsApp(context, docUrl = info.docUrl, clientPhone = info.clientPhone)
                     },
@@ -402,6 +405,7 @@ fun PaymentsTab(
     onDeletePayment: (PaymentProcessingState) -> Unit,
     onOpenClientSheet: (PaymentProcessingState) -> Unit,
     onDismissIssuedCard: (Int) -> Unit,
+    onFakeIssueReceipt: (PaymentEntity) -> Unit,
     onSendWhatsAppFromCard: (IssuedReceiptInfo) -> Unit,
     onSendEmailFromCard: (IssuedReceiptInfo) -> Unit
 ) {
@@ -465,7 +469,8 @@ fun PaymentsTab(
                             onIssueReceipt(state.payment.copy(amount = amount, timestamp = ts), client, description)
                         },
                         onDelete = { onDeletePayment(state) },
-                        onOpenSheet = { onOpenClientSheet(state) }
+                        onOpenSheet = { onOpenClientSheet(state) },
+                        onFakeIssueReceipt = { onFakeIssueReceipt(state.payment) }
                     )
                 }
                 item { Spacer(Modifier.height(8.dp)) }
@@ -484,7 +489,8 @@ fun PaymentCard(
     selectedClient: ClientEntity?,          // explicitly chosen via bottom sheet
     onIssueReceipt: (ClientEntity, Double, Long, String) -> Unit,
     onDelete: () -> Unit,
-    onOpenSheet: () -> Unit
+    onOpenSheet: () -> Unit,
+    onFakeIssueReceipt: () -> Unit = {}
 ) {
     val payment = state.payment
     val initialDateStr = remember(payment.timestamp) {
@@ -582,6 +588,19 @@ fun PaymentCard(
                 }
             }
 
+            if (BuildConfig.DEBUG) {
+                TextButton(
+                    onClick = onFakeIssueReceipt,
+                    modifier = Modifier.fillMaxWidth()
+                ) {
+                    Text(
+                        "🔬 הדמיית הפקת קבלה",
+                        style = MaterialTheme.typography.labelSmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                    )
+                }
+            }
+
             // ── Send buttons (always visible, disabled until receipt issued) ──
             Text(
                 "שלח ללקוח",
@@ -638,65 +657,103 @@ fun IssuedReceiptCard(
 
     Card(
         modifier = Modifier.fillMaxWidth(),
-        elevation = CardDefaults.cardElevation(defaultElevation = 2.dp),
-        colors = CardDefaults.cardColors(
-            containerColor = if (!animationDone) Color(0xFF4CAF50).copy(alpha = 0.12f)
-                             else MaterialTheme.colorScheme.surface
-        )
+        elevation = CardDefaults.cardElevation(defaultElevation = 4.dp),
+        colors = CardDefaults.cardColors(containerColor = Color(0xFF4CAF50).copy(alpha = 0.08f))
     ) {
         Column(
-            modifier = Modifier.padding(16.dp).fillMaxWidth(),
-            horizontalAlignment = Alignment.CenterHorizontally
+            modifier = Modifier
+                .padding(horizontal = 24.dp, vertical = 28.dp)
+                .fillMaxWidth(),
+            horizontalAlignment = Alignment.CenterHorizontally,
+            verticalArrangement = Arrangement.spacedBy(8.dp)
         ) {
-            if (!animationDone) {
-                AnimatedVisibility(visible = true, enter = scaleIn() + fadeIn()) {
-                    Icon(
-                        Icons.Default.CheckCircle,
-                        contentDescription = null,
-                        modifier = Modifier.size(56.dp),
-                        tint = Color(0xFF4CAF50)
-                    )
-                }
-                Spacer(Modifier.height(8.dp))
-                Text("קבלה הופקה בהצלחה", style = MaterialTheme.typography.bodyLarge)
-            } else {
-                Text(
-                    "שלח ללקוח",
-                    style = MaterialTheme.typography.titleSmall,
-                    textAlign = TextAlign.Center,
-                    modifier = Modifier.fillMaxWidth()
+            // ── Success icon — always visible ─────────────────────────────
+            AnimatedVisibility(visible = true, enter = scaleIn() + fadeIn()) {
+                Icon(
+                    Icons.Default.CheckCircle,
+                    contentDescription = null,
+                    modifier = Modifier.size(72.dp),
+                    tint = Color(0xFF4CAF50)
                 )
-                Spacer(Modifier.height(12.dp))
-                Row(
-                    modifier = Modifier.fillMaxWidth(),
-                    horizontalArrangement = Arrangement.spacedBy(8.dp)
+            }
+
+            // ── Success message — always visible ──────────────────────────
+            Text(
+                "קבלה הופקה בהצלחה",
+                style = MaterialTheme.typography.headlineSmall,
+                fontWeight = FontWeight.Bold,
+                textAlign = TextAlign.Center
+            )
+            if (info.docNum != null) {
+                Text(
+                    "מספר קבלה: ${info.docNum}",
+                    style = MaterialTheme.typography.bodyMedium,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    textAlign = TextAlign.Center
+                )
+            }
+
+            // ── Send section — appears after animation ────────────────────
+            AnimatedVisibility(
+                visible = animationDone,
+                enter = fadeIn() + expandVertically()
+            ) {
+                Column(
+                    horizontalAlignment = Alignment.CenterHorizontally,
+                    verticalArrangement = Arrangement.spacedBy(12.dp),
+                    modifier = Modifier.fillMaxWidth()
                 ) {
-                    OutlinedButton(
-                        onClick = onSendWhatsApp,
-                        enabled = info.clientPhone != null,
-                        modifier = Modifier.weight(1f),
-                        colors = ButtonDefaults.outlinedButtonColors(contentColor = Color(0xFF25D366)),
-                        border = BorderStroke(1.dp, if (info.clientPhone != null) Color(0xFF25D366) else Color(0xFF25D366).copy(alpha = 0.4f))
+                    Spacer(Modifier.height(4.dp))
+                    Text(
+                        "שלח ללקוח",
+                        style = MaterialTheme.typography.titleLarge,
+                        fontWeight = FontWeight.Bold,
+                        textAlign = TextAlign.Center
+                    )
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.spacedBy(12.dp)
                     ) {
-                        Icon(Icons.Default.Person, contentDescription = null, modifier = Modifier.size(16.dp))
-                        Spacer(Modifier.width(4.dp))
-                        Text("וואטסאפ")
+                        Button(
+                            onClick = onSendWhatsApp,
+                            enabled = info.clientPhone != null,
+                            modifier = Modifier.weight(1f).height(72.dp),
+                            shape = RoundedCornerShape(12.dp),
+                            colors = ButtonDefaults.buttonColors(
+                                containerColor = Color(0xFF25D366),
+                                disabledContainerColor = Color(0xFF25D366).copy(alpha = 0.3f)
+                            )
+                        ) {
+                            Column(
+                                horizontalAlignment = Alignment.CenterHorizontally,
+                                verticalArrangement = Arrangement.spacedBy(4.dp)
+                            ) {
+                                Icon(Icons.Default.Message, contentDescription = null, modifier = Modifier.size(24.dp))
+                                Text("וואטסאפ", style = MaterialTheme.typography.labelMedium)
+                            }
+                        }
+                        Button(
+                            onClick = onSendEmail,
+                            enabled = info.docNum != null,
+                            modifier = Modifier.weight(1f).height(72.dp),
+                            shape = RoundedCornerShape(12.dp),
+                            colors = ButtonDefaults.buttonColors(
+                                containerColor = Color(0xFF1565C0),
+                                disabledContainerColor = Color(0xFF1565C0).copy(alpha = 0.3f)
+                            )
+                        ) {
+                            Column(
+                                horizontalAlignment = Alignment.CenterHorizontally,
+                                verticalArrangement = Arrangement.spacedBy(4.dp)
+                            ) {
+                                Icon(Icons.Default.Email, contentDescription = null, modifier = Modifier.size(24.dp))
+                                Text("מייל", style = MaterialTheme.typography.labelMedium)
+                            }
+                        }
                     }
-                    OutlinedButton(
-                        onClick = onSendEmail,
-                        enabled = info.docNum != null,
-                        modifier = Modifier.weight(1f),
-                        colors = ButtonDefaults.outlinedButtonColors(contentColor = Color(0xFF1565C0)),
-                        border = BorderStroke(1.dp, if (info.docNum != null) Color(0xFF1565C0) else Color(0xFF1565C0).copy(alpha = 0.4f))
-                    ) {
-                        Icon(Icons.Default.Email, contentDescription = null, modifier = Modifier.size(16.dp))
-                        Spacer(Modifier.width(4.dp))
-                        Text("מייל")
+                    TextButton(onClick = onDismiss, modifier = Modifier.fillMaxWidth()) {
+                        Text("סגור", color = MaterialTheme.colorScheme.onSurfaceVariant)
                     }
-                }
-                Spacer(Modifier.height(4.dp))
-                TextButton(onClick = onDismiss, modifier = Modifier.fillMaxWidth()) {
-                    Text("סגור")
                 }
             }
         }

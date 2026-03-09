@@ -99,7 +99,22 @@ class ReceiptRepository(private val paymentDao: PaymentDao, private val clientDa
         paymentDao.deletePayment(payment.id)
     }
 
-    // --- Test Functions ---
+    // --- Test / Debug Functions ---
+    suspend fun addFakeReceipt(payment: PaymentEntity): IssuedReceiptInfo {
+        val fakeDocNum = "TEST-${(1000..9999).random()}"
+        paymentDao.updatePaymentStatus(payment.id, "processed")
+        paymentDao.updatePaymentReceipt(
+            id           = payment.id,
+            clientId     = "fake",
+            clientName   = payment.senderName,
+            docNum       = fakeDocNum,
+            docUrl       = null,
+            issuedAmount = payment.amount
+        )
+        Log.d("Repository", "addFakeReceipt: payment.id=${payment.id} docNum=$fakeDocNum")
+        return IssuedReceiptInfo(docUrl = null, clientPhone = null, docNum = fakeDocNum)
+    }
+
     suspend fun addFakePayment() {
         val names = listOf("Danny", "Moshe", "Yossi", "ניר", "סמדר בדיקה", "Elad", "בלהבלה", "ניר")
         val randomName = names.random()

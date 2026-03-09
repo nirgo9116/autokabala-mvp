@@ -262,6 +262,13 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         }
     }
 
+    fun onFakeIssueReceiptClicked(payment: PaymentEntity) {
+        viewModelScope.launch {
+            val info = receiptRepository.addFakeReceipt(payment)
+            _justIssuedCards.value = _justIssuedCards.value + (payment.id to info)
+        }
+    }
+
     fun onAddFakePaymentClicked() {
         viewModelScope.launch {
             receiptRepository.addFakePayment()
