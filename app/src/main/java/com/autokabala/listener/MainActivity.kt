@@ -30,7 +30,10 @@ import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.navigationBarsPadding
+import androidx.compose.foundation.layout.IntrinsicSize
 import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.layout.widthIn
+import androidx.compose.foundation.layout.wrapContentWidth
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.shape.RoundedCornerShape
@@ -78,6 +81,7 @@ import androidx.compose.material3.TextButton
 import androidx.compose.material3.TopAppBar
 import androidx.compose.material3.rememberModalBottomSheetState
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
@@ -85,6 +89,8 @@ import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
+import androidx.compose.ui.platform.LocalLayoutDirection
+import androidx.compose.ui.unit.LayoutDirection
 import androidx.compose.ui.focus.onFocusChanged
 import kotlinx.coroutines.delay
 import androidx.compose.ui.Alignment
@@ -351,9 +357,6 @@ private fun MainTabsScreen(
                         viewModel.onDeletePaymentClicked(state.payment)
                     },
                     onOpenClientSheet = { clientSheetFor = it },
-                    onSelectClientInline = { paymentId, clientId ->
-                        selectedClientIdsMap = selectedClientIdsMap + (paymentId to clientId)
-                    },
                     onDismissIssuedCard = { paymentId -> viewModel.onDismissIssuedCard(paymentId) },
                     onFakeIssueReceipt = { payment -> viewModel.onFakeIssueReceiptClicked(payment) },
                     onSendWhatsAppFromCard = { info ->
@@ -414,7 +417,6 @@ fun PaymentsTab(
     onIssueReceipt: (PaymentEntity, ClientEntity, String) -> Unit,
     onDeletePayment: (PaymentProcessingState) -> Unit,
     onOpenClientSheet: (PaymentProcessingState) -> Unit,
-    onSelectClientInline: (Int, String) -> Unit,
     onDismissIssuedCard: (Int) -> Unit,
     onFakeIssueReceipt: (PaymentEntity) -> Unit,
     onSendWhatsAppFromCard: (IssuedReceiptInfo) -> Unit,
@@ -473,14 +475,12 @@ fun PaymentsTab(
                         }
                     PaymentCard(
                         state = state,
-                        allClients = allClients,
                         selectedClient = selectedClient,
                         onIssueReceipt = { client, amount, ts, description ->
                             onIssueReceipt(state.payment.copy(amount = amount, timestamp = ts), client, description)
                         },
                         onDelete = { onDeletePayment(state) },
                         onOpenSheet = { onOpenClientSheet(state) },
-                        onSelectClient = { client -> onSelectClientInline(state.payment.id, client.id) },
                         onFakeIssueReceipt = { onFakeIssueReceipt(state.payment) }
                     )
                 }
@@ -497,12 +497,10 @@ fun PaymentsTab(
 @Composable
 fun PaymentCard(
     state: PaymentProcessingState,
-    allClients: List<ClientEntity>,
     selectedClient: ClientEntity?,
     onIssueReceipt: (ClientEntity, Double, Long, String) -> Unit,
     onDelete: () -> Unit,
     onOpenSheet: () -> Unit,
-    onSelectClient: (ClientEntity) -> Unit,
     onFakeIssueReceipt: () -> Unit = {}
 ) {
     val payment = state.payment
@@ -518,8 +516,6 @@ fun PaymentCard(
     var editedAmountStr   by remember(payment.id) { mutableStateOf(initialAmountStr) }
     var editedDateStr     by remember(payment.id) { mutableStateOf(initialDateStr) }
     var editedDescription by remember(payment.id) { mutableStateOf("") }
-    var clientDropdownOpen by remember(payment.id) { mutableStateOf(false) }
-    var clientSearchQuery  by remember(payment.id) { mutableStateOf("") }
     val dateFmt = remember { SimpleDateFormat("dd/MM/yyyy", Locale.getDefault()) }
     val focusManager = LocalFocusManager.current
 
@@ -530,17 +526,12 @@ fun PaymentCard(
     val effectiveClient: ClientEntity? = selectedClient
         ?: (state.matchResult as? MatchResult.SingleMatch)?.client
 
-    val filteredClients = remember(clientSearchQuery, allClients) {
-        if (clientSearchQuery.length < 2) emptyList()
-        else allClients.filter { it.name.contains(clientSearchQuery, ignoreCase = true) }.take(5)
-    }
-
     val heroGradient = if (isDark)
         Brush.verticalGradient(listOf(Color(0xFF1B1B2F), Color(0xFF101020)))
     else
         Brush.verticalGradient(listOf(Color(0xFFEDE7FF), Color(0xFFF5F0FF)))
     val onHeroColor    = if (isDark) Color.White else Color(0xFF1A1A1A)
-    val onHeroSubColor = onHeroColor.copy(alpha = 0.38f)
+    val onHeroSubColor = onHeroColor.copy(alpha = 0.6f)
 
     Card(
         modifier = Modifier.fillMaxWidth(),
@@ -549,7 +540,7 @@ fun PaymentCard(
     ) {
         Column(modifier = Modifier.pointerInput(Unit) { detectTapGestures { focusManager.clearFocus() } }) {
 
-            // ── HERO: gradient top with source badge + OCR name + editable amount ──
+            // ── HERO ────────────────────────────────────────────────────────
             Box(
                 modifier = Modifier
                     .fillMaxWidth()
@@ -570,92 +561,67 @@ fun PaymentCard(
                         ) {
                             Text(sourceName, color = sourceColor, style = MaterialTheme.typography.labelMedium, fontWeight = FontWeight.Bold)
                         }
-                        Text(
-                            text = "שם: ${payment.senderName}",
-                            style = MaterialTheme.typography.labelSmall,
-                            color = onHeroSubColor
-                        )
+                        Text("איש קשר: ${payment.senderName}", style = MaterialTheme.typography.bodySmall, color = onHeroSubColor)
                     }
                     Spacer(Modifier.height(14.dp))
-                    Row(verticalAlignment = Alignment.CenterVertically) {
-                        Text(
-                            text = "₪",
-                            color = sourceColor,
-                            style = MaterialTheme.typography.headlineMedium,
-                            fontWeight = FontWeight.Bold,
-                            modifier = Modifier.padding(end = 3.dp, bottom = 4.dp)
-                        )
-                        BasicTextField(
-                            value = editedAmountStr,
-                            onValueChange = { editedAmountStr = it },
-                            singleLine = true,
-                            textStyle = MaterialTheme.typography.displaySmall.copy(
-                                color = onHeroColor,
-                                fontWeight = FontWeight.ExtraBold
-                            ),
-                            keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Decimal, imeAction = ImeAction.Done),
-                            keyboardActions = KeyboardActions(onDone = { focusManager.clearFocus() }),
-                            cursorBrush = SolidColor(onHeroColor)
-                        )
+                    CompositionLocalProvider(LocalLayoutDirection provides LayoutDirection.Ltr) {
+                        Row(
+                            modifier = Modifier.fillMaxWidth(),
+                            horizontalArrangement = Arrangement.End,
+                            verticalAlignment = Alignment.Bottom
+                        ) {
+                            Text("₪", color = sourceColor, style = MaterialTheme.typography.headlineMedium,
+                                fontWeight = FontWeight.Bold, modifier = Modifier.padding(bottom = 4.dp))
+                            Spacer(Modifier.width(4.dp))
+                            BasicTextField(
+                                value = editedAmountStr,
+                                onValueChange = { editedAmountStr = it },
+                                singleLine = true,
+                                modifier = Modifier.width(IntrinsicSize.Min).widthIn(min = 24.dp),
+                                textStyle = MaterialTheme.typography.displaySmall.copy(color = onHeroColor, fontWeight = FontWeight.ExtraBold),
+                                keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Decimal, imeAction = ImeAction.Done),
+                                keyboardActions = KeyboardActions(onDone = { focusManager.clearFocus() }),
+                                cursorBrush = SolidColor(onHeroColor)
+                            )
+                        }
                     }
                 }
             }
 
-            // ── BODY ──────────────────────────────────────────────────────────
+            // ── BODY ────────────────────────────────────────────────────────
             Column(
                 modifier = Modifier.padding(horizontal = 16.dp, vertical = 14.dp),
                 verticalArrangement = Arrangement.spacedBy(10.dp)
             ) {
-                ClientChipWithDropdown(
-                    state = state,
-                    selectedClient = selectedClient,
-                    effectiveClient = effectiveClient,
-                    searchQuery = clientSearchQuery,
-                    filteredClients = filteredClients,
-                    isOpen = clientDropdownOpen,
-                    onToggle = {
-                        clientDropdownOpen = !clientDropdownOpen
-                        if (clientDropdownOpen) {
-                            clientSearchQuery = effectiveClient?.name ?: ""
-                            focusManager.clearFocus()
-                        }
-                    },
-                    onQueryChange = { clientSearchQuery = it },
-                    onSelectClient = { client ->
-                        onSelectClient(client)
-                        clientDropdownOpen = false
-                    },
-                    onOpenSheet = {
-                        clientDropdownOpen = false
-                        onOpenSheet()
-                    }
-                )
+                ClientChipField(state = state, selectedClient = selectedClient,
+                    effectiveClient = effectiveClient, isDark = isDark, onClick = onOpenSheet)
 
-                OutlinedTextField(
+                PaymentInfoField(
+                    label = "תאריך תשלום",
                     value = editedDateStr,
                     onValueChange = { editedDateStr = it },
-                    label = { Text("תאריך") },
-                    singleLine = true,
-                    keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Text, imeAction = ImeAction.Done),
-                    keyboardActions = KeyboardActions(onDone = { focusManager.clearFocus() }),
-                    modifier = Modifier.fillMaxWidth(),
-                    textStyle = MaterialTheme.typography.bodyMedium.copy(fontWeight = FontWeight.Medium),
-                    colors = OutlinedTextFieldDefaults.colors(
-                        unfocusedBorderColor = MaterialTheme.colorScheme.outline.copy(alpha = 0.4f)
-                    )
+                    keyboardType = KeyboardType.Text,
+                    isDark = isDark,
+                    focusManager = focusManager
                 )
 
-                OutlinedTextField(
+                PaymentInfoField(
+                    label = "סכום",
+                    value = editedAmountStr,
+                    onValueChange = { editedAmountStr = it },
+                    keyboardType = KeyboardType.Decimal,
+                    isDark = isDark,
+                    focusManager = focusManager
+                )
+
+                PaymentDescField(
                     value = editedDescription,
                     onValueChange = { editedDescription = it },
-                    label = { Text("פרטים") },
-                    placeholder = { Text("תיאור שירות / מוצר...") },
-                    singleLine = true,
-                    keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Text, imeAction = ImeAction.Done),
-                    keyboardActions = KeyboardActions(onDone = { focusManager.clearFocus() }),
-                    modifier = Modifier.fillMaxWidth(),
-                    textStyle = MaterialTheme.typography.bodyMedium
+                    isDark = isDark,
+                    focusManager = focusManager
                 )
+
+                Spacer(Modifier.height(8.dp))
 
                 val parsedAmount = editedAmountStr.replace(",", "").toDoubleOrNull()
                 val parsedTs    = runCatching { dateFmt.parse(editedDateStr)?.time }.getOrNull()
@@ -698,6 +664,7 @@ fun IssuedReceiptCard(
     val amountStr = info.amount?.let {
         if (it % 1.0 == 0.0) "₪${it.toInt()}" else "₪${"%.2f".format(it)}"
     }
+    val dateFmt = remember { SimpleDateFormat("dd/MM/yyyy", Locale.getDefault()) }
 
     // ── Colors ────────────────────────────────────────────────────────────────
     val cardBg       = if (isDark) Color(0xFF161622) else Color(0xFFF4F0FF)
@@ -705,10 +672,10 @@ fun IssuedReceiptCard(
     val circleRingBorder = if (isDark) Color(0xFF6650A4).copy(alpha = 0.5f) else Color(0xFF7B61FF).copy(alpha = 0.4f)
     val checkmarkColor = if (isDark) Color(0xFFD0BCFF) else Color(0xFF7B61FF)
     val titleColor   = if (isDark) Color.White else Color(0xFF1A1A1A)
-    val docNumColor  = if (isDark) Color(0xFFD0BCFF).copy(alpha = 0.7f) else Color(0xFF7B61FF)
+    val docNumColor  = if (isDark) Color(0xFFD0BCFF).copy(alpha = 0.8f) else Color(0xFF7B61FF)
     val dividerColor = if (isDark) Color.White.copy(alpha = 0.08f) else Color(0xFFE0E0E0)
-    val sendLabelColor = if (isDark) Color.White.copy(alpha = 0.45f) else Color(0xFF888888)
-    val dismissColor = if (isDark) Color.White.copy(alpha = 0.35f) else Color(0xFFAAAAAA)
+    val sendLabelColor = if (isDark) Color.White.copy(alpha = 0.65f) else Color(0xFF555555)
+    val dismissColor = if (isDark) Color.White.copy(alpha = 0.5f) else Color(0xFF888888)
 
     Card(
         modifier = Modifier.fillMaxWidth(),
@@ -717,28 +684,27 @@ fun IssuedReceiptCard(
         colors = CardDefaults.cardColors(containerColor = cardBg)
     ) {
         Column(
-            modifier = Modifier.padding(horizontal = 24.dp, vertical = 24.dp).fillMaxWidth(),
+            modifier = Modifier.padding(horizontal = 24.dp, vertical = 28.dp).fillMaxWidth(),
             horizontalAlignment = Alignment.CenterHorizontally,
-            verticalArrangement = Arrangement.spacedBy(10.dp)
+            verticalArrangement = Arrangement.spacedBy(14.dp)
         ) {
             // ── D-style circle + checkmark ────────────────────────────────────
             Box(
                 modifier = Modifier
-                    .size(72.dp)
+                    .size(80.dp)
                     .background(circleRingBg, RoundedCornerShape(percent = 50))
                     .border(2.dp, circleRingBorder, RoundedCornerShape(percent = 50)),
                 contentAlignment = Alignment.Center
             ) {
-                Text("✓", style = MaterialTheme.typography.headlineMedium, color = checkmarkColor, fontWeight = FontWeight.Bold)
+                Text("✓", style = MaterialTheme.typography.headlineLarge, color = checkmarkColor, fontWeight = FontWeight.Bold)
             }
-            Text("קבלה הופקה!", style = MaterialTheme.typography.headlineSmall, fontWeight = FontWeight.Bold, color = titleColor)
+            Text("קבלה הופקה!", style = MaterialTheme.typography.headlineMedium, fontWeight = FontWeight.Bold, color = titleColor)
             if (info.docNum != null) {
-                Text("מספר קבלה: ${info.docNum}", style = MaterialTheme.typography.bodySmall, color = docNumColor)
+                Text("מספר קבלה: ${info.docNum}", style = MaterialTheme.typography.bodyMedium, color = docNumColor)
             }
 
             // ── B-style receipt rows ──────────────────────────────────────────
-            if (info.clientName != null || amountStr != null) {
-                // Receipt details card (white inner card in light mode)
+            if (info.clientName != null || amountStr != null || info.timestamp != null) {
                 val rowsBg = if (isDark) Color.Transparent else Color.White
                 Surface(
                     modifier = Modifier.fillMaxWidth(),
@@ -749,9 +715,15 @@ fun IssuedReceiptCard(
                         if (info.clientName != null) {
                             ReceiptSlipRow("לקוח", info.clientName, dividerColor, titleColor)
                         }
+                        val hasDate = info.timestamp != null
                         if (amountStr != null) {
-                            ReceiptSlipRow("סכום", amountStr, Color.Transparent,
-                                if (isDark) Color(0xFF4CAF50) else Color(0xFF2E7D32))
+                            ReceiptSlipRow("סכום", amountStr,
+                                if (hasDate) dividerColor else Color.Transparent,
+                                if (isDark) Color(0xFF66BB6A) else Color(0xFF2E7D32))
+                        }
+                        if (info.timestamp != null) {
+                            val dateStr = remember(info.timestamp) { dateFmt.format(Date(info.timestamp)) }
+                            ReceiptSlipRow("תאריך", dateStr, Color.Transparent, titleColor)
                         }
                     }
                 }
@@ -760,41 +732,41 @@ fun IssuedReceiptCard(
             HorizontalDivider(color = dividerColor)
 
             // ── Send buttons ──────────────────────────────────────────────────
-            Text("שלח ללקוח", style = MaterialTheme.typography.labelMedium, color = sendLabelColor)
+            Text("שלח קבלה ללקוח", style = MaterialTheme.typography.titleSmall, color = sendLabelColor)
             Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(10.dp)) {
                 Button(
                     onClick = onSendWhatsApp,
                     enabled = info.clientPhone != null,
-                    modifier = Modifier.weight(1f).height(64.dp),
+                    modifier = Modifier.weight(1f).height(68.dp),
                     shape = RoundedCornerShape(12.dp),
                     colors = ButtonDefaults.buttonColors(
-                        containerColor = Color(0xFF43C768),
-                        disabledContainerColor = Color(0xFF43C768).copy(alpha = 0.3f)
+                        containerColor = Color(0xFF81C784),
+                        disabledContainerColor = Color(0xFF81C784).copy(alpha = 0.3f)
                     )
                 ) {
-                    Column(horizontalAlignment = Alignment.CenterHorizontally, verticalArrangement = Arrangement.spacedBy(3.dp)) {
+                    Column(horizontalAlignment = Alignment.CenterHorizontally, verticalArrangement = Arrangement.spacedBy(4.dp)) {
                         Icon(painter = painterResource(R.drawable.ic_whatsapp), contentDescription = null, modifier = Modifier.size(22.dp))
-                        Text("וואטסאפ", style = MaterialTheme.typography.labelSmall)
+                        Text("וואטסאפ", style = MaterialTheme.typography.labelLarge)
                     }
                 }
                 Button(
                     onClick = onSendEmail,
                     enabled = info.docNum != null,
-                    modifier = Modifier.weight(1f).height(64.dp),
+                    modifier = Modifier.weight(1f).height(68.dp),
                     shape = RoundedCornerShape(12.dp),
                     colors = ButtonDefaults.buttonColors(
-                        containerColor = Color(0xFF2196F3),
-                        disabledContainerColor = Color(0xFF2196F3).copy(alpha = 0.3f)
+                        containerColor = Color(0xFF7B61FF),
+                        disabledContainerColor = Color(0xFF7B61FF).copy(alpha = 0.3f)
                     )
                 ) {
-                    Column(horizontalAlignment = Alignment.CenterHorizontally, verticalArrangement = Arrangement.spacedBy(3.dp)) {
+                    Column(horizontalAlignment = Alignment.CenterHorizontally, verticalArrangement = Arrangement.spacedBy(4.dp)) {
                         Icon(Icons.Default.Email, contentDescription = null, modifier = Modifier.size(22.dp))
-                        Text("מייל", style = MaterialTheme.typography.labelSmall)
+                        Text("מייל", style = MaterialTheme.typography.labelLarge)
                     }
                 }
             }
             TextButton(onClick = onDismiss, modifier = Modifier.fillMaxWidth()) {
-                Text("סגור", color = dismissColor)
+                Text("סגור", style = MaterialTheme.typography.bodyLarge, color = dismissColor)
             }
         }
     }
@@ -804,12 +776,12 @@ fun IssuedReceiptCard(
 private fun ReceiptSlipRow(key: String, value: String, dividerColor: Color, valueColor: Color) {
     Column {
         Row(
-            modifier = Modifier.fillMaxWidth().padding(horizontal = 14.dp, vertical = 10.dp),
+            modifier = Modifier.fillMaxWidth().padding(horizontal = 14.dp, vertical = 12.dp),
             horizontalArrangement = Arrangement.SpaceBetween,
             verticalAlignment = Alignment.CenterVertically
         ) {
-            Text(key, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
-            Text(value, style = MaterialTheme.typography.bodyMedium, fontWeight = FontWeight.SemiBold, color = valueColor)
+            Text(key, style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
+            Text(value, style = MaterialTheme.typography.bodyLarge, fontWeight = FontWeight.SemiBold, color = valueColor)
         }
         if (dividerColor != Color.Transparent) {
             HorizontalDivider(color = dividerColor, modifier = Modifier.padding(horizontal = 14.dp))
@@ -818,127 +790,146 @@ private fun ReceiptSlipRow(key: String, value: String, dividerColor: Color, valu
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
-// Client chip with inline dropdown
+// Client chip — tapping opens the bottom sheet (original behavior)
 // ─────────────────────────────────────────────────────────────────────────────
 
 @Composable
-private fun ClientChipWithDropdown(
+private fun ClientChipField(
     state: PaymentProcessingState,
     selectedClient: ClientEntity?,
     effectiveClient: ClientEntity?,
-    searchQuery: String,
-    filteredClients: List<ClientEntity>,
-    isOpen: Boolean,
-    onToggle: () -> Unit,
-    onQueryChange: (String) -> Unit,
-    onSelectClient: (ClientEntity) -> Unit,
-    onOpenSheet: () -> Unit
+    isDark: Boolean,
+    onClick: () -> Unit
 ) {
     val mr = state.matchResult
 
-    val chipBg: Color
-    val chipText: Color
-    val chipBorder: Color
-    val leadingIcon: ImageVector
-    val chipLabel: String
+    val chipBg: Color; val chipText: Color; val chipBorder: Color
+    val subtitle: String
 
     when {
         selectedClient != null -> {
             chipBg = ChipGreenBg; chipText = ChipGreenText; chipBorder = ChipGreenBorder
-            leadingIcon = Icons.Default.CheckCircle; chipLabel = selectedClient.name
+            subtitle = "לקוח קיים"
         }
         mr is MatchResult.SingleMatch && mr.isStrong -> {
             chipBg = ChipGreenBg; chipText = ChipGreenText; chipBorder = ChipGreenBorder
-            leadingIcon = Icons.Default.CheckCircle; chipLabel = mr.client.name
+            subtitle = "התאמה מלאה"
         }
         mr is MatchResult.SingleMatch && !mr.isStrong -> {
             chipBg = ChipAmberBg; chipText = ChipAmberText; chipBorder = ChipAmberBorder
-            leadingIcon = Icons.Default.HelpOutline; chipLabel = mr.client.name
+            subtitle = "התאמה חלקית"
         }
         mr is MatchResult.MultipleMatches -> {
             chipBg = ChipAmberBg; chipText = ChipAmberText; chipBorder = ChipAmberBorder
-            leadingIcon = Icons.Default.HelpOutline; chipLabel = mr.clients.first().name
+            subtitle = "מספר התאמות"
         }
         else -> {
             chipBg = ChipGrayBg; chipText = ChipGrayText; chipBorder = ChipGrayBorder
-            leadingIcon = Icons.Default.Add; chipLabel = "לחץ לבחור לקוח"
+            subtitle = ""
         }
     }
 
-    Column {
-        // ── Chip row ──
-        Surface(
-            onClick = onToggle,
-            modifier = Modifier.fillMaxWidth(),
-            shape = if (isOpen) RoundedCornerShape(topStart = 12.dp, topEnd = 12.dp)
-                    else RoundedCornerShape(12.dp),
-            color = chipBg,
-            border = BorderStroke(1.dp, chipBorder)
+    Surface(
+        onClick = onClick,
+        modifier = Modifier.fillMaxWidth(),
+        shape = RoundedCornerShape(12.dp),
+        color = chipBg,
+        border = BorderStroke(1.dp, chipBorder)
+    ) {
+        Row(
+            modifier = Modifier.padding(horizontal = 14.dp, vertical = 10.dp),
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.spacedBy(12.dp)
         ) {
-            Row(
-                modifier = Modifier.padding(horizontal = 12.dp, vertical = 10.dp),
-                verticalAlignment = Alignment.CenterVertically,
-                horizontalArrangement = Arrangement.SpaceBetween
-            ) {
-                Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                    Icon(leadingIcon, null, tint = chipText, modifier = Modifier.size(18.dp))
-                    Text(chipLabel, color = chipText, style = MaterialTheme.typography.bodyMedium, fontWeight = FontWeight.SemiBold)
+            if (effectiveClient != null) {
+                Column(modifier = Modifier.weight(1f)) {
+                    Text(effectiveClient.name, color = chipText, style = MaterialTheme.typography.bodyMedium, fontWeight = FontWeight.SemiBold)
+                    if (subtitle.isNotEmpty()) {
+                        Text(subtitle, color = chipText.copy(alpha = 0.6f), style = MaterialTheme.typography.labelSmall)
+                    }
                 }
-                Icon(
-                    if (isOpen) Icons.Default.KeyboardArrowUp else Icons.Default.KeyboardArrowDown,
-                    contentDescription = null,
-                    tint = chipText,
-                    modifier = Modifier.size(20.dp)
+            } else {
+                Icon(Icons.Default.Add, null, tint = chipText, modifier = Modifier.size(18.dp))
+                Text("לחץ לבחור לקוח", color = chipText, style = MaterialTheme.typography.bodyMedium, fontWeight = FontWeight.SemiBold,
+                    modifier = Modifier.weight(1f))
+            }
+            Icon(Icons.Default.KeyboardArrowDown, null, tint = chipText, modifier = Modifier.size(20.dp))
+        }
+    }
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Card-style editable fields matching Design 1 / Design 3
+// ─────────────────────────────────────────────────────────────────────────────
+
+@Composable
+private fun PaymentInfoField(
+    label: String,
+    value: String,
+    onValueChange: (String) -> Unit,
+    keyboardType: KeyboardType,
+    isDark: Boolean,
+    focusManager: androidx.compose.ui.focus.FocusManager
+) {
+    val bgColor  = if (isDark) Color(0xFF1E1E1E) else Color.White
+    val bdrColor = if (isDark) Color(0xFF333333) else Color(0xFFF0F0F0)
+    val lblColor = if (isDark) Color(0xFFCCCCCC) else Color(0xFF888888)
+    val txtColor = if (isDark) Color.White else Color(0xFF7B61FF)
+
+    Surface(modifier = Modifier.fillMaxWidth(), shape = RoundedCornerShape(12.dp),
+        color = bgColor, border = BorderStroke(1.dp, bdrColor)) {
+        Column(modifier = Modifier.padding(horizontal = 14.dp, vertical = 14.dp)) {
+            Text(label, color = lblColor, style = MaterialTheme.typography.labelMedium)
+            Spacer(Modifier.height(5.dp))
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                BasicTextField(
+                    value = value, onValueChange = onValueChange, singleLine = true,
+                    textStyle = MaterialTheme.typography.bodyLarge.copy(color = txtColor, fontWeight = FontWeight.Medium),
+                    keyboardOptions = KeyboardOptions(keyboardType = keyboardType, imeAction = ImeAction.Done),
+                    keyboardActions = KeyboardActions(onDone = { focusManager.clearFocus() }),
+                    cursorBrush = SolidColor(txtColor),
+                    modifier = Modifier.weight(1f)
                 )
+                Icon(Icons.Default.Edit, null, modifier = Modifier.size(14.dp), tint = lblColor)
             }
         }
+    }
+}
 
-        // ── Inline dropdown ──
-        AnimatedVisibility(visible = isOpen, enter = fadeIn() + expandVertically()) {
-            Column(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .clip(RoundedCornerShape(bottomStart = 12.dp, bottomEnd = 12.dp))
-                    .background(MaterialTheme.colorScheme.surfaceVariant)
-                    .padding(horizontal = 12.dp, vertical = 10.dp),
-                verticalArrangement = Arrangement.spacedBy(6.dp)
-            ) {
-                OutlinedTextField(
-                    value = searchQuery,
-                    onValueChange = onQueryChange,
-                    placeholder = { Text("חיפוש לקוח...") },
-                    singleLine = true,
-                    modifier = Modifier.fillMaxWidth(),
-                    shape = RoundedCornerShape(10.dp),
-                    colors = OutlinedTextFieldDefaults.colors(
-                        unfocusedContainerColor = MaterialTheme.colorScheme.surface,
-                        focusedContainerColor = MaterialTheme.colorScheme.surface
-                    ),
-                    keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Text, imeAction = ImeAction.Search)
-                )
-                filteredClients.forEach { client ->
-                    Surface(
-                        onClick = { onSelectClient(client) },
-                        modifier = Modifier.fillMaxWidth(),
-                        shape = RoundedCornerShape(8.dp),
-                        color = MaterialTheme.colorScheme.surface
-                    ) {
-                        Text(
-                            client.name,
-                            modifier = Modifier.padding(horizontal = 14.dp, vertical = 10.dp),
-                            style = MaterialTheme.typography.bodyMedium
-                        )
+@Composable
+private fun PaymentDescField(
+    value: String,
+    onValueChange: (String) -> Unit,
+    isDark: Boolean,
+    focusManager: androidx.compose.ui.focus.FocusManager
+) {
+    val bgColor  = if (isDark) Color(0xFF1E1E1E) else Color.White
+    val bdrColor = if (isDark) Color(0xFF383838) else Color(0xFFD9D0F5)
+    val lblColor = if (isDark) Color(0xFFCCCCCC) else Color(0xFF999999)
+    val txtColor = if (isDark) Color.White else Color(0xFF444444)
+    val phColor  = if (isDark) Color(0xFF999999) else Color(0xFFBBBBBB)
+
+    Surface(modifier = Modifier.fillMaxWidth(), shape = RoundedCornerShape(12.dp),
+        color = bgColor, border = BorderStroke(1.dp, bdrColor)) {
+        Column(modifier = Modifier.padding(horizontal = 14.dp, vertical = 14.dp)) {
+            Text("פרטים / תיאור שירות", color = lblColor, style = MaterialTheme.typography.labelMedium)
+            Spacer(Modifier.height(5.dp))
+            BasicTextField(
+                value = value, onValueChange = onValueChange, singleLine = true,
+                textStyle = MaterialTheme.typography.bodyLarge.copy(color = txtColor),
+                keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Text, imeAction = ImeAction.Done),
+                keyboardActions = KeyboardActions(onDone = { focusManager.clearFocus() }),
+                cursorBrush = SolidColor(txtColor),
+                decorationBox = { innerTextField ->
+                    Box {
+                        if (value.isEmpty()) {
+                            Text("הוסף תיאור לקבלה...", style = MaterialTheme.typography.bodyLarge.copy(color = phColor))
+                        }
+                        innerTextField()
                     }
-                }
-                Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                    OutlinedButton(onClick = onOpenSheet, modifier = Modifier.weight(1f), shape = RoundedCornerShape(10.dp)) {
-                        Text("חיפוש")
-                    }
-                    Button(onClick = onOpenSheet, modifier = Modifier.weight(1f), shape = RoundedCornerShape(10.dp)) {
-                        Text("לקוח חדש")
-                    }
-                }
-            }
+                },
+                modifier = Modifier.fillMaxWidth()
+            )
         }
     }
 }

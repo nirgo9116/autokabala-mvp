@@ -77,12 +77,10 @@ object PayboxShareParser {
 
         if (tessName != null) {
             // Detect if Tesseract garbled a Latin name (e.g. "Hanita" → "גמזוחבח").
-            // A name is considered all-Hebrew when every char is a Hebrew letter/mark or space/quote.
-            val isAllHebrew = tessName.all {
-                it in '\u05D0'..'\u05EA' || it in '\u05F0'..'\u05F4' ||
-                it == ' ' || it == '"' || it == '\''
-            }
-            if (isAllHebrew) {
+            // Use ML Kit hint when the Tesseract output contains no Latin letters —
+            // this tolerates OCR garbage chars like \ / | alongside Hebrew letters.
+            val hasNoLatinLetters = tessName.none { it in 'A'..'Z' || it in 'a'..'z' }
+            if (hasNoLatinLetters) {
                 // Extract Latin words from the ML Kit bounding-box hint (text above the amount).
                 // Then build a combined name: ML Kit Latin words replace the corresponding
                 // garbled Tesseract Hebrew words; any remaining Tesseract Hebrew words are kept.

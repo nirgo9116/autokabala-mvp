@@ -21,7 +21,7 @@ interface PaymentDao {
      * so that a previously-processed receipt is never overwritten.
      */
     @Insert(onConflict = OnConflictStrategy.IGNORE)
-    suspend fun insertPayment(payment: PaymentEntity)
+    suspend fun insertPayment(payment: PaymentEntity): Long
 
     /**
      * Retrieves all payments that are currently in 'pending' status.

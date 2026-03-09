@@ -41,7 +41,8 @@ data class IssuedReceiptInfo(
     val clientPhone: String?,
     val docNum: String? = null,
     val clientName: String? = null,
-    val amount: Double? = null
+    val amount: Double? = null,
+    val timestamp: Long? = null
 )
 data class PendingNewClient(val name: String, val phone: String?, val email: String?)
 
@@ -182,6 +183,14 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
     private val _uiEvent = Channel<UiEvent>()
     val uiEvent: Flow<UiEvent> = _uiEvent.receiveAsFlow()
 
+    init {
+        viewModelScope.launch {
+            receiptRepository.duplicatePaymentEvent.collect {
+                _uiEvent.send(UiEvent.ShowError("התשלום כבר קיים במערכת"))
+            }
+        }
+    }
+
     sealed class UiEvent {
         data class ShowError(val message: String) : UiEvent()
     }
@@ -207,7 +216,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                     payment, pending.name, pending.phone, pending.email, description
                 )
                 if (docUrl != null) {
-                    _justIssuedCards.value = _justIssuedCards.value + (payment.id to IssuedReceiptInfo(docUrl, pending.phone, clientName = pending.name, amount = payment.amount))
+                    _justIssuedCards.value = _justIssuedCards.value + (payment.id to IssuedReceiptInfo(docUrl, pending.phone, clientName = pending.name, amount = payment.amount, timestamp = payment.timestamp))
                     _pendingNewClients.value = _pendingNewClients.value - payment.id
                 } else {
                     _uiEvent.send(UiEvent.ShowError("שגיאה ביצירת לקוח או הפקת קבלה."))
@@ -216,7 +225,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                 val outcome = receiptRepository.issueReceiptForClient(payment, client, description)
                 if (outcome != null) {
                     val phone = client.phone ?: receiptRepository.fetchAndCachePhone(client.id)
-                    _justIssuedCards.value = _justIssuedCards.value + (payment.id to IssuedReceiptInfo(outcome.docUrl, phone, outcome.docNum, clientName = client.name, amount = payment.amount))
+                    _justIssuedCards.value = _justIssuedCards.value + (payment.id to IssuedReceiptInfo(outcome.docUrl, phone, outcome.docNum, clientName = client.name, amount = payment.amount, timestamp = payment.timestamp))
                 } else {
                     _uiEvent.send(UiEvent.ShowError("שגיאה בהפקת קבלה. בדוק חיבור לאינטרנט ונסה שוב."))
                 }

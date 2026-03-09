@@ -3,12 +3,18 @@ package com.autokabala.listener
 import android.util.Log
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.flow.Flow
+import kotlinx.coroutines.flow.MutableSharedFlow
+import kotlinx.coroutines.flow.SharedFlow
+import kotlinx.coroutines.flow.asSharedFlow
 import kotlinx.coroutines.flow.launchIn
 import kotlinx.coroutines.flow.onEach
 
 class ReceiptRepository(private val paymentDao: PaymentDao, private val clientDao: ClientDao) {
 
     val pendingPayments: Flow<List<PaymentEntity>> = paymentDao.getPendingPayments()
+
+    private val _duplicatePaymentEvent = MutableSharedFlow<Unit>()
+    val duplicatePaymentEvent: SharedFlow<Unit> = _duplicatePaymentEvent.asSharedFlow()
 
     fun startListeningForPayments(scope: CoroutineScope) {
         ListenerManager.newPaymentEvent
@@ -21,7 +27,11 @@ class ReceiptRepository(private val paymentDao: PaymentDao, private val clientDa
                     isConfirmed = paymentData.isConfirmed,
                     timestamp = paymentData.timestamp
                 )
-                paymentDao.insertPayment(paymentEntity)
+                val rowId = paymentDao.insertPayment(paymentEntity)
+                if (rowId == -1L) {
+                    Log.d("Repository", "Payment already exists in DB — emitting duplicate event")
+                    _duplicatePaymentEvent.emit(Unit)
+                }
             }
             .launchIn(scope)
     }
@@ -112,7 +122,7 @@ class ReceiptRepository(private val paymentDao: PaymentDao, private val clientDa
             issuedAmount = payment.amount
         )
         Log.d("Repository", "addFakeReceipt: payment.id=${payment.id} docNum=$fakeDocNum")
-        return IssuedReceiptInfo(docUrl = null, clientPhone = null, docNum = fakeDocNum, clientName = payment.senderName, amount = payment.amount)
+        return IssuedReceiptInfo(docUrl = null, clientPhone = null, docNum = fakeDocNum, clientName = payment.senderName, amount = payment.amount, timestamp = payment.timestamp)
     }
 
     suspend fun addFakePayment() {
