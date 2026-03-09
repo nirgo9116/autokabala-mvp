@@ -10,11 +10,15 @@ import androidx.activity.compose.BackHandler
 import androidx.activity.compose.setContent
 import androidx.activity.enableEdgeToEdge
 import androidx.compose.animation.AnimatedVisibility
+import androidx.compose.animation.expandVertically
 import androidx.compose.animation.fadeIn
 import androidx.compose.animation.scaleIn
 import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.background
+import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.isSystemInDarkTheme
+import androidx.compose.foundation.text.BasicTextField
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -37,6 +41,7 @@ import androidx.compose.material.icons.filled.CheckCircle
 import androidx.compose.material.icons.filled.Email
 import androidx.compose.material.icons.filled.HelpOutline
 import androidx.compose.material.icons.filled.KeyboardArrowDown
+import androidx.compose.material.icons.filled.KeyboardArrowUp
 import androidx.compose.material.icons.filled.List
 import androidx.compose.material.icons.filled.Clear
 import androidx.compose.material.icons.filled.Edit
@@ -62,6 +67,7 @@ import androidx.compose.material3.NavigationBar
 import androidx.compose.material3.NavigationBarItem
 import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.OutlinedTextField
+import androidx.compose.material3.OutlinedTextFieldDefaults
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.SnackbarHost
 import androidx.compose.material3.SnackbarHostState
@@ -83,7 +89,9 @@ import androidx.compose.ui.focus.onFocusChanged
 import kotlinx.coroutines.delay
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.SolidColor
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.res.painterResource
@@ -343,6 +351,9 @@ private fun MainTabsScreen(
                         viewModel.onDeletePaymentClicked(state.payment)
                     },
                     onOpenClientSheet = { clientSheetFor = it },
+                    onSelectClientInline = { paymentId, clientId ->
+                        selectedClientIdsMap = selectedClientIdsMap + (paymentId to clientId)
+                    },
                     onDismissIssuedCard = { paymentId -> viewModel.onDismissIssuedCard(paymentId) },
                     onFakeIssueReceipt = { payment -> viewModel.onFakeIssueReceiptClicked(payment) },
                     onSendWhatsAppFromCard = { info ->
@@ -403,14 +414,13 @@ fun PaymentsTab(
     onIssueReceipt: (PaymentEntity, ClientEntity, String) -> Unit,
     onDeletePayment: (PaymentProcessingState) -> Unit,
     onOpenClientSheet: (PaymentProcessingState) -> Unit,
+    onSelectClientInline: (Int, String) -> Unit,
     onDismissIssuedCard: (Int) -> Unit,
     onFakeIssueReceipt: (PaymentEntity) -> Unit,
     onSendWhatsAppFromCard: (IssuedReceiptInfo) -> Unit,
     onSendEmailFromCard: (IssuedReceiptInfo) -> Unit
 ) {
     Column(modifier = modifier.fillMaxSize().padding(horizontal = 16.dp)) {
-        Spacer(Modifier.height(16.dp))
-        Text("תשלומים ממתינים", style = MaterialTheme.typography.headlineSmall, fontWeight = FontWeight.Bold)
         Spacer(Modifier.height(12.dp))
 
         if (isProcessingShare) {
@@ -463,12 +473,14 @@ fun PaymentsTab(
                         }
                     PaymentCard(
                         state = state,
+                        allClients = allClients,
                         selectedClient = selectedClient,
                         onIssueReceipt = { client, amount, ts, description ->
                             onIssueReceipt(state.payment.copy(amount = amount, timestamp = ts), client, description)
                         },
                         onDelete = { onDeletePayment(state) },
                         onOpenSheet = { onOpenClientSheet(state) },
+                        onSelectClient = { client -> onSelectClientInline(state.payment.id, client.id) },
                         onFakeIssueReceipt = { onFakeIssueReceipt(state.payment) }
                     )
                 }
@@ -485,152 +497,186 @@ fun PaymentsTab(
 @Composable
 fun PaymentCard(
     state: PaymentProcessingState,
-    selectedClient: ClientEntity?,          // explicitly chosen via bottom sheet
+    allClients: List<ClientEntity>,
+    selectedClient: ClientEntity?,
     onIssueReceipt: (ClientEntity, Double, Long, String) -> Unit,
     onDelete: () -> Unit,
     onOpenSheet: () -> Unit,
+    onSelectClient: (ClientEntity) -> Unit,
     onFakeIssueReceipt: () -> Unit = {}
 ) {
     val payment = state.payment
-    val initialDateStr = remember(payment.timestamp) {
-        SimpleDateFormat("dd/MM/yyyy HH:mm", Locale.getDefault()).format(Date(payment.timestamp))
-    }
+    val isDark = isSystemInDarkTheme()
+
     val initialAmountStr = remember(payment.amount) {
         if (payment.amount % 1.0 == 0.0) payment.amount.toInt().toString()
         else "%.2f".format(payment.amount)
     }
+    val initialDateStr = remember(payment.timestamp) {
+        SimpleDateFormat("dd/MM/yyyy", Locale.getDefault()).format(Date(payment.timestamp))
+    }
     var editedAmountStr   by remember(payment.id) { mutableStateOf(initialAmountStr) }
     var editedDateStr     by remember(payment.id) { mutableStateOf(initialDateStr) }
     var editedDescription by remember(payment.id) { mutableStateOf("") }
-    val dateFmt = remember { SimpleDateFormat("dd/MM/yyyy HH:mm", Locale.getDefault()) }
+    var clientDropdownOpen by remember(payment.id) { mutableStateOf(false) }
+    var clientSearchQuery  by remember(payment.id) { mutableStateOf("") }
+    val dateFmt = remember { SimpleDateFormat("dd/MM/yyyy", Locale.getDefault()) }
+    val focusManager = LocalFocusManager.current
 
-    val sourceStr = when (payment.source) {
-        "bit_share" -> "Bit (שיתוף)"
-        "bit"       -> "Bit (התראה)"
-        else        -> payment.source
-    }
+    val isBit = payment.source.startsWith("bit")
+    val sourceColor = if (isBit) Color(0xFF90CAF9) else Color(0xFFCE93D8)
+    val sourceName  = if (isBit) "ביט" else "פייבוקס"
 
-    // The client that will be used when "הפק קבלה" is pressed:
-    //  • user picked one from the sheet  → selectedClient
-    //  • auto strong/weak single match   → matchResult.client
-    //  • multiple / no match             → null (button stays disabled)
     val effectiveClient: ClientEntity? = selectedClient
         ?: (state.matchResult as? MatchResult.SingleMatch)?.client
 
-    val focusManager = LocalFocusManager.current
+    val filteredClients = remember(clientSearchQuery, allClients) {
+        if (clientSearchQuery.length < 2) emptyList()
+        else allClients.filter { it.name.contains(clientSearchQuery, ignoreCase = true) }.take(5)
+    }
+
+    val heroGradient = if (isDark)
+        Brush.verticalGradient(listOf(Color(0xFF1B1B2F), Color(0xFF101020)))
+    else
+        Brush.verticalGradient(listOf(Color(0xFFEDE7FF), Color(0xFFF5F0FF)))
+    val onHeroColor    = if (isDark) Color.White else Color(0xFF1A1A1A)
+    val onHeroSubColor = onHeroColor.copy(alpha = 0.38f)
 
     Card(
         modifier = Modifier.fillMaxWidth(),
-        elevation = CardDefaults.cardElevation(defaultElevation = 2.dp)
+        elevation = CardDefaults.cardElevation(defaultElevation = 3.dp),
+        shape = RoundedCornerShape(20.dp)
     ) {
-        Column(
-            modifier = Modifier
-                .padding(16.dp)
-                .pointerInput(Unit) { detectTapGestures { focusManager.clearFocus() } },
-            verticalArrangement = Arrangement.spacedBy(6.dp)
-        ) {
-            // ── Receipt-style fields ──────────────────────────────────────────
-            PaymentField("שם", payment.senderName)
-            EditablePaymentField(
-                label = "סכום",
-                value = editedAmountStr,
-                onValueChange = { editedAmountStr = it },
-                keyboardType = KeyboardType.Number
-            )
-            EditablePaymentField(
-                label = "תאריך",
-                value = editedDateStr,
-                onValueChange = { editedDateStr = it },
-                keyboardType = KeyboardType.Text
-            )
-            PaymentField("מקור", sourceStr)
-            EditablePaymentField(
-                label = "פרטים",
-                value = editedDescription,
-                onValueChange = { editedDescription = it },
-                keyboardType = KeyboardType.Text
-            )
+        Column(modifier = Modifier.pointerInput(Unit) { detectTapGestures { focusManager.clearFocus() } }) {
 
-            HorizontalDivider(modifier = Modifier.padding(vertical = 6.dp))
+            // ── HERO: gradient top with source badge + OCR name + editable amount ──
+            Box(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .background(heroGradient)
+                    .padding(horizontal = 20.dp, vertical = 18.dp)
+            ) {
+                Column {
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.SpaceBetween,
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Box(
+                            modifier = Modifier
+                                .background(sourceColor.copy(alpha = 0.15f), RoundedCornerShape(20.dp))
+                                .border(1.dp, sourceColor.copy(alpha = 0.4f), RoundedCornerShape(20.dp))
+                                .padding(horizontal = 10.dp, vertical = 4.dp)
+                        ) {
+                            Text(sourceName, color = sourceColor, style = MaterialTheme.typography.labelMedium, fontWeight = FontWeight.Bold)
+                        }
+                        Text(
+                            text = "שם: ${payment.senderName}",
+                            style = MaterialTheme.typography.labelSmall,
+                            color = onHeroSubColor
+                        )
+                    }
+                    Spacer(Modifier.height(14.dp))
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        Text(
+                            text = "₪",
+                            color = sourceColor,
+                            style = MaterialTheme.typography.headlineMedium,
+                            fontWeight = FontWeight.Bold,
+                            modifier = Modifier.padding(end = 3.dp, bottom = 4.dp)
+                        )
+                        BasicTextField(
+                            value = editedAmountStr,
+                            onValueChange = { editedAmountStr = it },
+                            singleLine = true,
+                            textStyle = MaterialTheme.typography.displaySmall.copy(
+                                color = onHeroColor,
+                                fontWeight = FontWeight.ExtraBold
+                            ),
+                            keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Decimal, imeAction = ImeAction.Done),
+                            keyboardActions = KeyboardActions(onDone = { focusManager.clearFocus() }),
+                            cursorBrush = SolidColor(onHeroColor)
+                        )
+                    }
+                }
+            }
 
-            // ── Client selection field ────────────────────────────────────────
-            ClientChipField(
-                state = state,
-                selectedClient = selectedClient,
-                onClick = onOpenSheet
-            )
-            Text(
-                text = "לחץ לשנות לקוח או ליצור לקוח חדש",
-                style = MaterialTheme.typography.labelSmall,
-                color = MaterialTheme.colorScheme.onSurfaceVariant
-            )
-
-            // ── Action buttons ────────────────────────────────────────────────
-            Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                val parsedAmount = editedAmountStr.replace(",", "").toDoubleOrNull()
-                val parsedTs    = runCatching { dateFmt.parse(editedDateStr)?.time }.getOrNull()
-                Button(
-                    onClick = {
-                        effectiveClient?.let { client ->
-                            val amount = parsedAmount ?: payment.amount
-                            val ts     = parsedTs    ?: payment.timestamp
-                            onIssueReceipt(client, amount, ts, editedDescription)
+            // ── BODY ──────────────────────────────────────────────────────────
+            Column(
+                modifier = Modifier.padding(horizontal = 16.dp, vertical = 14.dp),
+                verticalArrangement = Arrangement.spacedBy(10.dp)
+            ) {
+                ClientChipWithDropdown(
+                    state = state,
+                    selectedClient = selectedClient,
+                    effectiveClient = effectiveClient,
+                    searchQuery = clientSearchQuery,
+                    filteredClients = filteredClients,
+                    isOpen = clientDropdownOpen,
+                    onToggle = {
+                        clientDropdownOpen = !clientDropdownOpen
+                        if (clientDropdownOpen) {
+                            clientSearchQuery = effectiveClient?.name ?: ""
+                            focusManager.clearFocus()
                         }
                     },
-                    enabled = effectiveClient != null,
-                    modifier = Modifier.weight(1f)
-                ) {
-                    Text("הפק קבלה")
-                }
-                OutlinedButton(onClick = onDelete) {
-                    Text("מחק")
-                }
-            }
+                    onQueryChange = { clientSearchQuery = it },
+                    onSelectClient = { client ->
+                        onSelectClient(client)
+                        clientDropdownOpen = false
+                    },
+                    onOpenSheet = {
+                        clientDropdownOpen = false
+                        onOpenSheet()
+                    }
+                )
 
-            if (BuildConfig.DEBUG) {
-                TextButton(
-                    onClick = onFakeIssueReceipt,
-                    modifier = Modifier.fillMaxWidth()
-                ) {
-                    Text(
-                        "🔬 הדמיית הפקת קבלה",
-                        style = MaterialTheme.typography.labelSmall,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                OutlinedTextField(
+                    value = editedDateStr,
+                    onValueChange = { editedDateStr = it },
+                    label = { Text("תאריך") },
+                    singleLine = true,
+                    keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Text, imeAction = ImeAction.Done),
+                    keyboardActions = KeyboardActions(onDone = { focusManager.clearFocus() }),
+                    modifier = Modifier.fillMaxWidth(),
+                    textStyle = MaterialTheme.typography.bodyMedium.copy(fontWeight = FontWeight.Medium),
+                    colors = OutlinedTextFieldDefaults.colors(
+                        unfocusedBorderColor = MaterialTheme.colorScheme.outline.copy(alpha = 0.4f)
                     )
-                }
-            }
+                )
 
-            // ── Send buttons (always visible, disabled until receipt issued) ──
-            Text(
-                "שלח ללקוח",
-                style = MaterialTheme.typography.titleSmall,
-                modifier = Modifier.fillMaxWidth(),
-                textAlign = TextAlign.Center,
-                color = MaterialTheme.colorScheme.onSurfaceVariant
-            )
-            Row(
-                modifier = Modifier.fillMaxWidth(),
-                horizontalArrangement = Arrangement.spacedBy(8.dp)
-            ) {
-                OutlinedButton(
-                    onClick = {},
-                    enabled = false,
-                    modifier = Modifier.weight(1f),
-                    border = BorderStroke(1.dp, MaterialTheme.colorScheme.outline.copy(alpha = 0.4f))
-                ) {
-                    Icon(Icons.Default.Person, contentDescription = null, modifier = Modifier.size(16.dp))
-                    Spacer(Modifier.width(4.dp))
-                    Text("וואטסאפ")
+                OutlinedTextField(
+                    value = editedDescription,
+                    onValueChange = { editedDescription = it },
+                    label = { Text("פרטים") },
+                    placeholder = { Text("תיאור שירות / מוצר...") },
+                    singleLine = true,
+                    keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Text, imeAction = ImeAction.Done),
+                    keyboardActions = KeyboardActions(onDone = { focusManager.clearFocus() }),
+                    modifier = Modifier.fillMaxWidth(),
+                    textStyle = MaterialTheme.typography.bodyMedium
+                )
+
+                val parsedAmount = editedAmountStr.replace(",", "").toDoubleOrNull()
+                val parsedTs    = runCatching { dateFmt.parse(editedDateStr)?.time }.getOrNull()
+                Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                    Button(
+                        onClick = {
+                            effectiveClient?.let { client ->
+                                onIssueReceipt(client, parsedAmount ?: payment.amount, parsedTs ?: payment.timestamp, editedDescription)
+                            }
+                        },
+                        enabled = effectiveClient != null,
+                        modifier = Modifier.weight(1f)
+                    ) { Text("הפק קבלה") }
+                    OutlinedButton(onClick = onDelete) { Text("מחק") }
                 }
-                OutlinedButton(
-                    onClick = {},
-                    enabled = false,
-                    modifier = Modifier.weight(1f),
-                    border = BorderStroke(1.dp, MaterialTheme.colorScheme.outline.copy(alpha = 0.4f))
-                ) {
-                    Icon(Icons.Default.Email, contentDescription = null, modifier = Modifier.size(16.dp))
-                    Spacer(Modifier.width(4.dp))
-                    Text("מייל")
+
+                if (BuildConfig.DEBUG) {
+                    TextButton(onClick = onFakeIssueReceipt, modifier = Modifier.fillMaxWidth()) {
+                        Text("🔬 הדמיית הפקת קבלה", style = MaterialTheme.typography.labelSmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant)
+                    }
                 }
             }
         }
@@ -648,231 +694,251 @@ fun IssuedReceiptCard(
     onSendEmail: () -> Unit,
     onDismiss: () -> Unit
 ) {
+    val isDark = isSystemInDarkTheme()
+    val amountStr = info.amount?.let {
+        if (it % 1.0 == 0.0) "₪${it.toInt()}" else "₪${"%.2f".format(it)}"
+    }
+
+    // ── Colors ────────────────────────────────────────────────────────────────
+    val cardBg       = if (isDark) Color(0xFF161622) else Color(0xFFF4F0FF)
+    val circleRingBg = if (isDark) Color(0xFF6650A4).copy(alpha = 0.15f) else Color(0xFFEDE7FF)
+    val circleRingBorder = if (isDark) Color(0xFF6650A4).copy(alpha = 0.5f) else Color(0xFF7B61FF).copy(alpha = 0.4f)
+    val checkmarkColor = if (isDark) Color(0xFFD0BCFF) else Color(0xFF7B61FF)
+    val titleColor   = if (isDark) Color.White else Color(0xFF1A1A1A)
+    val docNumColor  = if (isDark) Color(0xFFD0BCFF).copy(alpha = 0.7f) else Color(0xFF7B61FF)
+    val dividerColor = if (isDark) Color.White.copy(alpha = 0.08f) else Color(0xFFE0E0E0)
+    val sendLabelColor = if (isDark) Color.White.copy(alpha = 0.45f) else Color(0xFF888888)
+    val dismissColor = if (isDark) Color.White.copy(alpha = 0.35f) else Color(0xFFAAAAAA)
+
     Card(
         modifier = Modifier.fillMaxWidth(),
         elevation = CardDefaults.cardElevation(defaultElevation = 4.dp),
-        colors = CardDefaults.cardColors(containerColor = Color(0xFF4CAF50).copy(alpha = 0.08f))
+        shape = RoundedCornerShape(20.dp),
+        colors = CardDefaults.cardColors(containerColor = cardBg)
     ) {
         Column(
-            modifier = Modifier
-                .padding(horizontal = 24.dp, vertical = 28.dp)
-                .fillMaxWidth(),
+            modifier = Modifier.padding(horizontal = 24.dp, vertical = 24.dp).fillMaxWidth(),
             horizontalAlignment = Alignment.CenterHorizontally,
-            verticalArrangement = Arrangement.spacedBy(8.dp)
+            verticalArrangement = Arrangement.spacedBy(10.dp)
         ) {
-            Icon(
-                Icons.Default.CheckCircle,
-                contentDescription = null,
-                modifier = Modifier.size(72.dp),
-                tint = Color(0xFF4CAF50)
-            )
-            Text(
-                "קבלה הופקה בהצלחה",
-                style = MaterialTheme.typography.headlineSmall,
-                fontWeight = FontWeight.Bold,
-                textAlign = TextAlign.Center
-            )
-            if (info.docNum != null) {
-                Text(
-                    "מספר קבלה: ${info.docNum}",
-                    style = MaterialTheme.typography.bodyMedium,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant,
-                    textAlign = TextAlign.Center
-                )
-            }
-            Spacer(Modifier.height(4.dp))
-            Text(
-                "שלח ללקוח",
-                style = MaterialTheme.typography.titleLarge,
-                fontWeight = FontWeight.Bold,
-                textAlign = TextAlign.Center
-            )
-            Row(
-                modifier = Modifier.fillMaxWidth(),
-                horizontalArrangement = Arrangement.spacedBy(12.dp)
+            // ── D-style circle + checkmark ────────────────────────────────────
+            Box(
+                modifier = Modifier
+                    .size(72.dp)
+                    .background(circleRingBg, RoundedCornerShape(percent = 50))
+                    .border(2.dp, circleRingBorder, RoundedCornerShape(percent = 50)),
+                contentAlignment = Alignment.Center
             ) {
+                Text("✓", style = MaterialTheme.typography.headlineMedium, color = checkmarkColor, fontWeight = FontWeight.Bold)
+            }
+            Text("קבלה הופקה!", style = MaterialTheme.typography.headlineSmall, fontWeight = FontWeight.Bold, color = titleColor)
+            if (info.docNum != null) {
+                Text("מספר קבלה: ${info.docNum}", style = MaterialTheme.typography.bodySmall, color = docNumColor)
+            }
+
+            // ── B-style receipt rows ──────────────────────────────────────────
+            if (info.clientName != null || amountStr != null) {
+                // Receipt details card (white inner card in light mode)
+                val rowsBg = if (isDark) Color.Transparent else Color.White
+                Surface(
+                    modifier = Modifier.fillMaxWidth(),
+                    shape = RoundedCornerShape(12.dp),
+                    color = rowsBg
+                ) {
+                    Column {
+                        if (info.clientName != null) {
+                            ReceiptSlipRow("לקוח", info.clientName, dividerColor, titleColor)
+                        }
+                        if (amountStr != null) {
+                            ReceiptSlipRow("סכום", amountStr, Color.Transparent,
+                                if (isDark) Color(0xFF4CAF50) else Color(0xFF2E7D32))
+                        }
+                    }
+                }
+            }
+
+            HorizontalDivider(color = dividerColor)
+
+            // ── Send buttons ──────────────────────────────────────────────────
+            Text("שלח ללקוח", style = MaterialTheme.typography.labelMedium, color = sendLabelColor)
+            Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(10.dp)) {
                 Button(
                     onClick = onSendWhatsApp,
                     enabled = info.clientPhone != null,
-                    modifier = Modifier.weight(1f).height(72.dp),
+                    modifier = Modifier.weight(1f).height(64.dp),
                     shape = RoundedCornerShape(12.dp),
                     colors = ButtonDefaults.buttonColors(
                         containerColor = Color(0xFF43C768),
-                        disabledContainerColor = Color(0xFF43C768).copy(alpha = 0.35f)
+                        disabledContainerColor = Color(0xFF43C768).copy(alpha = 0.3f)
                     )
                 ) {
-                    Column(
-                        horizontalAlignment = Alignment.CenterHorizontally,
-                        verticalArrangement = Arrangement.spacedBy(4.dp)
-                    ) {
-                        Icon(
-                            painter = painterResource(R.drawable.ic_whatsapp),
-                            contentDescription = null,
-                            modifier = Modifier.size(24.dp)
-                        )
-                        Text("וואטסאפ", style = MaterialTheme.typography.labelMedium)
+                    Column(horizontalAlignment = Alignment.CenterHorizontally, verticalArrangement = Arrangement.spacedBy(3.dp)) {
+                        Icon(painter = painterResource(R.drawable.ic_whatsapp), contentDescription = null, modifier = Modifier.size(22.dp))
+                        Text("וואטסאפ", style = MaterialTheme.typography.labelSmall)
                     }
                 }
                 Button(
                     onClick = onSendEmail,
                     enabled = info.docNum != null,
-                    modifier = Modifier.weight(1f).height(72.dp),
+                    modifier = Modifier.weight(1f).height(64.dp),
                     shape = RoundedCornerShape(12.dp),
                     colors = ButtonDefaults.buttonColors(
                         containerColor = Color(0xFF2196F3),
-                        disabledContainerColor = Color(0xFF2196F3).copy(alpha = 0.35f)
+                        disabledContainerColor = Color(0xFF2196F3).copy(alpha = 0.3f)
                     )
                 ) {
-                    Column(
-                        horizontalAlignment = Alignment.CenterHorizontally,
-                        verticalArrangement = Arrangement.spacedBy(4.dp)
-                    ) {
-                        Icon(Icons.Default.Email, contentDescription = null, modifier = Modifier.size(24.dp))
-                        Text("מייל", style = MaterialTheme.typography.labelMedium)
+                    Column(horizontalAlignment = Alignment.CenterHorizontally, verticalArrangement = Arrangement.spacedBy(3.dp)) {
+                        Icon(Icons.Default.Email, contentDescription = null, modifier = Modifier.size(22.dp))
+                        Text("מייל", style = MaterialTheme.typography.labelSmall)
                     }
                 }
             }
             TextButton(onClick = onDismiss, modifier = Modifier.fillMaxWidth()) {
-                Text("סגור", color = MaterialTheme.colorScheme.onSurfaceVariant)
+                Text("סגור", color = dismissColor)
             }
         }
     }
 }
 
 @Composable
-private fun PaymentField(label: String, value: String) {
-    Row(verticalAlignment = Alignment.CenterVertically) {
-        Text(
-            text = "$label:",
-            style = MaterialTheme.typography.bodySmall,
-            color = MaterialTheme.colorScheme.onSurfaceVariant,
-            modifier = Modifier.width(52.dp)
-        )
-        Text(
-            text = value,
-            style = MaterialTheme.typography.bodyMedium,
-            fontWeight = FontWeight.Medium
-        )
-    }
-}
-
-@Composable
-private fun EditablePaymentField(
-    label: String,
-    value: String,
-    onValueChange: (String) -> Unit,
-    keyboardType: KeyboardType = KeyboardType.Text
-) {
-    val focusManager = LocalFocusManager.current
-    Row(verticalAlignment = Alignment.CenterVertically) {
-        Text(
-            text = "$label:",
-            style = MaterialTheme.typography.bodySmall,
-            color = MaterialTheme.colorScheme.onSurfaceVariant,
-            modifier = Modifier.width(52.dp)
-        )
-        OutlinedTextField(
-            value = value,
-            onValueChange = onValueChange,
-            singleLine = true,
-            keyboardOptions = KeyboardOptions(
-                keyboardType = keyboardType,
-                imeAction = ImeAction.Done
-            ),
-            keyboardActions = KeyboardActions(onDone = { focusManager.clearFocus() }),
-            textStyle = MaterialTheme.typography.bodyMedium.copy(fontWeight = FontWeight.Medium),
-            modifier = Modifier.fillMaxWidth()
-        )
+private fun ReceiptSlipRow(key: String, value: String, dividerColor: Color, valueColor: Color) {
+    Column {
+        Row(
+            modifier = Modifier.fillMaxWidth().padding(horizontal = 14.dp, vertical = 10.dp),
+            horizontalArrangement = Arrangement.SpaceBetween,
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            Text(key, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+            Text(value, style = MaterialTheme.typography.bodyMedium, fontWeight = FontWeight.SemiBold, color = valueColor)
+        }
+        if (dividerColor != Color.Transparent) {
+            HorizontalDivider(color = dividerColor, modifier = Modifier.padding(horizontal = 14.dp))
+        }
     }
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
-// Client chip / selection field
+// Client chip with inline dropdown
 // ─────────────────────────────────────────────────────────────────────────────
 
 @Composable
-private fun ClientChipField(
+private fun ClientChipWithDropdown(
     state: PaymentProcessingState,
     selectedClient: ClientEntity?,
-    onClick: () -> Unit
+    effectiveClient: ClientEntity?,
+    searchQuery: String,
+    filteredClients: List<ClientEntity>,
+    isOpen: Boolean,
+    onToggle: () -> Unit,
+    onQueryChange: (String) -> Unit,
+    onSelectClient: (ClientEntity) -> Unit,
+    onOpenSheet: () -> Unit
 ) {
-    // Resolve what to show in the chip
-    val isFromSheet = selectedClient != null
     val mr = state.matchResult
 
-    val displayClient: ClientEntity?
     val chipBg: Color
     val chipText: Color
     val chipBorder: Color
     val leadingIcon: ImageVector
+    val chipLabel: String
 
     when {
-        isFromSheet -> {
-            // User explicitly confirmed a client → always green
-            displayClient = selectedClient
+        selectedClient != null -> {
             chipBg = ChipGreenBg; chipText = ChipGreenText; chipBorder = ChipGreenBorder
-            leadingIcon = Icons.Default.CheckCircle
+            leadingIcon = Icons.Default.CheckCircle; chipLabel = selectedClient.name
         }
         mr is MatchResult.SingleMatch && mr.isStrong -> {
-            displayClient = mr.client
             chipBg = ChipGreenBg; chipText = ChipGreenText; chipBorder = ChipGreenBorder
-            leadingIcon = Icons.Default.CheckCircle
+            leadingIcon = Icons.Default.CheckCircle; chipLabel = mr.client.name
         }
         mr is MatchResult.SingleMatch && !mr.isStrong -> {
-            displayClient = mr.client
             chipBg = ChipAmberBg; chipText = ChipAmberText; chipBorder = ChipAmberBorder
-            leadingIcon = Icons.Default.HelpOutline
+            leadingIcon = Icons.Default.HelpOutline; chipLabel = mr.client.name
         }
         mr is MatchResult.MultipleMatches -> {
-            // Show first matched client as a suggestion (amber = needs confirmation)
-            displayClient = mr.clients.first()
             chipBg = ChipAmberBg; chipText = ChipAmberText; chipBorder = ChipAmberBorder
-            leadingIcon = Icons.Default.HelpOutline
+            leadingIcon = Icons.Default.HelpOutline; chipLabel = mr.clients.first().name
         }
         else -> {
-            displayClient = null
             chipBg = ChipGrayBg; chipText = ChipGrayText; chipBorder = ChipGrayBorder
-            leadingIcon = Icons.Default.Add
+            leadingIcon = Icons.Default.Add; chipLabel = "לחץ לבחור לקוח"
         }
     }
 
-    val chipLabel = displayClient?.name ?: "לחץ לבחור לקוח"
-
-    Surface(
-        onClick = onClick,
-        modifier = Modifier.fillMaxWidth(),
-        shape = RoundedCornerShape(8.dp),
-        color = chipBg,
-        border = BorderStroke(1.dp, chipBorder)
-    ) {
-        Row(
-            modifier = Modifier.padding(horizontal = 12.dp, vertical = 10.dp),
-            verticalAlignment = Alignment.CenterVertically,
-            horizontalArrangement = Arrangement.SpaceBetween
+    Column {
+        // ── Chip row ──
+        Surface(
+            onClick = onToggle,
+            modifier = Modifier.fillMaxWidth(),
+            shape = if (isOpen) RoundedCornerShape(topStart = 12.dp, topEnd = 12.dp)
+                    else RoundedCornerShape(12.dp),
+            color = chipBg,
+            border = BorderStroke(1.dp, chipBorder)
         ) {
             Row(
+                modifier = Modifier.padding(horizontal = 12.dp, vertical = 10.dp),
                 verticalAlignment = Alignment.CenterVertically,
-                horizontalArrangement = Arrangement.spacedBy(8.dp)
+                horizontalArrangement = Arrangement.SpaceBetween
             ) {
+                Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                    Icon(leadingIcon, null, tint = chipText, modifier = Modifier.size(18.dp))
+                    Text(chipLabel, color = chipText, style = MaterialTheme.typography.bodyMedium, fontWeight = FontWeight.SemiBold)
+                }
                 Icon(
-                    imageVector = leadingIcon,
+                    if (isOpen) Icons.Default.KeyboardArrowUp else Icons.Default.KeyboardArrowDown,
                     contentDescription = null,
                     tint = chipText,
-                    modifier = Modifier.size(18.dp)
-                )
-                Text(
-                    text = chipLabel,
-                    color = chipText,
-                    style = MaterialTheme.typography.bodyMedium,
-                    fontWeight = FontWeight.SemiBold
+                    modifier = Modifier.size(20.dp)
                 )
             }
-            Icon(
-                imageVector = Icons.Default.KeyboardArrowDown,
-                contentDescription = "בחר לקוח",
-                tint = chipText,
-                modifier = Modifier.size(20.dp)
-            )
+        }
+
+        // ── Inline dropdown ──
+        AnimatedVisibility(visible = isOpen, enter = fadeIn() + expandVertically()) {
+            Column(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .clip(RoundedCornerShape(bottomStart = 12.dp, bottomEnd = 12.dp))
+                    .background(MaterialTheme.colorScheme.surfaceVariant)
+                    .padding(horizontal = 12.dp, vertical = 10.dp),
+                verticalArrangement = Arrangement.spacedBy(6.dp)
+            ) {
+                OutlinedTextField(
+                    value = searchQuery,
+                    onValueChange = onQueryChange,
+                    placeholder = { Text("חיפוש לקוח...") },
+                    singleLine = true,
+                    modifier = Modifier.fillMaxWidth(),
+                    shape = RoundedCornerShape(10.dp),
+                    colors = OutlinedTextFieldDefaults.colors(
+                        unfocusedContainerColor = MaterialTheme.colorScheme.surface,
+                        focusedContainerColor = MaterialTheme.colorScheme.surface
+                    ),
+                    keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Text, imeAction = ImeAction.Search)
+                )
+                filteredClients.forEach { client ->
+                    Surface(
+                        onClick = { onSelectClient(client) },
+                        modifier = Modifier.fillMaxWidth(),
+                        shape = RoundedCornerShape(8.dp),
+                        color = MaterialTheme.colorScheme.surface
+                    ) {
+                        Text(
+                            client.name,
+                            modifier = Modifier.padding(horizontal = 14.dp, vertical = 10.dp),
+                            style = MaterialTheme.typography.bodyMedium
+                        )
+                    }
+                }
+                Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                    OutlinedButton(onClick = onOpenSheet, modifier = Modifier.weight(1f), shape = RoundedCornerShape(10.dp)) {
+                        Text("חיפוש")
+                    }
+                    Button(onClick = onOpenSheet, modifier = Modifier.weight(1f), shape = RoundedCornerShape(10.dp)) {
+                        Text("לקוח חדש")
+                    }
+                }
+            }
         }
     }
 }

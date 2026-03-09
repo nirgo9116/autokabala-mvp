@@ -36,7 +36,13 @@ import java.io.FileOutputStream
 import kotlin.coroutines.resume
 
 data class OverdueClient(val client: ClientEntity, val daysSinceLastPayment: Int)
-data class IssuedReceiptInfo(val docUrl: String?, val clientPhone: String?, val docNum: String? = null)
+data class IssuedReceiptInfo(
+    val docUrl: String?,
+    val clientPhone: String?,
+    val docNum: String? = null,
+    val clientName: String? = null,
+    val amount: Double? = null
+)
 data class PendingNewClient(val name: String, val phone: String?, val email: String?)
 
 // Represents the result of matching a payment to existing clients
@@ -201,7 +207,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                     payment, pending.name, pending.phone, pending.email, description
                 )
                 if (docUrl != null) {
-                    _justIssuedCards.value = _justIssuedCards.value + (payment.id to IssuedReceiptInfo(docUrl, pending.phone))
+                    _justIssuedCards.value = _justIssuedCards.value + (payment.id to IssuedReceiptInfo(docUrl, pending.phone, clientName = pending.name, amount = payment.amount))
                     _pendingNewClients.value = _pendingNewClients.value - payment.id
                 } else {
                     _uiEvent.send(UiEvent.ShowError("שגיאה ביצירת לקוח או הפקת קבלה."))
@@ -210,7 +216,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                 val outcome = receiptRepository.issueReceiptForClient(payment, client, description)
                 if (outcome != null) {
                     val phone = client.phone ?: receiptRepository.fetchAndCachePhone(client.id)
-                    _justIssuedCards.value = _justIssuedCards.value + (payment.id to IssuedReceiptInfo(outcome.docUrl, phone, outcome.docNum))
+                    _justIssuedCards.value = _justIssuedCards.value + (payment.id to IssuedReceiptInfo(outcome.docUrl, phone, outcome.docNum, clientName = client.name, amount = payment.amount))
                 } else {
                     _uiEvent.send(UiEvent.ShowError("שגיאה בהפקת קבלה. בדוק חיבור לאינטרנט ונסה שוב."))
                 }

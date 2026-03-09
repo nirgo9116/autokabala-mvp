@@ -112,7 +112,7 @@ class ReceiptRepository(private val paymentDao: PaymentDao, private val clientDa
             issuedAmount = payment.amount
         )
         Log.d("Repository", "addFakeReceipt: payment.id=${payment.id} docNum=$fakeDocNum")
-        return IssuedReceiptInfo(docUrl = null, clientPhone = null, docNum = fakeDocNum)
+        return IssuedReceiptInfo(docUrl = null, clientPhone = null, docNum = fakeDocNum, clientName = payment.senderName, amount = payment.amount)
     }
 
     suspend fun addFakePayment() {
