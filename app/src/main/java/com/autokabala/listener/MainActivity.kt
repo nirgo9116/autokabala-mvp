@@ -266,7 +266,8 @@ private fun MainTabsScreen(
     LaunchedEffect(Unit) {
         viewModel.uiEvent.collectLatest { event ->
             when (event) {
-                is MainViewModel.UiEvent.ShowError -> snackbarHostState.showSnackbar(event.message)
+                is MainViewModel.UiEvent.ShowError   -> snackbarHostState.showSnackbar(event.message)
+                is MainViewModel.UiEvent.ShowMessage -> snackbarHostState.showSnackbar(event.message)
             }
         }
     }
@@ -363,7 +364,7 @@ private fun MainTabsScreen(
                         launchWhatsApp(context, docUrl = info.docUrl, clientPhone = info.clientPhone)
                     },
                     onSendEmailFromCard = { info ->
-                        // email auto-send triggered separately; no-op for manual send without docNum
+                        info.docNum?.let { viewModel.onSendEmailFromIssuedCard(it) }
                     }
                 )
                 1 -> SettingsTab(
@@ -736,12 +737,11 @@ fun IssuedReceiptCard(
             Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(10.dp)) {
                 Button(
                     onClick = onSendWhatsApp,
-                    enabled = info.clientPhone != null,
+                    enabled = true,
                     modifier = Modifier.weight(1f).height(68.dp),
                     shape = RoundedCornerShape(12.dp),
                     colors = ButtonDefaults.buttonColors(
-                        containerColor = Color(0xFF81C784),
-                        disabledContainerColor = Color(0xFF81C784).copy(alpha = 0.3f)
+                        containerColor = Color(0xFF81C784)
                     )
                 ) {
                     Column(horizontalAlignment = Alignment.CenterHorizontally, verticalArrangement = Arrangement.spacedBy(4.dp)) {

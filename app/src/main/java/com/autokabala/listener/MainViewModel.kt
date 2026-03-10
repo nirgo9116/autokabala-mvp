@@ -193,6 +193,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
 
     sealed class UiEvent {
         data class ShowError(val message: String) : UiEvent()
+        data class ShowMessage(val message: String) : UiEvent()
     }
 
     // --- Event Handlers ---
@@ -279,8 +280,25 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
 
     fun onFakeIssueReceiptClicked(payment: PaymentEntity) {
         viewModelScope.launch {
+            val matchedClientName = paymentProcessingStates.value
+                .find { it.payment.id == payment.id }
+                ?.matchResult
+                ?.let { it as? MatchResult.SingleMatch }
+                ?.client?.name
             val info = receiptRepository.addFakeReceipt(payment)
-            _justIssuedCards.value = _justIssuedCards.value + (payment.id to info)
+            val finalInfo = if (matchedClientName != null) info.copy(clientName = matchedClientName) else info
+            _justIssuedCards.value = _justIssuedCards.value + (payment.id to finalInfo)
+        }
+    }
+
+    fun onSendEmailFromIssuedCard(docNum: String) {
+        viewModelScope.launch {
+            val success = ReceiptApiClient.sendDocumentByEmail(docNum)
+            if (success) {
+                _uiEvent.send(UiEvent.ShowMessage("מייל נשלח ללקוח ע״י iCount ✓"))
+            } else {
+                _uiEvent.send(UiEvent.ShowError("שליחת המייל נכשלה — בדוק חיבור לאינטרנט"))
+            }
         }
     }
 
