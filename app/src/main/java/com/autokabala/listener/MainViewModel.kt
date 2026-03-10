@@ -161,6 +161,10 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
             } else emptyList()
 
             val matchingClients = fullNameMatches.ifEmpty { firstNameMatches }
+                .sortedByDescending { client ->
+                    val clientFirst = client.name.trim().split(Regex("\\s+")).firstOrNull() ?: ""
+                    if (wordsMatch(clientFirst, senderFirst)) 1 else 0
+                }
             val isStrong = fullNameMatches.isNotEmpty() // green only when full name confirmed
             val matchResult = when {
                 matchingClients.isEmpty() -> MatchResult.NoMatch
