@@ -37,8 +37,16 @@ object PayboxShareParser {
         val latinLines  = latinText.split("\n").map  { it.trim() }.filter { it.isNotBlank() }
 
         Log.d(TAG, "=== PayboxParser START ===")
-        hebrewLines.forEachIndexed { i, line -> Log.d(TAG, "  Line[$i]: '$line'") }
-        if (mlKitNameHint != null) Log.d(TAG, "ML Kit name hint (bbox above amount): '$mlKitNameHint'")
+        Log.d(TAG, "--- Tesseract lines ---")
+        hebrewLines.forEachIndexed { i, line -> Log.d(TAG, "  T[$i]: '$line'") }
+        if (latinText != hebrewText) {
+            Log.d(TAG, "--- ML Kit lines ---")
+            latinLines.forEachIndexed { i, line -> Log.d(TAG, "  M[$i]: '$line'") }
+        } else {
+            Log.d(TAG, "  (ML Kit text identical to Tesseract — single engine)")
+        }
+        Log.d(TAG, "  mlKitAmount (bbox spatial): $mlKitAmount")
+        if (mlKitNameHint != null) Log.d(TAG, "  mlKitNameHint (bbox above amount): '$mlKitNameHint'")
 
         val senderName = extractSenderName(hebrewLines, latinLines, mlKitNameHint) ?: run {
             Log.w(TAG, "Cannot extract sender name")
@@ -46,13 +54,27 @@ object PayboxShareParser {
         }
 
         val amount = if (mlKitAmount != null) {
-            Log.d(TAG, "Amount from ML Kit bounding-box: $mlKitAmount")
+            Log.d(TAG, "Amount → ML Kit bbox won: $mlKitAmount")
             mlKitAmount
         } else {
-            extractAmount(hebrewLines)
+            Log.d(TAG, "--- Amount extraction (no bbox result) ---")
+            extractAmount(hebrewLines, "Tesseract")
+                ?: if (latinLines !== hebrewLines && latinText != hebrewText
+                        && latinLines.any { it.contains("₪") }) {
+                       // Only scan ML Kit text lines if any of them actually contain ₪.
+                       // For Paybox, ML Kit returns only bottom-section Latin text (hex, date,
+                       // PayBox logo) which never contains ₪ — skip to avoid wasted work.
+                       extractAmount(latinLines, "MLKit").also {
+                           if (it != null) Log.d(TAG, "Amount → ML Kit text fallback: $it")
+                           else Log.w(TAG, "Amount → ML Kit text also failed")
+                       }
+                   } else {
+                       Log.d(TAG, "ML Kit text lines contain no ₪ — skipping text scan")
+                       null
+                   }
         } ?: run {
-            Log.w(TAG, "Cannot extract amount")
-            return null
+            Log.w(TAG, "Amount → ALL engines failed — creating with amount=0 for manual input")
+            0.0
         }
 
         // ML Kit first for timestamp — more accurate on digits; Tesseract as fallback only
@@ -159,25 +181,40 @@ object PayboxShareParser {
 
     // ── Amount ────────────────────────────────────────────────────────────────
 
-    private fun extractAmount(lines: List<String>): Double? {
+    private fun extractAmount(lines: List<String>, engine: String = "?"): Double? {
+        Log.d(TAG, "  [$engine] scanning ${lines.size} lines for amount:")
         lines.forEachIndexed { i, line ->
             val nums = buildList { val m = anyNumber.matcher(line); while (m.find()) add(m.group(1)) }
-            if (nums.isNotEmpty()) Log.d(TAG, "  Amount candidates line[$i]: $nums | '$line'")
+            if (nums.isNotEmpty()) Log.d(TAG, "    [$engine] L$i candidates=$nums | '$line'")
+            else Log.d(TAG, "    [$engine] L$i no-numbers | '$line'")
         }
         for ((i, line) in lines.withIndex()) {
+            // Skip approval-number lines ("מספר אישור" / OCR variant "מספר אישזר").
+            // The confirmation number on this line looks like an amount but isn't.
+            if (line.trimStart().startsWith("מספר")) {
+                Log.d(TAG, "    [$engine] L$i SKIPPED (approval-number line)")
+                continue
+            }
             shekelReversed.matcher(line).let { m ->
                 while (m.find()) {
                     val v = m.group(1)?.replace(",", "")?.toDoubleOrNull()
-                    if (v != null && v in 1.0..99_999.0) { Log.d(TAG, "Amount [₪N] line $i: $v"); return v }
+                    if (v != null && v in 1.0..99_999.0) {
+                        Log.d(TAG, "  [$engine] Amount [₪N] L$i → $v")
+                        return v
+                    }
                 }
             }
             shekelNormal.matcher(line).let { m ->
                 while (m.find()) {
                     val v = m.group(1)?.replace(",", "")?.toDoubleOrNull()
-                    if (v != null && v in 1.0..99_999.0) { Log.d(TAG, "Amount [N₪] line $i: $v"); return v }
+                    if (v != null && v in 1.0..99_999.0) {
+                        Log.d(TAG, "  [$engine] Amount [N₪] L$i → $v")
+                        return v
+                    }
                 }
             }
         }
+        Log.d(TAG, "  [$engine] no amount found")
         return null
     }
 

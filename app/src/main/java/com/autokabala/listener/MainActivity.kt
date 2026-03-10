@@ -534,6 +534,7 @@ fun PaymentCard(
     var editedAmountStr   by remember(payment.id) { mutableStateOf(initialAmountStr) }
     var editedDateStr     by remember(payment.id) { mutableStateOf(initialDateStr) }
     var editedDescription by remember(payment.id) { mutableStateOf("") }
+    val amountMissing = payment.amount == 0.0
     val dateFmt = remember { SimpleDateFormat("dd/MM/yyyy", Locale.getDefault()) }
     val focusManager = LocalFocusManager.current
 
@@ -588,7 +589,8 @@ fun PaymentCard(
                             horizontalArrangement = Arrangement.End,
                             verticalAlignment = Alignment.Bottom
                         ) {
-                            Text("₪", color = sourceColor, style = MaterialTheme.typography.headlineMedium,
+                            Text("₪", color = if (amountMissing) Color(0xFFFF6B6B) else sourceColor,
+                                style = MaterialTheme.typography.headlineMedium,
                                 fontWeight = FontWeight.Bold, modifier = Modifier.padding(bottom = 4.dp))
                             Spacer(Modifier.width(4.dp))
                             BasicTextField(
@@ -596,12 +598,25 @@ fun PaymentCard(
                                 onValueChange = { editedAmountStr = it },
                                 singleLine = true,
                                 modifier = Modifier.width(IntrinsicSize.Min).widthIn(min = 24.dp),
-                                textStyle = MaterialTheme.typography.displaySmall.copy(color = onHeroColor, fontWeight = FontWeight.ExtraBold),
+                                textStyle = MaterialTheme.typography.displaySmall.copy(
+                                    color = if (amountMissing) Color(0xFFFF6B6B) else onHeroColor,
+                                    fontWeight = FontWeight.ExtraBold
+                                ),
                                 keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Decimal, imeAction = ImeAction.Done),
                                 keyboardActions = KeyboardActions(onDone = { focusManager.clearFocus() }),
-                                cursorBrush = SolidColor(onHeroColor)
+                                cursorBrush = SolidColor(if (amountMissing) Color(0xFFFF6B6B) else onHeroColor)
                             )
                         }
+                    }
+                    if (amountMissing) {
+                        Spacer(Modifier.height(6.dp))
+                        Text(
+                            "אופס משהו השתבש — הזן סכום ידנית",
+                            color = Color(0xFFFF6B6B),
+                            style = MaterialTheme.typography.labelMedium,
+                            modifier = Modifier.fillMaxWidth(),
+                            textAlign = androidx.compose.ui.text.style.TextAlign.Center
+                        )
                     }
                 }
             }
@@ -800,27 +815,30 @@ fun PaymentCard(
                     }
                     // Amount field
                     CompositionLocalProvider(LocalLayoutDirection provides LayoutDirection.Ltr) {
+                        val amtFieldColor = if (amountMissing) Color(0xFFFF6B6B) else amtC
                         Row(
                             modifier = Modifier
                                 .drawBehind {
                                     val sw = 1.5.dp.toPx()
-                                    drawLine(underlineC, Offset(0f, size.height), Offset(size.width, size.height), sw)
+                                    drawLine(if (amountMissing) Color(0xFFFF6B6B) else underlineC,
+                                        Offset(0f, size.height), Offset(size.width, size.height), sw)
                                 }
                                 .padding(bottom = 3.dp),
                             verticalAlignment = Alignment.CenterVertically,
                             horizontalArrangement = Arrangement.spacedBy(2.dp)
                         ) {
-                            Text("₪", color = amtC, style = MaterialTheme.typography.bodyLarge, fontWeight = FontWeight.Bold)
+                            Text("₪", color = amtFieldColor, style = MaterialTheme.typography.bodyLarge, fontWeight = FontWeight.Bold)
                             BasicTextField(
                                 value = editedAmountStr, onValueChange = { editedAmountStr = it },
                                 singleLine = true,
                                 modifier = Modifier.width(IntrinsicSize.Min).widthIn(min = 32.dp),
-                                textStyle = MaterialTheme.typography.bodyLarge.copy(color = amtC, fontWeight = FontWeight.Bold),
+                                textStyle = MaterialTheme.typography.bodyLarge.copy(color = amtFieldColor, fontWeight = FontWeight.Bold),
                                 keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Decimal, imeAction = ImeAction.Done),
                                 keyboardActions = KeyboardActions(onDone = { focusManager.clearFocus() }),
-                                cursorBrush = SolidColor(amtC)
+                                cursorBrush = SolidColor(amtFieldColor)
                             )
-                            Icon(Icons.Default.Edit, null, modifier = Modifier.size(14.dp), tint = underlineC)
+                            Icon(Icons.Default.Edit, null, modifier = Modifier.size(14.dp),
+                                tint = if (amountMissing) Color(0xFFFF6B6B) else underlineC)
                         }
                     }
                 }

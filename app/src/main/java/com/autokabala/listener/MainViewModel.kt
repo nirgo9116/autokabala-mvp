@@ -372,8 +372,18 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                 val tesseractText = runTesseractOcr(context, preprocessed).also {
                     withContext(Dispatchers.IO) { preprocessed.recycle() }
                 }
-                originalBitmap.recycle()
                 Log.d("OCR_TESS", "Tesseract output:\n${tesseractText ?: "(empty)"}")
+
+                // Crop retry: when Paybox amount line has only ₪ (digit missed by both engines),
+                // re-run Tesseract on a 3× zoomed crop of the amount area.
+                val hasBareShekl = tesseractText?.lines()?.any { it.trim() == "₪" } == true
+                Log.d("AmountCrop", "isPaybox=$isPaybox mlKitAmount=$mlKitAmount hasBareShekl=$hasBareShekl")
+                val resolvedAmount = mlKitAmount ?: if (isPaybox && hasBareShekl) {
+                    retesseractPayboxAmount(context, originalBitmap).also {
+                        Log.d("AmountCrop", if (it != null) "Crop amount: $it" else "Crop also failed")
+                    }
+                } else null
+                originalBitmap.recycle()
 
                 // Step 3: Parse with the appropriate parser.
                 if (isPaybox) {
@@ -381,7 +391,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                         _uiEvent.send(UiEvent.ShowError("לא ניתן לקרוא טקסט מהתמונה."))
                         return@launch
                     }
-                    val paymentData = PayboxShareParser.parse(payboxText, mlKitText ?: payboxText, mlKitAmount, mlKitResult?.nameAboveAmount) ?: run {
+                    val paymentData = PayboxShareParser.parse(payboxText, mlKitText ?: payboxText, resolvedAmount, mlKitResult?.nameAboveAmount) ?: run {
                         _uiEvent.send(UiEvent.ShowError("לא נמצאו פרטי תשלום. ודא שמדובר באישור תשלום PayBox."))
                         return@launch
                     }
@@ -535,6 +545,96 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                 null
             }
         }
+
+    /**
+     * Crop retry for Paybox: when the full-image scan misses the amount digit,
+     * crop y 15%–55% of the original (where the Paybox amount is always displayed).
+     *
+     * Strategy:
+     *  1. ML Kit on the raw crop — without the confirmation-code / date / PayBox
+     *     blocks in the lower portion, the ₪ amount block may now be detectable.
+     *  2. If ML Kit fails, Tesseract on the crop at 3× zoom with contrast boost.
+     */
+    private suspend fun retesseractPayboxAmount(context: Context, original: Bitmap): Double? {
+        try {
+            val cropTop = (original.height * 0.15).toInt()
+            val cropH   = (original.height * 0.40).toInt()  // y 15%–55%
+            if (cropH <= 0) return null
+
+            val crop = withContext(Dispatchers.IO) {
+                Bitmap.createBitmap(original, 0, cropTop, original.width, cropH)
+            }
+
+            // Step 1: ML Kit on the crop (no preprocessing — ML Kit prefers original pixels)
+            val mlKitCropAmount = runMlKitOcr(crop)?.amount
+            if (mlKitCropAmount != null) {
+                withContext(Dispatchers.IO) { crop.recycle() }
+                Log.d("AmountCrop", "ML Kit crop found: $mlKitCropAmount")
+                return mlKitCropAmount
+            }
+            Log.d("AmountCrop", "ML Kit crop null — trying Tesseract")
+
+            // Step 2: Tesseract on a tight sub-crop at 5× zoom.
+            // Narrow crop: y=17%–40% of original — covers only the amount line, not the
+            // recipient. Aggressive binarization (c=20) sharpens anti-aliased thin strokes.
+            // PSM_SPARSE_TEXT finds text anywhere with no direction assumptions.
+            return withContext(Dispatchers.IO) {
+                crop.recycle()   // discard the wider crop — build a new tighter one
+                val tightTop = (original.height * 0.17).toInt()
+                val tightH   = (original.height * 0.23).toInt()   // y 17%–40%
+                if (tightH <= 0) return@withContext null
+                val tight    = Bitmap.createBitmap(original, 0, tightTop, original.width, tightH)
+                val sharpened = sharpenBitmap(tight)
+                tight.recycle()
+                val scaled = Bitmap.createScaledBitmap(sharpened, original.width * 5, tightH * 5, true)
+                sharpened.recycle()
+
+                // Grayscale → hard binarization (c=20): anti-aliased thin strokes → solid black
+                val processed = Bitmap.createBitmap(scaled.width, scaled.height, Bitmap.Config.ARGB_8888)
+                Canvas(processed).apply {
+                    val paint = Paint()
+                    val cm = ColorMatrix().apply {
+                        setSaturation(0f)
+                        val c = 20f; val t = 128f * (1f - c)
+                        postConcat(ColorMatrix(floatArrayOf(
+                            c, 0f, 0f, 0f, t,
+                            0f, c, 0f, 0f, t,
+                            0f, 0f, c, 0f, t,
+                            0f, 0f, 0f, 1f, 0f
+                        )))
+                    }
+                    paint.colorFilter = ColorMatrixColorFilter(cm)
+                    drawBitmap(scaled, 0f, 0f, paint)
+                }
+                scaled.recycle()
+
+                val tessDataDir = ensureTessData(context)
+                val tess = TessBaseAPI()
+                if (!tess.init(tessDataDir, "heb")) {
+                    processed.recycle()
+                    return@withContext null
+                }
+                // PSM_SPARSE_TEXT (11): no direction/layout assumptions — finds any text fragment
+                tess.pageSegMode = TessBaseAPI.PageSegMode.PSM_SPARSE_TEXT
+                tess.setImage(processed)
+                val text = tess.utF8Text
+                tess.recycle()
+                processed.recycle()
+                Log.d("AmountCrop", "Tesseract tight-crop raw: '$text'")
+
+                // ₪N wins; fall back to first standalone number
+                val shekelMatch = Regex("""₪\s*([\d,]+\.?\d*)""").find(text)
+                val numMatch    = Regex("""([\d,]+\.?\d*)""").find(text)
+                (shekelMatch?.groupValues?.get(1) ?: numMatch?.groupValues?.get(1))
+                    ?.replace(",", "")
+                    ?.toDoubleOrNull()
+                    ?.takeIf { it in 1.0..99_999.0 }
+            }  // closes return withContext(Dispatchers.IO)
+        } catch (e: Exception) {
+            Log.w("AmountCrop", "Crop OCR exception", e)
+            return null
+        }
+    }
 
     private fun preprocessForOcr(src: Bitmap): Bitmap {
         // Scale up 2x — improves Tesseract accuracy on small text
