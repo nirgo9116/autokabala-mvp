@@ -563,7 +563,7 @@ fun PaymentCard(
                 modifier = Modifier
                     .fillMaxWidth()
                     .background(heroGradient)
-                    .padding(horizontal = 20.dp, vertical = 18.dp)
+                    .padding(horizontal = 20.dp, vertical = 13.dp)
             ) {
                 Column {
                     Row(
@@ -628,7 +628,7 @@ fun PaymentCard(
                     modifier = Modifier
                         .fillMaxWidth()
                         .background(hdrGradient)
-                        .padding(horizontal = 16.dp, vertical = 14.dp),
+                        .padding(horizontal = 16.dp, vertical = 10.dp),
                     horizontalArrangement = Arrangement.SpaceBetween,
                     verticalAlignment = Alignment.CenterVertically
                 ) {
@@ -648,7 +648,7 @@ fun PaymentCard(
                     Column(
                         modifier = Modifier
                             .fillMaxWidth()
-                            .padding(start = 16.dp, end = 16.dp, top = 14.dp, bottom = 14.dp)
+                            .padding(start = 16.dp, end = 16.dp, top = 10.dp, bottom = 10.dp)
                     ) {
                         Text("לכבוד — בחר לקוח:", color = lblColor, style = MaterialTheme.typography.bodyMedium, fontWeight = FontWeight.SemiBold)
                         Spacer(Modifier.height(10.dp))
@@ -675,7 +675,7 @@ fun PaymentCard(
                     Row(
                         modifier = Modifier
                             .fillMaxWidth()
-                            .padding(horizontal = 16.dp, vertical = 14.dp),
+                            .padding(horizontal = 16.dp, vertical = 10.dp),
                         verticalAlignment = Alignment.CenterVertically,
                         horizontalArrangement = Arrangement.spacedBy(10.dp)
                     ) {
@@ -688,7 +688,7 @@ fun PaymentCard(
                                     .background(Color(0xFF43A047).copy(alpha = 0.14f))
                                     .border(1.5.dp, Color(0xFF43A047).copy(alpha = 0.4f), RoundedCornerShape(20.dp))
                                     .clickable { onOpenSheet() }
-                                    .padding(horizontal = 14.dp, vertical = 10.dp),
+                                    .padding(horizontal = 14.dp, vertical = 8.dp),
                                 verticalAlignment = Alignment.CenterVertically,
                                 horizontalArrangement = Arrangement.spacedBy(8.dp)
                             ) {
@@ -704,7 +704,7 @@ fun PaymentCard(
                                     .background(Color.Black.copy(alpha = 0.05f))
                                     .border(1.5.dp, Color(0xFFCCCCCC), RoundedCornerShape(20.dp))
                                     .clickable { onOpenSheet() }
-                                    .padding(horizontal = 14.dp, vertical = 10.dp)
+                                    .padding(horizontal = 14.dp, vertical = 8.dp)
                             ) {
                                 Text("חפש לקוח...", color = Color(0xFFAAAAAA), style = MaterialTheme.typography.bodyLarge, fontStyle = FontStyle.Italic)
                             }
@@ -717,7 +717,7 @@ fun PaymentCard(
                 Row(
                     modifier = Modifier
                         .fillMaxWidth()
-                        .padding(horizontal = 16.dp, vertical = 14.dp),
+                        .padding(horizontal = 16.dp, vertical = 10.dp),
                     verticalAlignment = Alignment.CenterVertically,
                     horizontalArrangement = Arrangement.spacedBy(10.dp)
                 ) {
@@ -752,7 +752,7 @@ fun PaymentCard(
                     modifier = Modifier
                         .fillMaxWidth()
                         .background(Color(0xFFEDE9E0))
-                        .padding(horizontal = 16.dp, vertical = 8.dp),
+                        .padding(horizontal = 16.dp, vertical = 5.dp),
                     horizontalArrangement = Arrangement.SpaceBetween
                 ) {
                     Text("תיאור השירות", color = Color(0xFF999999), style = MaterialTheme.typography.bodyMedium, fontWeight = FontWeight.Bold)
@@ -763,7 +763,7 @@ fun PaymentCard(
                 Row(
                     modifier = Modifier
                         .fillMaxWidth()
-                        .padding(horizontal = 16.dp, vertical = 16.dp),
+                        .padding(horizontal = 16.dp, vertical = 11.dp),
                     verticalAlignment = Alignment.Bottom,
                     horizontalArrangement = Arrangement.spacedBy(8.dp)
                 ) {
@@ -831,7 +831,7 @@ fun PaymentCard(
                 Row(
                     modifier = Modifier
                         .fillMaxWidth()
-                        .padding(horizontal = 16.dp, vertical = 12.dp),
+                        .padding(horizontal = 16.dp, vertical = 8.dp),
                     verticalAlignment = Alignment.CenterVertically,
                     horizontalArrangement = Arrangement.spacedBy(8.dp)
                 ) {
@@ -848,7 +848,7 @@ fun PaymentCard(
                         .drawBehind {
                             drawLine(Color(0xFFC8C2B2), Offset(0f, 0f), Offset(size.width, 0f), 2.dp.toPx())
                         }
-                        .padding(horizontal = 16.dp, vertical = 15.dp),
+                        .padding(horizontal = 16.dp, vertical = 11.dp),
                     horizontalArrangement = Arrangement.SpaceBetween,
                     verticalAlignment = Alignment.CenterVertically
                 ) {
@@ -863,7 +863,7 @@ fun PaymentCard(
                     modifier = Modifier
                         .fillMaxWidth()
                         .background(Color(0xFFEDE9E0))
-                        .padding(horizontal = 16.dp, vertical = 7.dp),
+                        .padding(horizontal = 16.dp, vertical = 5.dp),
                     contentAlignment = Alignment.CenterEnd
                 ) {
                     Text(
@@ -886,14 +886,14 @@ fun PaymentCard(
                 modifier = Modifier
                     .fillMaxWidth()
                     .background(Color(0xFF121212))
-                    .padding(horizontal = 14.dp, vertical = 14.dp),
+                    .padding(horizontal = 14.dp, vertical = 10.dp),
                 horizontalArrangement = Arrangement.spacedBy(10.dp),
                 verticalAlignment = Alignment.CenterVertically
             ) {
                 Box(
                     modifier = Modifier
                         .weight(1f)
-                        .height(58.dp)
+                        .height(54.dp)
                         .alpha(if (btnEnabled) 1f else 0.45f)
                         .clip(RoundedCornerShape(14.dp))
                         .background(issueGrad)
@@ -908,7 +908,7 @@ fun PaymentCard(
                 }
                 Box(
                     modifier = Modifier
-                        .size(58.dp)
+                        .size(54.dp)
                         .clip(RoundedCornerShape(14.dp))
                         .background(Color(0xFF1E1E1E))
                         .border(1.dp, Color(0xFF333333), RoundedCornerShape(14.dp))
