@@ -628,12 +628,12 @@ fun PaymentCard(
                     modifier = Modifier
                         .fillMaxWidth()
                         .background(hdrGradient)
-                        .padding(horizontal = 16.dp, vertical = 13.dp),
+                        .padding(horizontal = 16.dp, vertical = 14.dp),
                     horizontalArrangement = Arrangement.SpaceBetween,
                     verticalAlignment = Alignment.CenterVertically
                 ) {
-                    Text("העסק שלי", color = Color.White, style = MaterialTheme.typography.bodyMedium, fontWeight = FontWeight.Bold)
-                    Text("קבלה", color = Color.White.copy(alpha = 0.75f), style = MaterialTheme.typography.bodySmall)
+                    Text("העסק שלי", color = Color.White, style = MaterialTheme.typography.bodyLarge, fontWeight = FontWeight.Bold)
+                    Text("קבלה", color = Color.White.copy(alpha = 0.75f), style = MaterialTheme.typography.bodyMedium)
                 }
 
                 // ── Client row ("לכבוד") ──────────────────────────────────────
@@ -648,10 +648,10 @@ fun PaymentCard(
                     Column(
                         modifier = Modifier
                             .fillMaxWidth()
-                            .padding(start = 16.dp, end = 16.dp, top = 13.dp, bottom = 13.dp)
+                            .padding(start = 16.dp, end = 16.dp, top = 14.dp, bottom = 14.dp)
                     ) {
-                        Text("לכבוד — בחר לקוח:", color = lblColor, style = MaterialTheme.typography.labelMedium, fontWeight = FontWeight.SemiBold)
-                        Spacer(Modifier.height(8.dp))
+                        Text("לכבוד — בחר לקוח:", color = lblColor, style = MaterialTheme.typography.bodyMedium, fontWeight = FontWeight.SemiBold)
+                        Spacer(Modifier.height(10.dp))
                         FlowRow(
                             horizontalArrangement = Arrangement.spacedBy(8.dp),
                             verticalArrangement = Arrangement.spacedBy(8.dp)
@@ -663,9 +663,9 @@ fun PaymentCard(
                                         .border(1.5.dp, bubbleC.copy(alpha = 0.5f), RoundedCornerShape(20.dp))
                                         .background(bubbleC.copy(alpha = 0.08f))
                                         .clickable { onSelectClient(client) }
-                                        .padding(horizontal = 16.dp, vertical = 8.dp)
+                                        .padding(horizontal = 18.dp, vertical = 10.dp)
                                 ) {
-                                    Text(client.name, color = bubbleC, style = MaterialTheme.typography.bodyMedium, fontWeight = FontWeight.SemiBold)
+                                    Text(client.name, color = bubbleC, style = MaterialTheme.typography.bodyLarge, fontWeight = FontWeight.SemiBold)
                                 }
                             }
                         }
@@ -675,11 +675,11 @@ fun PaymentCard(
                     Row(
                         modifier = Modifier
                             .fillMaxWidth()
-                            .padding(horizontal = 16.dp, vertical = 12.dp),
+                            .padding(horizontal = 16.dp, vertical = 14.dp),
                         verticalAlignment = Alignment.CenterVertically,
                         horizontalArrangement = Arrangement.spacedBy(10.dp)
                     ) {
-                        Text("לכבוד", color = lblColor, style = MaterialTheme.typography.labelMedium, fontWeight = FontWeight.SemiBold)
+                        Text("לכבוד", color = lblColor, style = MaterialTheme.typography.bodyMedium, fontWeight = FontWeight.SemiBold)
                         if (effectiveClient != null) {
                             Row(
                                 modifier = Modifier
@@ -688,13 +688,13 @@ fun PaymentCard(
                                     .background(Color(0xFF43A047).copy(alpha = 0.14f))
                                     .border(1.5.dp, Color(0xFF43A047).copy(alpha = 0.4f), RoundedCornerShape(20.dp))
                                     .clickable { onOpenSheet() }
-                                    .padding(horizontal = 14.dp, vertical = 8.dp),
+                                    .padding(horizontal = 14.dp, vertical = 10.dp),
                                 verticalAlignment = Alignment.CenterVertically,
                                 horizontalArrangement = Arrangement.spacedBy(8.dp)
                             ) {
-                                Text("✓", color = Color(0xFF2E7D32), style = MaterialTheme.typography.bodySmall)
-                                Text(effectiveClient.name, color = Color(0xFF2E7D32), style = MaterialTheme.typography.bodyMedium, fontWeight = FontWeight.Bold, modifier = Modifier.weight(1f))
-                                Text("▼", color = Color(0xFFAAAAAA), style = MaterialTheme.typography.bodySmall)
+                                Text("✓", color = Color(0xFF2E7D32), style = MaterialTheme.typography.bodyMedium)
+                                Text(effectiveClient.name, color = Color(0xFF2E7D32), style = MaterialTheme.typography.bodyLarge, fontWeight = FontWeight.Bold, modifier = Modifier.weight(1f))
+                                Text("▼", color = Color(0xFFAAAAAA), style = MaterialTheme.typography.bodyMedium)
                             }
                         } else {
                             Box(
@@ -704,9 +704,9 @@ fun PaymentCard(
                                     .background(Color.Black.copy(alpha = 0.05f))
                                     .border(1.5.dp, Color(0xFFCCCCCC), RoundedCornerShape(20.dp))
                                     .clickable { onOpenSheet() }
-                                    .padding(horizontal = 14.dp, vertical = 8.dp)
+                                    .padding(horizontal = 14.dp, vertical = 10.dp)
                             ) {
-                                Text("חפש לקוח...", color = Color(0xFFAAAAAA), style = MaterialTheme.typography.bodyMedium, fontStyle = FontStyle.Italic)
+                                Text("חפש לקוח...", color = Color(0xFFAAAAAA), style = MaterialTheme.typography.bodyLarge, fontStyle = FontStyle.Italic)
                             }
                         }
                     }
@@ -717,11 +717,11 @@ fun PaymentCard(
                 Row(
                     modifier = Modifier
                         .fillMaxWidth()
-                        .padding(horizontal = 16.dp, vertical = 12.dp),
+                        .padding(horizontal = 16.dp, vertical = 14.dp),
                     verticalAlignment = Alignment.CenterVertically,
                     horizontalArrangement = Arrangement.spacedBy(10.dp)
                 ) {
-                    Text("תאריך", color = lblColor, style = MaterialTheme.typography.labelMedium, fontWeight = FontWeight.SemiBold)
+                    Text("תאריך", color = lblColor, style = MaterialTheme.typography.bodyMedium, fontWeight = FontWeight.SemiBold)
                     Row(
                         modifier = Modifier
                             .weight(1f)
@@ -736,13 +736,13 @@ fun PaymentCard(
                         BasicTextField(
                             value = editedDateStr, onValueChange = { editedDateStr = it },
                             singleLine = true,
-                            textStyle = MaterialTheme.typography.bodyMedium.copy(color = valueC, fontWeight = FontWeight.SemiBold),
+                            textStyle = MaterialTheme.typography.bodyLarge.copy(color = valueC, fontWeight = FontWeight.SemiBold),
                             keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Text, imeAction = ImeAction.Done),
                             keyboardActions = KeyboardActions(onDone = { focusManager.clearFocus() }),
                             cursorBrush = SolidColor(valueC),
                             modifier = Modifier.weight(1f)
                         )
-                        Icon(Icons.Default.Edit, null, modifier = Modifier.size(13.dp), tint = underlineC)
+                        Icon(Icons.Default.Edit, null, modifier = Modifier.size(15.dp), tint = underlineC)
                     }
                 }
                 HorizontalDivider(color = divColor)
@@ -752,18 +752,18 @@ fun PaymentCard(
                     modifier = Modifier
                         .fillMaxWidth()
                         .background(Color(0xFFEDE9E0))
-                        .padding(horizontal = 16.dp, vertical = 7.dp),
+                        .padding(horizontal = 16.dp, vertical = 8.dp),
                     horizontalArrangement = Arrangement.SpaceBetween
                 ) {
-                    Text("תיאור השירות", color = Color(0xFF999999), style = MaterialTheme.typography.labelMedium, fontWeight = FontWeight.Bold)
-                    Text("סכום", color = Color(0xFF999999), style = MaterialTheme.typography.labelMedium, fontWeight = FontWeight.Bold)
+                    Text("תיאור השירות", color = Color(0xFF999999), style = MaterialTheme.typography.bodySmall, fontWeight = FontWeight.Bold)
+                    Text("סכום", color = Color(0xFF999999), style = MaterialTheme.typography.bodySmall, fontWeight = FontWeight.Bold)
                 }
 
                 // ── Item row ──────────────────────────────────────────────────
                 Row(
                     modifier = Modifier
                         .fillMaxWidth()
-                        .padding(horizontal = 16.dp, vertical = 14.dp),
+                        .padding(horizontal = 16.dp, vertical = 16.dp),
                     verticalAlignment = Alignment.Bottom,
                     horizontalArrangement = Arrangement.spacedBy(8.dp)
                 ) {
@@ -782,21 +782,21 @@ fun PaymentCard(
                         BasicTextField(
                             value = editedDescription, onValueChange = { editedDescription = it },
                             singleLine = true,
-                            textStyle = MaterialTheme.typography.bodyMedium.copy(color = valueC),
+                            textStyle = MaterialTheme.typography.bodyLarge.copy(color = valueC),
                             keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Text, imeAction = ImeAction.Done),
                             keyboardActions = KeyboardActions(onDone = { focusManager.clearFocus() }),
                             cursorBrush = SolidColor(valueC),
                             decorationBox = { inner ->
                                 Box {
                                     if (editedDescription.isEmpty()) {
-                                        Text("הזן פרטים...", style = MaterialTheme.typography.bodyMedium.copy(color = Color(0xFFBBBBBB), fontStyle = FontStyle.Italic))
+                                        Text("הזן פרטים...", style = MaterialTheme.typography.bodyLarge.copy(color = Color(0xFFBBBBBB), fontStyle = FontStyle.Italic))
                                     }
                                     inner()
                                 }
                             },
                             modifier = Modifier.weight(1f)
                         )
-                        Icon(Icons.Default.Edit, null, modifier = Modifier.size(13.dp), tint = underlineC)
+                        Icon(Icons.Default.Edit, null, modifier = Modifier.size(15.dp), tint = underlineC)
                     }
                     // Amount field
                     CompositionLocalProvider(LocalLayoutDirection provides LayoutDirection.Ltr) {
@@ -810,17 +810,17 @@ fun PaymentCard(
                             verticalAlignment = Alignment.CenterVertically,
                             horizontalArrangement = Arrangement.spacedBy(2.dp)
                         ) {
-                            Text("₪", color = amtC, style = MaterialTheme.typography.bodyMedium, fontWeight = FontWeight.Bold)
+                            Text("₪", color = amtC, style = MaterialTheme.typography.bodyLarge, fontWeight = FontWeight.Bold)
                             BasicTextField(
                                 value = editedAmountStr, onValueChange = { editedAmountStr = it },
                                 singleLine = true,
-                                modifier = Modifier.width(IntrinsicSize.Min).widthIn(min = 28.dp),
-                                textStyle = MaterialTheme.typography.bodyMedium.copy(color = amtC, fontWeight = FontWeight.Bold),
+                                modifier = Modifier.width(IntrinsicSize.Min).widthIn(min = 32.dp),
+                                textStyle = MaterialTheme.typography.bodyLarge.copy(color = amtC, fontWeight = FontWeight.Bold),
                                 keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Decimal, imeAction = ImeAction.Done),
                                 keyboardActions = KeyboardActions(onDone = { focusManager.clearFocus() }),
                                 cursorBrush = SolidColor(amtC)
                             )
-                            Icon(Icons.Default.Edit, null, modifier = Modifier.size(12.dp), tint = underlineC)
+                            Icon(Icons.Default.Edit, null, modifier = Modifier.size(14.dp), tint = underlineC)
                         }
                     }
                 }
@@ -831,12 +831,12 @@ fun PaymentCard(
                 Row(
                     modifier = Modifier
                         .fillMaxWidth()
-                        .padding(horizontal = 16.dp, vertical = 10.dp),
+                        .padding(horizontal = 16.dp, vertical = 12.dp),
                     verticalAlignment = Alignment.CenterVertically,
                     horizontalArrangement = Arrangement.spacedBy(8.dp)
                 ) {
-                    Box(Modifier.size(7.dp).background(pmDotC, CircleShape))
-                    Text("שולם באמצעות $sourceName", color = Color(0xFF777777), style = MaterialTheme.typography.bodySmall)
+                    Box(Modifier.size(8.dp).background(pmDotC, CircleShape))
+                    Text("שולם באמצעות $sourceName", color = Color(0xFF777777), style = MaterialTheme.typography.bodyMedium)
                 }
                 HorizontalDivider(color = divColor)
 
@@ -848,13 +848,13 @@ fun PaymentCard(
                         .drawBehind {
                             drawLine(Color(0xFFC8C2B2), Offset(0f, 0f), Offset(size.width, 0f), 2.dp.toPx())
                         }
-                        .padding(horizontal = 16.dp, vertical = 13.dp),
+                        .padding(horizontal = 16.dp, vertical = 15.dp),
                     horizontalArrangement = Arrangement.SpaceBetween,
                     verticalAlignment = Alignment.CenterVertically
                 ) {
-                    Text("סה״כ", color = Color(0xFF222222), style = MaterialTheme.typography.bodyMedium, fontWeight = FontWeight.Bold)
+                    Text("סה״כ", color = Color(0xFF222222), style = MaterialTheme.typography.bodyLarge, fontWeight = FontWeight.Bold)
                     CompositionLocalProvider(LocalLayoutDirection provides LayoutDirection.Ltr) {
-                        Text(totalStr, color = Color(0xFF12357A), style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.ExtraBold)
+                        Text(totalStr, color = Color(0xFF12357A), style = MaterialTheme.typography.headlineSmall, fontWeight = FontWeight.ExtraBold)
                     }
                 }
 
@@ -863,13 +863,13 @@ fun PaymentCard(
                     modifier = Modifier
                         .fillMaxWidth()
                         .background(Color(0xFFEDE9E0))
-                        .padding(horizontal = 16.dp, vertical = 6.dp),
+                        .padding(horizontal = 16.dp, vertical = 7.dp),
                     contentAlignment = Alignment.CenterEnd
                 ) {
                     Text(
                         "יופק אוטומטית ע״י iCount",
                         color = Color(0xFFAAAAAA),
-                        style = MaterialTheme.typography.labelSmall,
+                        style = MaterialTheme.typography.labelMedium,
                         fontStyle = FontStyle.Italic
                     )
                 }
@@ -893,7 +893,7 @@ fun PaymentCard(
                 Box(
                     modifier = Modifier
                         .weight(1f)
-                        .height(54.dp)
+                        .height(58.dp)
                         .alpha(if (btnEnabled) 1f else 0.45f)
                         .clip(RoundedCornerShape(14.dp))
                         .background(issueGrad)
@@ -904,18 +904,18 @@ fun PaymentCard(
                         },
                     contentAlignment = Alignment.Center
                 ) {
-                    Text("הפק קבלה", color = Color.Black, fontWeight = FontWeight.Bold, fontSize = 16.sp)
+                    Text("הפק קבלה", color = Color.Black, fontWeight = FontWeight.Bold, fontSize = 18.sp)
                 }
                 Box(
                     modifier = Modifier
-                        .size(54.dp)
+                        .size(58.dp)
                         .clip(RoundedCornerShape(14.dp))
                         .background(Color(0xFF1E1E1E))
                         .border(1.dp, Color(0xFF333333), RoundedCornerShape(14.dp))
                         .clickable { onDelete() },
                     contentAlignment = Alignment.Center
                 ) {
-                    Text("🗑", fontSize = 20.sp)
+                    Text("🗑", fontSize = 22.sp)
                 }
             }
 
