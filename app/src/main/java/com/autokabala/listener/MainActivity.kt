@@ -755,8 +755,8 @@ fun PaymentCard(
                         .padding(horizontal = 16.dp, vertical = 8.dp),
                     horizontalArrangement = Arrangement.SpaceBetween
                 ) {
-                    Text("תיאור השירות", color = Color(0xFF999999), style = MaterialTheme.typography.bodySmall, fontWeight = FontWeight.Bold)
-                    Text("סכום", color = Color(0xFF999999), style = MaterialTheme.typography.bodySmall, fontWeight = FontWeight.Bold)
+                    Text("תיאור השירות", color = Color(0xFF999999), style = MaterialTheme.typography.bodyMedium, fontWeight = FontWeight.Bold)
+                    Text("סכום", color = Color(0xFF999999), style = MaterialTheme.typography.bodyMedium, fontWeight = FontWeight.Bold)
                 }
 
                 // ── Item row ──────────────────────────────────────────────────
@@ -782,7 +782,7 @@ fun PaymentCard(
                         BasicTextField(
                             value = editedDescription, onValueChange = { editedDescription = it },
                             singleLine = true,
-                            textStyle = MaterialTheme.typography.bodyLarge.copy(color = valueC),
+                            textStyle = MaterialTheme.typography.bodyLarge.copy(color = valueC, fontWeight = FontWeight.Bold),
                             keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Text, imeAction = ImeAction.Done),
                             keyboardActions = KeyboardActions(onDone = { focusManager.clearFocus() }),
                             cursorBrush = SolidColor(valueC),
@@ -868,9 +868,9 @@ fun PaymentCard(
                 ) {
                     Text(
                         "יופק אוטומטית ע״י iCount",
-                        color = Color(0xFFAAAAAA),
+                        color = Color(0xFF555555),
                         style = MaterialTheme.typography.labelMedium,
-                        fontStyle = FontStyle.Italic
+                        fontWeight = FontWeight.SemiBold
                     )
                 }
             }
