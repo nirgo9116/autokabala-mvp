@@ -53,7 +53,15 @@ import androidx.compose.material.icons.filled.Search
 import androidx.compose.material.icons.filled.Settings
 import androidx.compose.material.icons.outlined.History
 import androidx.compose.material.icons.outlined.Notifications
+import androidx.compose.ui.draw.alpha
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.draw.drawBehind
+import androidx.compose.ui.geometry.Offset
+import androidx.compose.foundation.layout.ExperimentalLayoutApi
+import androidx.compose.foundation.layout.FlowRow
+import androidx.compose.foundation.shape.CircleShape
+import androidx.compose.ui.text.font.FontStyle
+import androidx.compose.ui.unit.sp
 import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.Card
@@ -358,6 +366,9 @@ private fun MainTabsScreen(
                         viewModel.onDeletePaymentClicked(state.payment)
                     },
                     onOpenClientSheet = { clientSheetFor = it },
+                    onSelectClient = { paymentId, client ->
+                        selectedClientIdsMap = selectedClientIdsMap + (paymentId to client.id)
+                    },
                     onDismissIssuedCard = { paymentId -> viewModel.onDismissIssuedCard(paymentId) },
                     onFakeIssueReceipt = { payment -> viewModel.onFakeIssueReceiptClicked(payment) },
                     onSendWhatsAppFromCard = { info ->
@@ -418,6 +429,7 @@ fun PaymentsTab(
     onIssueReceipt: (PaymentEntity, ClientEntity, String) -> Unit,
     onDeletePayment: (PaymentProcessingState) -> Unit,
     onOpenClientSheet: (PaymentProcessingState) -> Unit,
+    onSelectClient: (paymentId: Int, ClientEntity) -> Unit,
     onDismissIssuedCard: (Int) -> Unit,
     onFakeIssueReceipt: (PaymentEntity) -> Unit,
     onSendWhatsAppFromCard: (IssuedReceiptInfo) -> Unit,
@@ -482,6 +494,9 @@ fun PaymentsTab(
                         },
                         onDelete = { onDeletePayment(state) },
                         onOpenSheet = { onOpenClientSheet(state) },
+                        onSelectClient = { client ->
+                            onSelectClient(state.payment.id, client)
+                        },
                         onFakeIssueReceipt = { onFakeIssueReceipt(state.payment) }
                     )
                 }
@@ -495,6 +510,7 @@ fun PaymentsTab(
 // Payment card
 // ─────────────────────────────────────────────────────────────────────────────
 
+@OptIn(ExperimentalLayoutApi::class)
 @Composable
 fun PaymentCard(
     state: PaymentProcessingState,
@@ -502,6 +518,7 @@ fun PaymentCard(
     onIssueReceipt: (ClientEntity, Double, Long, String) -> Unit,
     onDelete: () -> Unit,
     onOpenSheet: () -> Unit,
+    onSelectClient: (ClientEntity) -> Unit = {},
     onFakeIssueReceipt: () -> Unit = {}
 ) {
     val payment = state.payment
@@ -589,60 +606,324 @@ fun PaymentCard(
                 }
             }
 
-            // ── BODY ────────────────────────────────────────────────────────
-            Column(
-                modifier = Modifier.padding(horizontal = 16.dp, vertical = 14.dp),
-                verticalArrangement = Arrangement.spacedBy(10.dp)
-            ) {
-                ClientChipField(state = state, selectedClient = selectedClient,
-                    effectiveClient = effectiveClient, isDark = isDark, onClick = onOpenSheet)
+            // ── RECEIPT FORM BODY ────────────────────────────────────────────
+            val paperBg    = Color(0xFFF4F1EB)
+            val divColor   = Color(0xFFDDD8CC)
+            val lblColor   = Color(0xFF888888)
+            val underlineC = Color(0xFFBBBBBB)
+            val valueC     = Color(0xFF222222)
+            val amtC       = if (isBit) Color(0xFF1A3A8A) else Color(0xFF4A1270)
+            val hdrGradient = if (isBit)
+                Brush.horizontalGradient(listOf(Color(0xFF12357A), Color(0xFF1A55C4)))
+            else
+                Brush.horizontalGradient(listOf(Color(0xFF4A1270), Color(0xFF8A2BE2)))
 
-                PaymentInfoField(
-                    label = "תאריך תשלום",
-                    value = editedDateStr,
-                    onValueChange = { editedDateStr = it },
-                    keyboardType = KeyboardType.Text,
-                    isDark = isDark,
-                    focusManager = focusManager
-                )
+            val parsedAmt = editedAmountStr.replace(",", "").toDoubleOrNull() ?: payment.amount
+            val parsedTs  = runCatching { dateFmt.parse(editedDateStr)?.time }.getOrNull()
+            val totalStr  = "₪${"%.2f".format(parsedAmt)}"
 
-                PaymentInfoField(
-                    label = "סכום",
-                    value = editedAmountStr,
-                    onValueChange = { editedAmountStr = it },
-                    keyboardType = KeyboardType.Decimal,
-                    isDark = isDark,
-                    focusManager = focusManager
-                )
-
-                PaymentDescField(
-                    value = editedDescription,
-                    onValueChange = { editedDescription = it },
-                    isDark = isDark,
-                    focusManager = focusManager
-                )
-
-                Spacer(Modifier.height(8.dp))
-
-                val parsedAmount = editedAmountStr.replace(",", "").toDoubleOrNull()
-                val parsedTs    = runCatching { dateFmt.parse(editedDateStr)?.time }.getOrNull()
-                Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                    Button(
-                        onClick = {
-                            effectiveClient?.let { client ->
-                                onIssueReceipt(client, parsedAmount ?: payment.amount, parsedTs ?: payment.timestamp, editedDescription)
-                            }
-                        },
-                        enabled = effectiveClient != null,
-                        modifier = Modifier.weight(1f)
-                    ) { Text("הפק קבלה") }
-                    OutlinedButton(onClick = onDelete) { Text("מחק") }
+            Column(modifier = Modifier.background(paperBg)) {
+                // ── Header stripe ─────────────────────────────────────────────
+                Row(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .background(hdrGradient)
+                        .padding(horizontal = 14.dp, vertical = 10.dp),
+                    horizontalArrangement = Arrangement.SpaceBetween,
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Text("העסק שלי", color = Color.White, style = MaterialTheme.typography.bodySmall, fontWeight = FontWeight.Bold)
+                    Text("קבלה", color = Color.White.copy(alpha = 0.7f), style = MaterialTheme.typography.labelSmall)
                 }
 
-                if (BuildConfig.DEBUG) {
+                // ── Client row ("לכבוד") ──────────────────────────────────────
+                val mr = state.matchResult
+                val showBubbles = selectedClient == null
+                    && mr is MatchResult.MultipleMatches
+                    && mr.clients.size in 2..3
+                val bubbleC = if (isBit) Color(0xFF1565C0) else Color(0xFF6A1B9A)
+
+                if (showBubbles) {
+                    val bubbleClients = (mr as MatchResult.MultipleMatches).clients
+                    Column(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .padding(start = 14.dp, end = 14.dp, top = 10.dp, bottom = 10.dp)
+                    ) {
+                        Text("לכבוד — בחר לקוח:", color = lblColor, style = MaterialTheme.typography.labelSmall, fontWeight = FontWeight.SemiBold)
+                        Spacer(Modifier.height(6.dp))
+                        FlowRow(
+                            horizontalArrangement = Arrangement.spacedBy(6.dp),
+                            verticalArrangement = Arrangement.spacedBy(6.dp)
+                        ) {
+                            bubbleClients.forEach { client ->
+                                Box(
+                                    modifier = Modifier
+                                        .clip(RoundedCornerShape(20.dp))
+                                        .border(1.5.dp, bubbleC.copy(alpha = 0.5f), RoundedCornerShape(20.dp))
+                                        .background(bubbleC.copy(alpha = 0.08f))
+                                        .clickable { onSelectClient(client) }
+                                        .padding(horizontal = 12.dp, vertical = 5.dp)
+                                ) {
+                                    Text(client.name, color = bubbleC, style = MaterialTheme.typography.bodySmall, fontWeight = FontWeight.SemiBold)
+                                }
+                            }
+                        }
+                    }
+                    HorizontalDivider(color = divColor)
+                } else {
+                    Row(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .padding(horizontal = 14.dp, vertical = 9.dp),
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.spacedBy(8.dp)
+                    ) {
+                        Text("לכבוד", color = lblColor, style = MaterialTheme.typography.labelSmall, fontWeight = FontWeight.SemiBold)
+                        if (effectiveClient != null) {
+                            Row(
+                                modifier = Modifier
+                                    .weight(1f)
+                                    .clip(RoundedCornerShape(20.dp))
+                                    .background(Color(0xFF43A047).copy(alpha = 0.14f))
+                                    .border(1.5.dp, Color(0xFF43A047).copy(alpha = 0.4f), RoundedCornerShape(20.dp))
+                                    .clickable { onOpenSheet() }
+                                    .padding(horizontal = 10.dp, vertical = 5.dp),
+                                verticalAlignment = Alignment.CenterVertically,
+                                horizontalArrangement = Arrangement.spacedBy(6.dp)
+                            ) {
+                                Text("✓", color = Color(0xFF2E7D32), style = MaterialTheme.typography.labelSmall)
+                                Text(effectiveClient.name, color = Color(0xFF2E7D32), style = MaterialTheme.typography.bodySmall, fontWeight = FontWeight.Bold, modifier = Modifier.weight(1f))
+                                Text("▼", color = Color(0xFFAAAAAA), style = MaterialTheme.typography.labelSmall)
+                            }
+                        } else {
+                            Box(
+                                modifier = Modifier
+                                    .weight(1f)
+                                    .clip(RoundedCornerShape(20.dp))
+                                    .background(Color.Black.copy(alpha = 0.05f))
+                                    .border(1.5.dp, Color(0xFFCCCCCC), RoundedCornerShape(20.dp))
+                                    .clickable { onOpenSheet() }
+                                    .padding(horizontal = 10.dp, vertical = 6.dp)
+                            ) {
+                                Text("חפש לקוח...", color = Color(0xFFAAAAAA), style = MaterialTheme.typography.bodySmall, fontStyle = FontStyle.Italic)
+                            }
+                        }
+                    }
+                    HorizontalDivider(color = divColor)
+                }
+
+                // ── Date row ──────────────────────────────────────────────────
+                Row(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(horizontal = 14.dp, vertical = 9.dp),
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(8.dp)
+                ) {
+                    Text("תאריך", color = lblColor, style = MaterialTheme.typography.labelSmall, fontWeight = FontWeight.SemiBold)
+                    Row(
+                        modifier = Modifier
+                            .weight(1f)
+                            .drawBehind {
+                                val sw = 1.5.dp.toPx()
+                                drawLine(underlineC, Offset(0f, size.height), Offset(size.width, size.height), sw)
+                            }
+                            .padding(bottom = 2.dp),
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.SpaceBetween
+                    ) {
+                        BasicTextField(
+                            value = editedDateStr, onValueChange = { editedDateStr = it },
+                            singleLine = true,
+                            textStyle = MaterialTheme.typography.bodySmall.copy(color = valueC, fontWeight = FontWeight.SemiBold),
+                            keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Text, imeAction = ImeAction.Done),
+                            keyboardActions = KeyboardActions(onDone = { focusManager.clearFocus() }),
+                            cursorBrush = SolidColor(valueC),
+                            modifier = Modifier.weight(1f)
+                        )
+                        Icon(Icons.Default.Edit, null, modifier = Modifier.size(11.dp), tint = underlineC)
+                    }
+                }
+                HorizontalDivider(color = divColor)
+
+                // ── Table header ──────────────────────────────────────────────
+                Row(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .background(Color(0xFFEDE9E0))
+                        .padding(horizontal = 14.dp, vertical = 5.dp),
+                    horizontalArrangement = Arrangement.SpaceBetween
+                ) {
+                    Text("תיאור השירות", color = Color(0xFF999999), style = MaterialTheme.typography.labelSmall, fontWeight = FontWeight.Bold)
+                    Text("סכום", color = Color(0xFF999999), style = MaterialTheme.typography.labelSmall, fontWeight = FontWeight.Bold)
+                }
+
+                // ── Item row ──────────────────────────────────────────────────
+                Row(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(horizontal = 14.dp, vertical = 10.dp),
+                    verticalAlignment = Alignment.Bottom,
+                    horizontalArrangement = Arrangement.spacedBy(8.dp)
+                ) {
+                    // Description field
+                    Row(
+                        modifier = Modifier
+                            .weight(1f)
+                            .drawBehind {
+                                val sw = 1.5.dp.toPx()
+                                drawLine(underlineC, Offset(0f, size.height), Offset(size.width, size.height), sw)
+                            }
+                            .padding(bottom = 2.dp),
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.SpaceBetween
+                    ) {
+                        BasicTextField(
+                            value = editedDescription, onValueChange = { editedDescription = it },
+                            singleLine = true,
+                            textStyle = MaterialTheme.typography.bodySmall.copy(color = valueC),
+                            keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Text, imeAction = ImeAction.Done),
+                            keyboardActions = KeyboardActions(onDone = { focusManager.clearFocus() }),
+                            cursorBrush = SolidColor(valueC),
+                            decorationBox = { inner ->
+                                Box {
+                                    if (editedDescription.isEmpty()) {
+                                        Text("הזן פרטים...", style = MaterialTheme.typography.bodySmall.copy(color = Color(0xFFBBBBBB), fontStyle = FontStyle.Italic))
+                                    }
+                                    inner()
+                                }
+                            },
+                            modifier = Modifier.weight(1f)
+                        )
+                        Icon(Icons.Default.Edit, null, modifier = Modifier.size(11.dp), tint = underlineC)
+                    }
+                    // Amount field
+                    CompositionLocalProvider(LocalLayoutDirection provides LayoutDirection.Ltr) {
+                        Row(
+                            modifier = Modifier
+                                .drawBehind {
+                                    val sw = 1.5.dp.toPx()
+                                    drawLine(underlineC, Offset(0f, size.height), Offset(size.width, size.height), sw)
+                                }
+                                .padding(bottom = 2.dp),
+                            verticalAlignment = Alignment.CenterVertically,
+                            horizontalArrangement = Arrangement.spacedBy(2.dp)
+                        ) {
+                            Text("₪", color = amtC, style = MaterialTheme.typography.bodySmall, fontWeight = FontWeight.Bold)
+                            BasicTextField(
+                                value = editedAmountStr, onValueChange = { editedAmountStr = it },
+                                singleLine = true,
+                                modifier = Modifier.width(IntrinsicSize.Min).widthIn(min = 24.dp),
+                                textStyle = MaterialTheme.typography.bodySmall.copy(color = amtC, fontWeight = FontWeight.Bold),
+                                keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Decimal, imeAction = ImeAction.Done),
+                                keyboardActions = KeyboardActions(onDone = { focusManager.clearFocus() }),
+                                cursorBrush = SolidColor(amtC)
+                            )
+                            Icon(Icons.Default.Edit, null, modifier = Modifier.size(10.dp), tint = underlineC)
+                        }
+                    }
+                }
+                HorizontalDivider(color = divColor)
+
+                // ── Payment method ────────────────────────────────────────────
+                val pmDotC = if (isBit) Color(0xFF1565C0) else Color(0xFF6A1B9A)
+                Row(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(horizontal = 14.dp, vertical = 7.dp),
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(6.dp)
+                ) {
+                    Box(Modifier.size(6.dp).background(pmDotC, CircleShape))
+                    Text("שולם באמצעות $sourceName", color = Color(0xFF777777), style = MaterialTheme.typography.labelSmall)
+                }
+                HorizontalDivider(color = divColor)
+
+                // ── Total row ─────────────────────────────────────────────────
+                Row(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .background(Color(0xFFE5E0D5))
+                        .drawBehind {
+                            drawLine(Color(0xFFC8C2B2), Offset(0f, 0f), Offset(size.width, 0f), 2.dp.toPx())
+                        }
+                        .padding(horizontal = 14.dp, vertical = 10.dp),
+                    horizontalArrangement = Arrangement.SpaceBetween,
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Text("סה״כ", color = Color(0xFF222222), style = MaterialTheme.typography.bodySmall, fontWeight = FontWeight.Bold)
+                    CompositionLocalProvider(LocalLayoutDirection provides LayoutDirection.Ltr) {
+                        Text(totalStr, color = Color(0xFF12357A), style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.ExtraBold)
+                    }
+                }
+
+                // ── iCount footer ─────────────────────────────────────────────
+                Box(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .background(Color(0xFFEDE9E0))
+                        .padding(horizontal = 14.dp, vertical = 5.dp),
+                    contentAlignment = Alignment.CenterEnd
+                ) {
+                    Text(
+                        "יופק אוטומטית ע״י iCount",
+                        color = Color(0xFFAAAAAA),
+                        style = MaterialTheme.typography.labelSmall,
+                        fontStyle = FontStyle.Italic
+                    )
+                }
+            }
+
+            // ── ACTION BUTTONS ────────────────────────────────────────────────
+            val issueGrad = if (isBit)
+                Brush.horizontalGradient(listOf(Color(0xFF1A55C4), Color(0xFF90CAF9)))
+            else
+                Brush.horizontalGradient(listOf(Color(0xFF7B61FF), Color(0xFFCE93D8)))
+
+            val btnEnabled = effectiveClient != null
+            Row(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .background(Color(0xFF121212))
+                    .padding(horizontal = 14.dp, vertical = 12.dp),
+                horizontalArrangement = Arrangement.spacedBy(10.dp),
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                Box(
+                    modifier = Modifier
+                        .weight(1f)
+                        .height(48.dp)
+                        .alpha(if (btnEnabled) 1f else 0.45f)
+                        .clip(RoundedCornerShape(14.dp))
+                        .background(issueGrad)
+                        .clickable(enabled = btnEnabled) {
+                            effectiveClient?.let { c ->
+                                onIssueReceipt(c, parsedAmt, parsedTs ?: payment.timestamp, editedDescription)
+                            }
+                        },
+                    contentAlignment = Alignment.Center
+                ) {
+                    Text("הפק קבלה", color = Color.Black, fontWeight = FontWeight.Bold, fontSize = 14.sp)
+                }
+                Box(
+                    modifier = Modifier
+                        .size(44.dp)
+                        .clip(RoundedCornerShape(14.dp))
+                        .background(Color(0xFF1E1E1E))
+                        .border(1.dp, Color(0xFF333333), RoundedCornerShape(14.dp))
+                        .clickable { onDelete() },
+                    contentAlignment = Alignment.Center
+                ) {
+                    Text("🗑", fontSize = 18.sp)
+                }
+            }
+
+            if (BuildConfig.DEBUG) {
+                Box(modifier = Modifier.fillMaxWidth().background(Color(0xFF121212))) {
                     TextButton(onClick = onFakeIssueReceipt, modifier = Modifier.fillMaxWidth()) {
                         Text("🔬 הדמיית הפקת קבלה", style = MaterialTheme.typography.labelSmall,
-                            color = MaterialTheme.colorScheme.onSurfaceVariant)
+                            color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.5f))
                     }
                 }
             }
