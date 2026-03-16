@@ -1,88 +1,50 @@
 package com.autokabala.listener
 
-import android.app.Notification
-import android.app.PendingIntent
-import android.content.Intent
 import android.service.notification.NotificationListenerService
 import android.service.notification.StatusBarNotification
 import android.util.Log
-import androidx.core.app.NotificationCompat
-import androidx.core.app.NotificationManagerCompat
-import kotlinx.coroutines.CoroutineScope
-import kotlinx.coroutines.Dispatchers
-import kotlinx.coroutines.cancel
-import kotlinx.coroutines.launch
+import okhttp3.*
+import okhttp3.MediaType.Companion.toMediaType
+import okhttp3.RequestBody.Companion.toRequestBody
+import java.io.IOException
 
 class AutoKabalaNotificationService : NotificationListenerService() {
 
-    // Create a coroutine scope for this service.
-    private val serviceScope = CoroutineScope(Dispatchers.IO)
-
-    override fun onDestroy() {
-        super.onDestroy()
-        serviceScope.cancel()
-        Log.d("AutoKabalaNL", "Service destroyed and coroutine scope cancelled.")
-    }
+    private val client = OkHttpClient()
 
     override fun onNotificationPosted(sbn: StatusBarNotification) {
         val packageName = sbn.packageName
-        val extras = sbn.notification.extras ?: return
+        
+        // Filter only Bit and PayBox notifications
+        if (packageName != "com.bnhp.payments.paymentsapp" && packageName != "com.paybox.android") {
+            return
+        }
 
-        val timestamp = sbn.postTime
+        val extras = sbn.notification.extras
+        val text = extras.getString("android.text") ?: return
 
-        val title = extras.getCharSequence(Notification.EXTRA_TITLE)?.toString() ?: ""
-        val text = extras.getCharSequence(Notification.EXTRA_TEXT)?.toString() ?: ""
+        sendToBackend(text)
+    }
 
-        val rawText = listOf(title, text)
-            .map { it.trim() }
-            .filter { it.isNotEmpty() }
-            .joinToString(" | ")
+    private fun sendToBackend(notificationText: String) {
+        val mediaType = "application/json".toMediaType()
+        val json = "{\"text\":\"$notificationText\"}"
+        val requestBody = json.toRequestBody(mediaType)
 
-        if (rawText.isBlank()) return
+        val request = Request.Builder()
+            .url("http://192.168.1.198:3000/extract-payment")
+            .post(requestBody)
+            .build()
 
-        val paymentData = PaymentParser.parse(packageName, rawText, timestamp)
-
-        if (paymentData != null) {
-            Log.d("AutoKabalaNL", "Successfully parsed payment: $paymentData")
-            // Launch a coroutine to call the suspend function.
-            serviceScope.launch {
-                ListenerManager.onPaymentParsed(paymentData)
+        client.newCall(request).enqueue(object : Callback {
+            override fun onFailure(call: Call, e: IOException) {
+                Log.e("NotificationService", "Failed to send to backend", e)
             }
-            Log.d("AutoKabalaNL", "Attempting to show confirmation notification...") 
-            showConfirmationNotification(paymentData)
-        } else {
-            if (packageName in setOf("com.bnhp.payments.paymentsapp", "com.payboxapp")) {
-                Log.w("AutoKabalaNL", "Failed to parse notification from $packageName: $rawText")
+
+            override fun onResponse(call: Call, response: Response) {
+                val responseBody = response.body?.string()
+                Log.d("NotificationService", "Backend response: $responseBody")
             }
-        }
-    }
-
-    private fun showConfirmationNotification(paymentData: PaymentData) {
-        val intent = Intent(this, MainActivity::class.java).apply {
-            flags = Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_SINGLE_TOP
-        }
-        val pendingIntent: PendingIntent = PendingIntent.getActivity(this, 0, intent, PendingIntent.FLAG_IMMUTABLE)
-
-        val builder = NotificationCompat.Builder(this, "new_payment_channel")
-            .setSmallIcon(R.drawable.ic_launcher_foreground)
-            .setContentTitle("New Payment Detected")
-            .setContentText("From: ${paymentData.senderName}, Amount: ${paymentData.amount}")
-            .setPriority(NotificationCompat.PRIORITY_DEFAULT)
-            .setContentIntent(pendingIntent)
-            .setAutoCancel(true)
-
-        with(NotificationManagerCompat.from(this)) {
-            // Use a safer ID generation based on the payment's unique timestamp
-            val notificationId = (paymentData.timestamp % Int.MAX_VALUE).toInt()
-            notify(notificationId, builder.build())
-        }
-    }
-
-    override fun onListenerConnected() {
-        Log.d("AutoKabalaNL", "Notification listener connected")
-    }
-
-    override fun onListenerDisconnected() {
-        Log.d("AutoKabalaNL", "Notification listener disconnected")
+        })
     }
 }
