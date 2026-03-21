@@ -21,5 +21,6 @@ data class PaymentEntity(
     val clientName: String? = null, // snapshot of client name at receipt time
     val docNum: String? = null,     // iCount receipt number
     val docUrl: String? = null,     // iCount receipt PDF URL
-    val issuedAmount: Double? = null // amount actually sent to iCount (non-null only if edited)
+    val issuedAmount: Double? = null,
+    val clientPhone: String? = null // amount actually sent to iCount (non-null only if edited)
 )

@@ -125,6 +125,10 @@ class ReceiptRepository(private val paymentDao: PaymentDao, private val clientDa
         return IssuedReceiptInfo(docUrl = null, clientPhone = null, docNum = fakeDocNum, clientName = payment.senderName, amount = payment.amount, timestamp = payment.timestamp)
     }
 
+    suspend fun addPayment(payment: PaymentEntity): Long {
+        return paymentDao.insertPayment(payment)
+    }
+
     suspend fun addFakePayment() {
         val names = listOf("Danny", "Moshe", "Yossi", "ניר", "סמדר בדיקה", "Elad", "בלהבלה", "ניר")
         val randomName = names.random()

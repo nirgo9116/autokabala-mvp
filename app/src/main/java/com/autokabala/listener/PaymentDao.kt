@@ -53,4 +53,14 @@ interface PaymentDao {
 
     @Query("SELECT clientId, MAX(timestamp) AS lastPaymentTime FROM pending_payments WHERE clientId IS NOT NULL AND status != 'ignored' GROUP BY clientId")
     fun getLastPaymentPerClient(): Flow<List<ClientLastPayment>>
+
+    @Query("""
+        SELECT * FROM pending_payments
+        WHERE clientId = :clientId
+        AND timestamp >= :startTime
+        AND timestamp <= :endTime
+        AND docNum IS NOT NULL
+        LIMIT 1
+    """)
+    suspend fun getPaymentByClientInRange(clientId: String, startTime: Long, endTime: Long): PaymentEntity?
 }

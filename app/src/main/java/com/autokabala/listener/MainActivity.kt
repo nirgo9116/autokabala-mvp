@@ -1,11 +1,16 @@
 package com.autokabala.listener
 
+import android.Manifest
 import android.app.Application
 import android.content.Intent
+import android.content.pm.PackageManager
 import android.net.Uri
 import android.os.Bundle
 import android.provider.Settings
 import androidx.activity.ComponentActivity
+import androidx.activity.compose.rememberLauncherForActivityResult
+import androidx.activity.result.contract.ActivityResultContracts
+import androidx.core.content.ContextCompat
 import androidx.activity.compose.BackHandler
 import androidx.activity.compose.setContent
 import androidx.activity.enableEdgeToEdge
@@ -51,6 +56,7 @@ import androidx.compose.material.icons.filled.Edit
 import androidx.compose.material.icons.filled.Person
 import androidx.compose.material.icons.filled.Search
 import androidx.compose.material.icons.filled.Settings
+import androidx.compose.material.icons.outlined.CalendarMonth
 import androidx.compose.material.icons.outlined.History
 import androidx.compose.material.icons.outlined.Notifications
 import androidx.compose.ui.draw.alpha
@@ -129,6 +135,7 @@ import androidx.lifecycle.viewmodel.compose.viewModel
 import com.autokabala.listener.ui.theme.AutoKabalaListenerTheme
 import kotlinx.coroutines.flow.collectLatest
 import java.text.SimpleDateFormat
+import java.util.Calendar
 import java.util.Date
 import java.util.Locale
 
@@ -241,12 +248,28 @@ private fun MainTabsScreen(
     val overdueClients by viewModel.overdueClients.collectAsState()
     val overdueFilterDays by viewModel.overdueFilterDays.collectAsState()
     val justIssuedCards by viewModel.justIssuedCards.collectAsState()
+    val pendingSessionLinks by viewModel.pendingSessionLinks.collectAsState()
     val pendingNewClients by viewModel.pendingNewClients.collectAsState()
+    val calendarEvents by viewModel.calendarEvents.collectAsState()
+    val scheduledPayments by viewModel.scheduledPayments.collectAsState()
     val lifecycleOwner = LocalLifecycleOwner.current
     var hasNotificationPermission by remember {
         mutableStateOf(
             NotificationManagerCompat.getEnabledListenerPackages(context).contains(context.packageName)
         )
+    }
+    var hasCalendarPermission by remember {
+        mutableStateOf(
+            ContextCompat.checkSelfPermission(context, Manifest.permission.READ_CALENDAR) == PackageManager.PERMISSION_GRANTED
+        )
+    }
+    val calendarPermissionLauncher = rememberLauncherForActivityResult(
+        ActivityResultContracts.RequestPermission()
+    ) { granted ->
+        hasCalendarPermission = granted
+        if (granted) {
+            viewModel.onSyncCalendarClicked()
+        }
     }
     // Map of paymentId → chosen client ID (store ID only so effectiveClient always reflects DB)
     var selectedClientIdsMap by remember { mutableStateOf<Map<Int, String>>(emptyMap()) }
@@ -258,14 +281,25 @@ private fun MainTabsScreen(
             if (event == Lifecycle.Event.ON_RESUME) {
                 hasNotificationPermission = NotificationManagerCompat
                     .getEnabledListenerPackages(context).contains(context.packageName)
+                hasCalendarPermission = ContextCompat.checkSelfPermission(
+                    context, Manifest.permission.READ_CALENDAR
+                ) == PackageManager.PERMISSION_GRANTED
             }
         }
         lifecycleOwner.lifecycle.addObserver(observer)
         onDispose { lifecycleOwner.lifecycle.removeObserver(observer) }
     }
 
+    // Sync calendar on launch if permission is already granted
+    LaunchedEffect(hasCalendarPermission) {
+        if (hasCalendarPermission) {
+            viewModel.onSyncCalendarClicked()
+        }
+    }
+
     // Clean up stale map entries when payments disappear from DB
-    val currentPaymentIds = remember(paymentStates) { paymentStates.map { it.payment.id }.toSet() }
+    val currentPaymentIds =
+        remember(paymentStates) { paymentStates.map { it.payment.id }.toSet() }
     LaunchedEffect(currentPaymentIds) {
         selectedClientIdsMap = selectedClientIdsMap.filterKeys { it in currentPaymentIds }
     }
@@ -325,8 +359,14 @@ private fun MainTabsScreen(
                 NavigationBarItem(
                     selected = selectedTab == 3,
                     onClick = { viewModel.onTabSelected(3) },
-                    icon = { Icon(Icons.Outlined.Notifications, contentDescription = "תזכורות") },
-                    label = { Text("תזכורות") }
+                    icon = { Icon(Icons.Outlined.CalendarMonth, contentDescription = "מתוכנן") },
+                    label = { Text("מתוכנן") }
+                )
+                NavigationBarItem(
+                    selected = selectedTab == 4,
+                    onClick = { viewModel.onTabSelected(4) },
+                    icon = { Icon(Icons.Outlined.CalendarMonth, contentDescription = "לוח שנה") },
+                    label = { Text("יומן") }
                 )
             }
         }
@@ -355,9 +395,11 @@ private fun MainTabsScreen(
                     modifier = Modifier.padding(innerPadding),
                     paymentStates = paymentStates,
                     allClients = allClients,
+                    calendarEvents = calendarEvents,
                     selectedClientIdsMap = selectedClientIdsMap,
                     pendingNewClients = pendingNewClients,
                     justIssuedCards = justIssuedCards,
+                    pendingSessionLinks = pendingSessionLinks,
                     isProcessingShare = isProcessingShare,
                     onIssueReceipt = { payment, client, description ->
                         viewModel.onIssueReceiptForClientClicked(payment, client, description)
@@ -376,6 +418,12 @@ private fun MainTabsScreen(
                     },
                     onSendEmailFromCard = { info ->
                         info.docNum?.let { viewModel.onSendEmailFromIssuedCard(it) }
+                    },
+                    onConfirmSessionLink = { payment, client, session ->
+                        viewModel.onConfirmSessionLink(payment, client, session)
+                    },
+                    onDismissSessionLink = { paymentId ->
+                        viewModel.onDismissSessionLink(paymentId)
                     }
                 )
                 1 -> SettingsTab(
@@ -394,19 +442,29 @@ private fun MainTabsScreen(
                     allClients = allClients,
                     onOpenClientDetail = { client -> viewModel.onOpenClientDetail(client) }
                 )
-                3 -> OverdueClientsScreen(
+                3 -> ScheduledPaymentsScreen(
                     modifier = Modifier.padding(innerPadding),
-                    overdueClients = overdueClients,
-                    filterDays = overdueFilterDays,
-                    onFilterChanged = { viewModel.onOverdueFilterChanged(it) },
-                    onSendReminder = { client ->
-                        launchWhatsApp(
-                            context,
-                            clientPhone = client.phone,
-                            text = "שלום ${client.name}, רצינו להזכירך לגבי תשלום. תודה! 🙏"
-                        )
+                    scheduledPayments = scheduledPayments,
+                    allClients = allClients,
+                    calendarEvents = calendarEvents,
+                    onInsert = { viewModel.insertScheduledPayment(it) },
+                    onDelete = { viewModel.deleteScheduledPayment(it) },
+                    onSendReminder = { scheduled, client ->
+                        val reminderText = "שלום ${scheduled.clientName},\n" +
+                            "רציתי להזכיר לגבי התשלום עבור ${scheduled.description.ifBlank { "השיעור" }} שלנו.\n" +
+                            "סכום: ₪${scheduled.amount.toInt()}\n\nתודה רבה! 🙏"
+                        launchWhatsApp(context, clientPhone = client?.phone, text = reminderText)
+                    }
+                )
+                4 -> CalendarTab(
+                    modifier = Modifier.padding(innerPadding),
+                    events = calendarEvents,
+                    hasPermission = hasCalendarPermission,
+                    onRequestPermission = {
+                        calendarPermissionLauncher.launch(Manifest.permission.READ_CALENDAR)
                     },
-                    onOpenClientDetail = { client -> viewModel.onOpenClientDetail(client) }
+                    onSync = { viewModel.onSyncCalendarClicked() },
+                    onEventClick = { viewModel.onCalendarEventClicked(it) }
                 )
             }
         }
@@ -422,9 +480,11 @@ fun PaymentsTab(
     modifier: Modifier,
     paymentStates: List<PaymentProcessingState>,
     allClients: List<ClientEntity>,
+    calendarEvents: List<CalendarEventEntity>,
     selectedClientIdsMap: Map<Int, String>,
     pendingNewClients: Map<Int, PendingNewClient>,
     justIssuedCards: Map<Int, IssuedReceiptInfo>,
+    pendingSessionLinks: Map<Int, ScheduledPaymentEntity>,
     isProcessingShare: Boolean,
     onIssueReceipt: (PaymentEntity, ClientEntity, String) -> Unit,
     onDeletePayment: (PaymentProcessingState) -> Unit,
@@ -433,7 +493,9 @@ fun PaymentsTab(
     onDismissIssuedCard: (Int) -> Unit,
     onFakeIssueReceipt: (PaymentEntity) -> Unit,
     onSendWhatsAppFromCard: (IssuedReceiptInfo) -> Unit,
-    onSendEmailFromCard: (IssuedReceiptInfo) -> Unit
+    onSendEmailFromCard: (IssuedReceiptInfo) -> Unit,
+    onConfirmSessionLink: (PaymentEntity, ClientEntity, ScheduledPaymentEntity) -> Unit,
+    onDismissSessionLink: (Int) -> Unit
 ) {
     Column(modifier = modifier.fillMaxSize().padding(horizontal = 8.dp)) {
         Spacer(Modifier.height(12.dp))
@@ -489,6 +551,7 @@ fun PaymentsTab(
                     PaymentCard(
                         state = state,
                         selectedClient = selectedClient,
+                        calendarEvents = calendarEvents,
                         onIssueReceipt = { client, amount, ts, description ->
                             onIssueReceipt(state.payment.copy(amount = amount, timestamp = ts), client, description)
                         },
@@ -499,6 +562,18 @@ fun PaymentsTab(
                         },
                         onFakeIssueReceipt = { onFakeIssueReceipt(state.payment) }
                     )
+                    val linkedSession = pendingSessionLinks[state.payment.id]
+                    if (linkedSession != null) {
+                        val linkedClient = allClients.find { it.id == state.payment.clientId }
+                        if (linkedClient != null) {
+                            SessionPaymentLinkBanner(
+                                payment        = state.payment,
+                                matchedSession = linkedSession,
+                                onConfirmLink  = { onConfirmSessionLink(state.payment, linkedClient, linkedSession) },
+                                onDismiss      = { onDismissSessionLink(state.payment.id) }
+                            )
+                        }
+                    }
                 }
                 item { Spacer(Modifier.height(8.dp)) }
             }
@@ -515,6 +590,7 @@ fun PaymentsTab(
 fun PaymentCard(
     state: PaymentProcessingState,
     selectedClient: ClientEntity?,
+    calendarEvents: List<CalendarEventEntity> = emptyList(),
     onIssueReceipt: (ClientEntity, Double, Long, String) -> Unit,
     onDelete: () -> Unit,
     onOpenSheet: () -> Unit,
@@ -622,6 +698,18 @@ fun PaymentCard(
             }
 
             // ── RECEIPT FORM BODY ────────────────────────────────────────────
+            val eventsOnDay = remember(payment.timestamp, calendarEvents) {
+                val cal = Calendar.getInstance()
+                cal.timeInMillis = payment.timestamp
+                cal.set(Calendar.HOUR_OF_DAY, 0)
+                cal.set(Calendar.MINUTE, 0)
+                cal.set(Calendar.SECOND, 0)
+                cal.set(Calendar.MILLISECOND, 0)
+                val dayStart = cal.timeInMillis
+                val dayEnd = dayStart + 24L * 60 * 60 * 1000
+                calendarEvents.filter { it.startTime >= dayStart && it.startTime < dayEnd }
+            }
+
             val paperBg    = Color(0xFFF4F1EB)
             val divColor   = Color(0xFFDDD8CC)
             val lblColor   = Color(0xFF888888)
@@ -772,6 +860,39 @@ fun PaymentCard(
                 ) {
                     Text("תיאור השירות", color = Color(0xFF999999), style = MaterialTheme.typography.bodyMedium, fontWeight = FontWeight.Bold)
                     Text("סכום", color = Color(0xFF999999), style = MaterialTheme.typography.bodyMedium, fontWeight = FontWeight.Bold)
+                }
+
+                // ── Calendar event chips ──────────────────────────────────────
+                if (eventsOnDay.isNotEmpty()) {
+                    Column(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .padding(start = 16.dp, end = 16.dp, top = 8.dp, bottom = 8.dp)
+                    ) {
+                        Text("אירועי יומן:", color = lblColor, style = MaterialTheme.typography.labelSmall)
+                        Spacer(Modifier.height(6.dp))
+                        FlowRow(
+                            horizontalArrangement = Arrangement.spacedBy(6.dp),
+                            verticalArrangement = Arrangement.spacedBy(6.dp)
+                        ) {
+                            eventsOnDay.forEach { event ->
+                                val isSelected = editedDescription == event.title
+                                Box(
+                                    modifier = Modifier
+                                        .clip(RoundedCornerShape(20.dp))
+                                        .background(amtC.copy(alpha = if (isSelected) 0.15f else 0.05f))
+                                        .border(1.dp, amtC.copy(alpha = if (isSelected) 0.8f else 0.35f), RoundedCornerShape(20.dp))
+                                        .clickable {
+                                            editedDescription = if (isSelected) "" else event.title
+                                        }
+                                        .padding(horizontal = 12.dp, vertical = 6.dp)
+                                ) {
+                                    Text(event.title, color = amtC, style = MaterialTheme.typography.labelMedium, fontWeight = if (isSelected) FontWeight.Bold else FontWeight.Normal)
+                                }
+                            }
+                        }
+                    }
+                    HorizontalDivider(color = divColor)
                 }
 
                 // ── Item row ──────────────────────────────────────────────────
@@ -2028,6 +2149,133 @@ private fun OverdueClientRow(
         }
     }
     HorizontalDivider(modifier = Modifier.padding(horizontal = 16.dp))
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Calendar tab
+// ─────────────────────────────────────────────────────────────────────────────
+
+@Composable
+fun CalendarTab(
+    modifier: Modifier = Modifier,
+    events: List<CalendarEventEntity>,
+    hasPermission: Boolean,
+    onRequestPermission: () -> Unit,
+    onSync: () -> Unit,
+    onEventClick: (CalendarEventEntity) -> Unit = {}
+) {
+    val timeFmt = remember { SimpleDateFormat("HH:mm", Locale.getDefault()) }
+    val dateFmt = remember { SimpleDateFormat("EEEE, d בMMMM", Locale("he")) }
+    val todayStart = remember {
+        java.util.Calendar.getInstance().apply {
+            set(java.util.Calendar.HOUR_OF_DAY, 0); set(java.util.Calendar.MINUTE, 0)
+            set(java.util.Calendar.SECOND, 0); set(java.util.Calendar.MILLISECOND, 0)
+        }.timeInMillis
+    }
+    val grouped = remember(events) {
+        val cal = java.util.Calendar.getInstance()
+        events.groupBy { event ->
+            cal.timeInMillis = event.startTime
+            cal.set(java.util.Calendar.HOUR_OF_DAY, 0); cal.set(java.util.Calendar.MINUTE, 0)
+            cal.set(java.util.Calendar.SECOND, 0); cal.set(java.util.Calendar.MILLISECOND, 0)
+            cal.timeInMillis
+        }.toSortedMap()
+    }
+
+    Column(modifier = modifier.fillMaxSize()) {
+        Row(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(start = 16.dp, end = 8.dp, top = 16.dp, bottom = 8.dp),
+            horizontalArrangement = Arrangement.SpaceBetween,
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            Text(
+                "לוח שנה",
+                style = MaterialTheme.typography.headlineSmall,
+                fontWeight = FontWeight.Bold
+            )
+            TextButton(onClick = if (hasPermission) onSync else onRequestPermission) {
+                Text(if (hasPermission) "רענן" else "אשר הרשאה")
+            }
+        }
+        when {
+            !hasPermission -> {
+                Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
+                    Column(
+                        horizontalAlignment = Alignment.CenterHorizontally,
+                        verticalArrangement = Arrangement.spacedBy(12.dp)
+                    ) {
+                        Text(
+                            "נדרשת הרשאה לגישה ללוח השנה",
+                            color = MaterialTheme.colorScheme.onSurfaceVariant
+                        )
+                        Button(onClick = onRequestPermission) { Text("אשר הרשאה") }
+                    }
+                }
+            }
+            events.isEmpty() -> {
+                Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
+                    Text("אין אירועים בלוח השנה", color = MaterialTheme.colorScheme.onSurfaceVariant)
+                }
+            }
+            else -> {
+                LazyColumn(Modifier.fillMaxSize()) {
+                    grouped.forEach { (dayStart, dayEvents) ->
+                        val isToday = dayStart == todayStart
+                        val isTomorrow = dayStart == todayStart + 24L * 60 * 60 * 1000
+                        item(key = "header_$dayStart") {
+                            val dayLabel = when {
+                                isToday -> "היום"
+                                isTomorrow -> "מחר"
+                                else -> dateFmt.format(Date(dayStart))
+                            }
+                            Text(
+                                dayLabel,
+                                style = MaterialTheme.typography.labelLarge,
+                                fontWeight = FontWeight.Bold,
+                                color = if (isToday) MaterialTheme.colorScheme.primary
+                                        else MaterialTheme.colorScheme.onSurfaceVariant,
+                                modifier = Modifier.padding(start = 16.dp, top = 16.dp, bottom = 4.dp)
+                            )
+                        }
+                        items(dayEvents, key = { it.eventId }) { event ->
+                            Card(
+                                onClick = { onEventClick(event) },
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .padding(horizontal = 12.dp, vertical = 4.dp)
+                            ) {
+                                Column(Modifier.padding(horizontal = 16.dp, vertical = 10.dp)) {
+                                    Text(
+                                        event.title,
+                                        fontWeight = FontWeight.SemiBold,
+                                        style = MaterialTheme.typography.bodyMedium
+                                    )
+                                    Spacer(Modifier.height(2.dp))
+                                    val timeStr = timeFmt.format(Date(event.startTime)) +
+                                        if (event.endTime > event.startTime) " – ${timeFmt.format(Date(event.endTime))}" else ""
+                                    Text(
+                                        timeStr,
+                                        style = MaterialTheme.typography.bodySmall,
+                                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                                    )
+                                    if (!event.location.isNullOrBlank()) {
+                                        Text(
+                                            event.location,
+                                            style = MaterialTheme.typography.bodySmall,
+                                            color = MaterialTheme.colorScheme.onSurfaceVariant
+                                        )
+                                    }
+                                }
+                            }
+                        }
+                    }
+                    item { Spacer(Modifier.height(16.dp)) }
+                }
+            }
+        }
+    }
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
