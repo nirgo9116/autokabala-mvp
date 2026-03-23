@@ -33,9 +33,12 @@ import androidx.compose.foundation.layout.navigationBarsPadding
 import androidx.compose.foundation.layout.IntrinsicSize
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.layout.widthIn
+import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.wrapContentWidth
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
@@ -107,6 +110,11 @@ import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.SolidColor
 import androidx.compose.ui.graphics.vector.ImageVector
+import androidx.compose.foundation.Image
+import androidx.compose.ui.graphics.painter.BitmapPainter
+import androidx.compose.ui.graphics.asImageBitmap
+import androidx.compose.ui.layout.ContentScale
+import androidx.compose.runtime.produceState
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.platform.LocalLifecycleOwner
@@ -120,6 +128,11 @@ import androidx.compose.ui.text.input.ImeAction
 import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
+import android.os.Build
+import android.provider.MediaStore
+import androidx.activity.compose.rememberLauncherForActivityResult
+import androidx.activity.result.IntentSenderRequest
+import androidx.activity.result.contract.ActivityResultContracts
 import androidx.core.app.NotificationManagerCompat
 import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.LifecycleEventObserver
@@ -127,6 +140,7 @@ import androidx.lifecycle.ViewModel
 import androidx.lifecycle.ViewModelProvider
 import androidx.lifecycle.viewmodel.compose.viewModel
 import com.autokabala.listener.ui.theme.AutoKabalaListenerTheme
+import com.autokabala.listener.BuildConfig
 import kotlinx.coroutines.flow.collectLatest
 import java.text.SimpleDateFormat
 import java.util.Date
@@ -150,13 +164,61 @@ class MainActivity : ComponentActivity() {
         setContent {
             val factory = remember { MainViewModelFactory(application) }
             val mainViewModel: MainViewModel = viewModel(factory = factory)
+            val prefs = remember { getSharedPreferences("autokabala_prefs", android.content.Context.MODE_PRIVATE) }
+            var showTutorial by remember { mutableStateOf(!prefs.getBoolean("tutorial_shown", false)) }
             AutoKabalaListenerTheme(dynamicColor = false) {
-                MainScreen(
-                    viewModel = mainViewModel,
-                    onOpenSettingsClicked = {
-                        startActivity(Intent(Settings.ACTION_NOTIFICATION_LISTENER_SETTINGS))
+                val ocrDebugInfo by mainViewModel.ocrDebugInfo.collectAsState()
+
+                // Gallery delete — kept at top level so it's always in composition
+                val pendingGalleryDelete by mainViewModel.pendingGalleryDelete.collectAsState()
+                val deleteRequestLauncher = rememberLauncherForActivityResult(
+                    ActivityResultContracts.StartIntentSenderForResult()
+                ) { mainViewModel.clearPendingGalleryDelete() }
+                LaunchedEffect(pendingGalleryDelete) {
+                    val uri = pendingGalleryDelete ?: return@LaunchedEffect
+                    try {
+                        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
+                            val pi = MediaStore.createDeleteRequest(contentResolver, listOf(uri))
+                            deleteRequestLauncher.launch(IntentSenderRequest.Builder(pi.intentSender).build())
+                        } else if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
+                            try {
+                                contentResolver.delete(uri, null, null)
+                                mainViewModel.clearPendingGalleryDelete()
+                            } catch (e: android.app.RecoverableSecurityException) {
+                                deleteRequestLauncher.launch(
+                                    IntentSenderRequest.Builder(e.userAction.actionIntent.intentSender).build()
+                                )
+                            }
+                        } else {
+                            mainViewModel.clearPendingGalleryDelete()
+                        }
+                    } catch (_: Exception) {
+                        mainViewModel.clearPendingGalleryDelete()
                     }
-                )
+                }
+
+                if (showTutorial) {
+                    TutorialScreen(onDone = {
+                        prefs.edit().putBoolean("tutorial_shown", true).apply()
+                        showTutorial = false
+                    })
+                } else if (BuildConfig.DEBUG && ocrDebugInfo != null) {
+                    val capturedInfo = ocrDebugInfo!!
+                    OcrCheckScreen(
+                        info = capturedInfo,
+                        onResult = { isSuccess -> mainViewModel.onTestResultSubmitted(isSuccess) },
+                        onDismiss = { mainViewModel.dismissOcrDebug() },
+                        onSendToDeveloper = { launchDeveloperFeedback(this@MainActivity, capturedInfo) }
+                    )
+                } else {
+                    MainScreen(
+                        viewModel = mainViewModel,
+                        onOpenSettingsClicked = {
+                            startActivity(Intent(Settings.ACTION_NOTIFICATION_LISTENER_SETTINGS))
+                        },
+                        onShowTutorial = { showTutorial = true }
+                    )
+                }
             }
         }
         // Only process share intent on a fresh launch, not on Activity recreation
@@ -208,7 +270,7 @@ private val ChipGrayBorder  = Color(0xFFBDBDBD)
 // ─────────────────────────────────────────────────────────────────────────────
 
 @Composable
-fun MainScreen(viewModel: MainViewModel, onOpenSettingsClicked: () -> Unit) {
+fun MainScreen(viewModel: MainViewModel, onOpenSettingsClicked: () -> Unit, onShowTutorial: () -> Unit) {
     val currentScreen by viewModel.currentScreen.collectAsState()
 
     BackHandler(enabled = currentScreen == Screen.CLIENT_DETAIL) {
@@ -218,7 +280,8 @@ fun MainScreen(viewModel: MainViewModel, onOpenSettingsClicked: () -> Unit) {
     MainTabsScreen(
         viewModel = viewModel,
         context = LocalContext.current,
-        onOpenSettingsClicked = onOpenSettingsClicked
+        onOpenSettingsClicked = onOpenSettingsClicked,
+        onShowTutorial = onShowTutorial
     )
 }
 
@@ -227,7 +290,8 @@ fun MainScreen(viewModel: MainViewModel, onOpenSettingsClicked: () -> Unit) {
 private fun MainTabsScreen(
     viewModel: MainViewModel,
     context: android.content.Context,
-    onOpenSettingsClicked: () -> Unit
+    onOpenSettingsClicked: () -> Unit,
+    onShowTutorial: () -> Unit
 ) {
     val currentScreen by viewModel.currentScreen.collectAsState()
     val selectedClient by viewModel.selectedClient.collectAsState()
@@ -242,6 +306,7 @@ private fun MainTabsScreen(
     val overdueFilterDays by viewModel.overdueFilterDays.collectAsState()
     val justIssuedCards by viewModel.justIssuedCards.collectAsState()
     val pendingNewClients by viewModel.pendingNewClients.collectAsState()
+    val testResults by viewModel.parseTestResults.collectAsState()
     val lifecycleOwner = LocalLifecycleOwner.current
     var hasNotificationPermission by remember {
         mutableStateOf(
@@ -386,7 +451,11 @@ private fun MainTabsScreen(
                     onOpenSettings = onOpenSettingsClicked,
                     onSyncClients = { viewModel.onSyncClientsClicked() },
                     onAddFakePayment = { viewModel.onAddFakePaymentClicked() },
-                    onAddFakeOverduePayment = { viewModel.onAddFakeOverduePaymentClicked() }
+                    onAddFakeOverduePayment = { viewModel.onAddFakeOverduePaymentClicked() },
+                    onShowTutorial = onShowTutorial,
+                    testResults = testResults,
+                    onSendFailure = { result -> launchDeveloperFeedbackFromResult(context, result) },
+                    onClearResults = { viewModel.clearTestResults() }
                 )
                 2 -> HistoryScreen(
                     modifier = Modifier.padding(innerPadding),
@@ -570,7 +639,7 @@ fun PaymentCard(
                     Row(
                         modifier = Modifier.fillMaxWidth(),
                         horizontalArrangement = Arrangement.SpaceBetween,
-                        verticalAlignment = Alignment.CenterVertically
+                        verticalAlignment = Alignment.Top
                     ) {
                         Box(
                             modifier = Modifier
@@ -580,7 +649,19 @@ fun PaymentCard(
                         ) {
                             Text(sourceName, color = sourceColor, style = MaterialTheme.typography.labelMedium, fontWeight = FontWeight.Bold)
                         }
-                        Text("איש קשר: ${payment.senderName}", style = MaterialTheme.typography.bodySmall, color = onHeroSubColor)
+                        Column(horizontalAlignment = Alignment.End) {
+                            Text(
+                                "איש קשר",
+                                style = MaterialTheme.typography.labelSmall,
+                                color = onHeroSubColor
+                            )
+                            Text(
+                                payment.senderName,
+                                style = MaterialTheme.typography.titleMedium,
+                                fontWeight = FontWeight.SemiBold,
+                                color = onHeroColor
+                            )
+                        }
                     }
                     Spacer(Modifier.height(14.dp))
                     CompositionLocalProvider(LocalLayoutDirection provides LayoutDirection.Ltr) {
@@ -2035,6 +2116,7 @@ private fun OverdueClientRow(
 // ─────────────────────────────────────────────────────────────────────────────
 
 @Composable
+@OptIn(ExperimentalMaterial3Api::class)
 fun SettingsTab(
     modifier: Modifier,
     isEnabled: Boolean,
@@ -2043,10 +2125,25 @@ fun SettingsTab(
     onOpenSettings: () -> Unit,
     onSyncClients: () -> Unit,
     onAddFakePayment: () -> Unit,
-    onAddFakeOverduePayment: () -> Unit
+    onAddFakeOverduePayment: () -> Unit,
+    onShowTutorial: () -> Unit = {},
+    testResults: List<ParseTestResult> = emptyList(),
+    onSendFailure: (ParseTestResult) -> Unit = {},
+    onClearResults: () -> Unit = {}
 ) {
+    var showTestResults by remember { mutableStateOf(false) }
+
+    if (showTestResults) {
+        ModalBottomSheet(onDismissRequest = { showTestResults = false }) {
+            TestResultsSheet(
+                results = testResults,
+                onSendFailure = onSendFailure,
+                onClear = { onClearResults(); showTestResults = false }
+            )
+        }
+    }
     Column(
-        modifier = modifier.fillMaxSize().padding(16.dp),
+        modifier = modifier.fillMaxSize().verticalScroll(rememberScrollState()).padding(16.dp),
         verticalArrangement = Arrangement.spacedBy(16.dp)
     ) {
         Text("הגדרות", style = MaterialTheme.typography.headlineSmall, fontWeight = FontWeight.Bold)
@@ -2090,6 +2187,23 @@ fun SettingsTab(
             Text("סנכרן לקוחות")
         }
 
+        OutlinedButton(onClick = onShowTutorial, modifier = Modifier.fillMaxWidth()) {
+            Icon(Icons.Default.HelpOutline, contentDescription = null, modifier = Modifier.size(18.dp))
+            Spacer(Modifier.width(8.dp))
+            Text("הצג מדריך למשתמש")
+        }
+
+        if (BuildConfig.DEBUG && testResults.isNotEmpty()) {
+            val ok = testResults.count { it.isSuccess }
+            val fail = testResults.count { !it.isSuccess }
+            OutlinedButton(
+                onClick = { showTestResults = true },
+                modifier = Modifier.fillMaxWidth()
+            ) {
+                Text("תוצאות בדיקה: ✓$ok  ✗$fail")
+            }
+        }
+
         // Dev tools separator
         Row(
             verticalAlignment = Alignment.CenterVertically,
@@ -2109,6 +2223,258 @@ fun SettingsTab(
         }
         OutlinedButton(onClick = onAddFakeOverduePayment, modifier = Modifier.fillMaxWidth()) {
             Text("הוסף תשלום ישן (בדיקת תזכורות)")
+        }
+    }
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// OCR check screen (תקין / לא תקין)
+// ─────────────────────────────────────────────────────────────────────────────
+
+@Composable
+private fun OcrCheckScreen(
+    info: OcrDebugInfo,
+    onResult: (Boolean) -> Unit,
+    onDismiss: () -> Unit,
+    onSendToDeveloper: () -> Unit = {}
+) {
+    val sourceLabel = if (info.source == "paybox") "Paybox" else "ביט"
+    val dateStr = info.parsedTimestamp?.let {
+        java.text.SimpleDateFormat("dd.MM.yy", java.util.Locale.getDefault()).format(java.util.Date(it))
+    }
+    val nameOk   = !info.parsedName.isNullOrBlank()
+    val amountOk = (info.parsedAmount ?: 0.0) > 0.0
+    var markedFailed by remember { mutableStateOf(false) }
+
+    val context = LocalContext.current
+    val bitmap by produceState<android.graphics.Bitmap?>(null, info.imageUri) {
+        value = try {
+            context.contentResolver.openInputStream(info.imageUri)?.use {
+                android.graphics.BitmapFactory.decodeStream(it)
+            }
+        } catch (_: Exception) { null }
+    }
+
+    Scaffold(
+        topBar = {
+            @OptIn(ExperimentalMaterial3Api::class)
+            TopAppBar(
+                title = { Text("בדיקת פענוח — $sourceLabel", style = MaterialTheme.typography.titleSmall) },
+                navigationIcon = {
+                    IconButton(onClick = onDismiss) {
+                        Icon(Icons.AutoMirrored.Filled.ArrowBack, null)
+                    }
+                },
+                modifier = Modifier.height(48.dp)
+            )
+        }
+    ) { padding ->
+        Column(modifier = Modifier.fillMaxSize().padding(padding)) {
+            // Screenshot image — takes all available space above the card
+            bitmap?.let { bmp ->
+                Image(
+                    painter = BitmapPainter(bmp.asImageBitmap()),
+                    contentDescription = "תמונת התשלום",
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .weight(1f)
+                        .padding(horizontal = 16.dp, vertical = 4.dp)
+                        .clip(RoundedCornerShape(10.dp)),
+                    contentScale = ContentScale.Fit
+                )
+            } ?: Spacer(Modifier.weight(1f))
+            // Parsed data card
+            Card(modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp)) {
+                Column(
+                    modifier 2= Modifier.padding(horizontal = 16.dp, vertical = 10.dp),
+                    verticalArrangement = Arrangement.spacedBy(6.dp)
+                ) {
+                    Text("נתוני הפענוח", style = MaterialTheme.typography.titleSmall, fontWeight = FontWeight.Bold)
+                    Row(horizontalArrangement = Arrangement.spacedBy(8.dp), verticalAlignment = Alignment.CenterVertically) {
+                        Text(if (nameOk) "✓" else "✗", color = if (nameOk) Color(0xFF4CAF50) else Color(0xFFF44336))
+                        Column {
+                            Text("שם", style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                            Text(info.parsedName ?: "לא זוהה", style = MaterialTheme.typography.bodyMedium, fontWeight = FontWeight.Medium)
+                        }
+                    }
+                    Row(horizontalArrangement = Arrangement.spacedBy(8.dp), verticalAlignment = Alignment.CenterVertically) {
+                        Text(if (amountOk) "✓" else "✗", color = if (amountOk) Color(0xFF4CAF50) else Color(0xFFF44336))
+                        Column {
+                            Text("סכום", style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                            Text(if (amountOk) "₪${info.parsedAmount}" else "לא זוהה", style = MaterialTheme.typography.bodyMedium, fontWeight = FontWeight.Medium)
+                        }
+                    }
+                    dateStr?.let {
+                        Row(horizontalArrangement = Arrangement.spacedBy(8.dp), verticalAlignment = Alignment.CenterVertically) {
+                            Text("✓", color = Color(0xFF4CAF50))
+                            Column {
+                                Text("תאריך", style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                                Text(it, style = MaterialTheme.typography.bodyMedium, fontWeight = FontWeight.Medium)
+                            }
+                        }
+                    }
+                }
+            }
+            // Fixed bottom action area
+            Column(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(horizontal = 16.dp)
+                    .padding(top = 6.dp, bottom = 4.dp)
+                    .navigationBarsPadding(),
+                verticalArrangement = Arrangement.spacedBy(6.dp),
+                horizontalAlignment = Alignment.CenterHorizontally
+            ) {
+                Text("האם הנתונים תואמים לתשלום בביט?", style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(12.dp)) {
+                    OutlinedButton(
+                        onClick = { markedFailed = true },
+                        modifier = Modifier.weight(1f),
+                        colors = ButtonDefaults.outlinedButtonColors(contentColor = MaterialTheme.colorScheme.error),
+                        border = BorderStroke(1.dp, MaterialTheme.colorScheme.error)
+                    ) { Text("✗  לא תקין") }
+                    Button(
+                        onClick = { onResult(true) },
+                        modifier = Modifier.weight(1f),
+                        colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF4CAF50))
+                    ) { Text("✓  תקין") }
+                }
+                if (markedFailed) {
+                    Button(
+                        onClick = { onSendToDeveloper(); onResult(false) },
+                        modifier = Modifier.fillMaxWidth(),
+                        colors = ButtonDefaults.buttonColors(containerColor = MaterialTheme.colorScheme.error)
+                    ) { Text("📤  שלח למפתח") }
+                    TextButton(
+                        onClick = { onResult(false) },
+                        modifier = Modifier.fillMaxWidth()
+                    ) { Text("המשך ללא שליחה", color = MaterialTheme.colorScheme.onSurfaceVariant) }
+                }
+            }
+        }
+    }
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Test results bottom sheet
+// ─────────────────────────────────────────────────────────────────────────────
+
+@Composable
+private fun TestResultsSheet(
+    results: List<ParseTestResult>,
+    onSendFailure: (ParseTestResult) -> Unit,
+    onClear: () -> Unit
+) {
+    val fmt = remember { java.text.SimpleDateFormat("dd.MM HH:mm", java.util.Locale.getDefault()) }
+    Column(
+        modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp).padding(bottom = 24.dp),
+        verticalArrangement = Arrangement.spacedBy(8.dp)
+    ) {
+        Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween, verticalAlignment = Alignment.CenterVertically) {
+            Text("תוצאות בדיקה", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Bold)
+            TextButton(onClick = onClear) { Text("נקה הכל", color = MaterialTheme.colorScheme.error) }
+        }
+        val ok = results.count { it.isSuccess }
+        val fail = results.count { !it.isSuccess }
+        Text("✓ $ok תקין   ✗ $fail לא תקין", style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
+        HorizontalDivider()
+        results.reversed().forEach { result ->
+            Row(
+                modifier = Modifier.fillMaxWidth().padding(vertical = 4.dp),
+                horizontalArrangement = Arrangement.SpaceBetween,
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                Row(horizontalArrangement = Arrangement.spacedBy(8.dp), verticalAlignment = Alignment.CenterVertically) {
+                    Text(if (result.isSuccess) "✓" else "✗",
+                        color = if (result.isSuccess) Color(0xFF4CAF50) else MaterialTheme.colorScheme.error,
+                        style = MaterialTheme.typography.titleMedium)
+                    Column {
+                        Text("#${result.id}  ${result.parsedName ?: "?"}  ${result.parsedAmount?.let { "₪$it" } ?: ""}",
+                            style = MaterialTheme.typography.bodyMedium)
+                        Text(fmt.format(java.util.Date(result.timestamp)),
+                            style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                    }
+                }
+                if (!result.isSuccess) {
+                    TextButton(onClick = { onSendFailure(result) }) { Text("שלח") }
+                }
+            }
+        }
+    }
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Developer feedback sharing
+// ─────────────────────────────────────────────────────────────────────────────
+
+private fun launchDeveloperFeedbackFromResult(context: android.content.Context, result: ParseTestResult) {
+    val text = buildString {
+        append("🔍 AutoKabala OCR Report #${result.id}\n")
+        append("מקור: ${if (result.source == "bit") "ביט" else "פייבוקס"}\n")
+        append("שם שזוהה: ${result.parsedName ?: "לא זוהה"}\n")
+        append("סכום שזוהה: ${result.parsedAmount?.let { "₪$it" } ?: "לא זוהה"}\n\n")
+        append("--- Tesseract ---\n${result.tesseractText}\n\n")
+        append("--- ML Kit ---\n${result.mlKitText}")
+    }
+    val imageUri = result.imagePath?.let { path ->
+        try {
+            val file = java.io.File(path)
+            if (file.exists()) androidx.core.content.FileProvider.getUriForFile(
+                context, "${context.packageName}.provider", file
+            ) else null
+        } catch (_: Exception) { null }
+    }
+    val intent = if (imageUri != null) {
+        Intent(Intent.ACTION_SEND).apply {
+            type = "image/*"
+            putExtra(Intent.EXTRA_STREAM, imageUri)
+            putExtra(Intent.EXTRA_TEXT, text)
+            addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
+            setPackage("com.whatsapp")
+        }
+    } else {
+        Intent(Intent.ACTION_VIEW,
+            android.net.Uri.parse("whatsapp://send?phone=972506818414&text=${android.net.Uri.encode(text)}"))
+    }
+    try {
+        context.startActivity(intent)
+    } catch (_: android.content.ActivityNotFoundException) {
+        val fallback = Intent(Intent.ACTION_SEND).apply {
+            type = "text/plain"; putExtra(Intent.EXTRA_TEXT, text)
+        }
+        context.startActivity(Intent.createChooser(fallback, null))
+    }
+}
+
+private fun launchDeveloperFeedback(context: android.content.Context, info: OcrDebugInfo) {
+    val text = buildString {
+        append("🔍 AutoKabala OCR Report\n")
+        append("מקור: ${if (info.source == "bit") "ביט" else "פייבוקס"}\n")
+        append("שם שזוהה: ${info.parsedName ?: "לא זוהה"}\n")
+        append("סכום שזוהה: ${info.parsedAmount?.let { "₪$it" } ?: "לא זוהה"}\n\n")
+        append("--- Tesseract ---\n${info.tesseractText}\n\n")
+        append("--- ML Kit ---\n${info.mlKitText}")
+    }
+    val waWithImage = Intent(Intent.ACTION_SEND).apply {
+        type = "image/*"
+        putExtra(Intent.EXTRA_STREAM, info.imageUri)
+        putExtra(Intent.EXTRA_TEXT, text)
+        addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
+        setPackage("com.whatsapp")
+    }
+    try {
+        context.startActivity(waWithImage)
+    } catch (_: android.content.ActivityNotFoundException) {
+        val waText = Intent(Intent.ACTION_VIEW,
+            android.net.Uri.parse("whatsapp://send?phone=972506818414&text=${android.net.Uri.encode(text)}"))
+        try {
+            context.startActivity(waText)
+        } catch (_: android.content.ActivityNotFoundException) {
+            val fallback = Intent(Intent.ACTION_SEND).apply {
+                type = "text/plain"
+                putExtra(Intent.EXTRA_TEXT, text)
+            }
+            context.startActivity(Intent.createChooser(fallback, null))
         }
     }
 }
@@ -2142,6 +2508,111 @@ private fun launchWhatsApp(
             putExtra(Intent.EXTRA_TEXT, messageText)
         }
         context.startActivity(Intent.createChooser(fallback, null))
+    }
+}
+
+@Composable
+private fun OcrDebugScreen(
+    info: OcrDebugInfo,
+    onContinue: () -> Unit,
+    onDismiss: () -> Unit
+) {
+    val sourceLabel = if (info.source == "paybox") "Paybox" else "Bit"
+    val nameOk      = !info.parsedName.isNullOrBlank()
+    val amountOk    = (info.parsedAmount ?: 0.0) > 0.0
+    val dateOk      = (info.parsedTimestamp ?: 0L) > 0L
+    val dateStr     = info.parsedTimestamp?.let {
+        SimpleDateFormat("dd.MM.yy HH:mm", Locale.getDefault()).format(Date(it))
+    }
+
+    Scaffold(
+        topBar = {
+            @OptIn(ExperimentalMaterial3Api::class)
+            TopAppBar(
+                title = { Text("בדיקת OCR — $sourceLabel") },
+                navigationIcon = {
+                    IconButton(onClick = onDismiss) {
+                        Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = "ביטול")
+                    }
+                }
+            )
+        },
+        bottomBar = {
+            Row(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .navigationBarsPadding()
+                    .padding(16.dp),
+                horizontalArrangement = Arrangement.spacedBy(12.dp)
+            ) {
+                OutlinedButton(onClick = onDismiss, modifier = Modifier.weight(1f)) {
+                    Text("בטל")
+                }
+                Button(
+                    onClick = onContinue,
+                    modifier = Modifier.weight(1f),
+                    enabled = nameOk && amountOk
+                ) {
+                    Text("המשך להפקת קבלה")
+                }
+            }
+        }
+    ) { padding ->
+        androidx.compose.foundation.lazy.LazyColumn(
+            modifier = Modifier
+                .fillMaxSize()
+                .padding(padding)
+                .padding(horizontal = 16.dp),
+            verticalArrangement = Arrangement.spacedBy(12.dp)
+        ) {
+            item {
+                // ── תוצאה ──
+                Card(modifier = Modifier.fillMaxWidth()) {
+                    Column(modifier = Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                        Text("תוצאת פענוח", style = MaterialTheme.typography.titleMedium)
+                        Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                            Text(if (nameOk) "✓" else "✗", color = if (nameOk) Color(0xFF4CAF50) else Color(0xFFF44336))
+                            Text("שם: ${info.parsedName ?: "לא זוהה"}")
+                        }
+                        Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                            Text(if (amountOk) "✓" else "✗", color = if (amountOk) Color(0xFF4CAF50) else Color(0xFFF44336))
+                            Text("סכום: ${if (amountOk) "₪${info.parsedAmount}" else "לא זוהה"}")
+                        }
+                        Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                            Text(if (dateOk) "✓" else "✗", color = if (dateOk) Color(0xFF4CAF50) else Color(0xFFF44336))
+                            Text("תאריך: ${dateStr ?: "לא זוהה"}")
+                        }
+                    }
+                }
+            }
+            item {
+                // ── Tesseract raw ──
+                Card(modifier = Modifier.fillMaxWidth()) {
+                    Column(modifier = Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                        Text("Tesseract (עברית)", style = MaterialTheme.typography.titleSmall)
+                        Text(
+                            text = info.tesseractText.ifBlank { "(ריק)" },
+                            style = MaterialTheme.typography.bodySmall,
+                            fontFamily = androidx.compose.ui.text.font.FontFamily.Monospace
+                        )
+                    }
+                }
+            }
+            item {
+                // ── ML Kit raw ──
+                Card(modifier = Modifier.fillMaxWidth()) {
+                    Column(modifier = Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                        Text("ML Kit (Latin)", style = MaterialTheme.typography.titleSmall)
+                        Text(
+                            text = info.mlKitText.ifBlank { "(ריק)" },
+                            style = MaterialTheme.typography.bodySmall,
+                            fontFamily = androidx.compose.ui.text.font.FontFamily.Monospace
+                        )
+                    }
+                }
+            }
+            item { Spacer(modifier = Modifier.height(8.dp)) }
+        }
     }
 }
 

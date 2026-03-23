@@ -2,6 +2,7 @@ package com.autokabala.listener
 
 import android.app.Application
 import android.content.Context
+import com.autokabala.listener.BuildConfig
 import android.net.Uri
 import android.util.Log
 import androidx.lifecycle.AndroidViewModel
@@ -31,6 +32,10 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.suspendCancellableCoroutine
 import kotlinx.coroutines.withContext
+import kotlinx.serialization.Serializable
+import kotlinx.serialization.encodeToString
+import kotlinx.serialization.decodeFromString
+import kotlinx.serialization.json.Json
 import java.io.File
 import java.io.FileOutputStream
 import kotlin.coroutines.resume
@@ -45,6 +50,30 @@ data class IssuedReceiptInfo(
     val timestamp: Long? = null
 )
 data class PendingNewClient(val name: String, val phone: String?, val email: String?)
+
+data class OcrDebugInfo(
+    val source: String,
+    val tesseractText: String,
+    val mlKitText: String,
+    val parsedName: String?,
+    val parsedAmount: Double?,
+    val parsedTimestamp: Long?,
+    val imageUri: Uri,
+    val pendingPaymentData: PaymentData
+)
+
+@Serializable
+data class ParseTestResult(
+    val id: Int,
+    val timestamp: Long,
+    val source: String,
+    val parsedName: String?,
+    val parsedAmount: Double?,
+    val isSuccess: Boolean,
+    val imagePath: String?,   // filesDir path, only for failures
+    val tesseractText: String,
+    val mlKitText: String
+)
 
 // Represents the result of matching a payment to existing clients
 sealed class MatchResult {
@@ -85,6 +114,75 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
 
     private val _pendingNewClients = MutableStateFlow<Map<Int, PendingNewClient>>(emptyMap())
     val pendingNewClients: StateFlow<Map<Int, PendingNewClient>> = _pendingNewClients.asStateFlow()
+
+    private val _ocrDebugInfo = MutableStateFlow<OcrDebugInfo?>(null)
+    val ocrDebugInfo: StateFlow<OcrDebugInfo?> = _ocrDebugInfo.asStateFlow()
+
+    private val _parseTestResults = MutableStateFlow<List<ParseTestResult>>(emptyList())
+    val parseTestResults: StateFlow<List<ParseTestResult>> = _parseTestResults.asStateFlow()
+
+    private val resultsFile get() = File(getApplication<Application>().filesDir, "parse_results.json")
+
+    init {
+        viewModelScope.launch(Dispatchers.IO) {
+            try {
+                if (resultsFile.exists())
+                    _parseTestResults.value = Json.decodeFromString(resultsFile.readText())
+            } catch (_: Exception) {}
+        }
+    }
+
+    fun onTestResultSubmitted(isSuccess: Boolean) {
+        val info = _ocrDebugInfo.value ?: return
+        _ocrDebugInfo.value = null
+        viewModelScope.launch {
+            ListenerManager.onPaymentParsed(info.pendingPaymentData)
+            val imagePath: String? = if (!isSuccess) {
+                withContext(Dispatchers.IO) {
+                    try {
+                        val dir = File(getApplication<Application>().filesDir, "ocr_debug").also { it.mkdirs() }
+                        val file = File(dir, "ocr_${System.currentTimeMillis()}.jpg")
+                        // Copy from cache to filesDir for persistence
+                        getApplication<Application>().contentResolver.openInputStream(info.imageUri)?.use { input ->
+                            FileOutputStream(file).use { out -> input.copyTo(out) }
+                        }
+                        file.absolutePath
+                    } catch (_: Exception) { null }
+                }
+            } else null
+            val nextId = (_parseTestResults.value.maxOfOrNull { it.id } ?: 0) + 1
+            val result = ParseTestResult(
+                id = nextId,
+                timestamp = System.currentTimeMillis(),
+                source = info.source,
+                parsedName = info.parsedName,
+                parsedAmount = info.parsedAmount,
+                isSuccess = isSuccess,
+                imagePath = imagePath,
+                tesseractText = info.tesseractText,
+                mlKitText = info.mlKitText
+            )
+            val updated = _parseTestResults.value + result
+            _parseTestResults.value = updated
+            withContext(Dispatchers.IO) {
+                try { resultsFile.writeText(Json.encodeToString(updated)) } catch (_: Exception) {}
+            }
+        }
+    }
+
+    fun dismissOcrDebug() { _ocrDebugInfo.value = null }
+
+    fun clearTestResults() {
+        _parseTestResults.value = emptyList()
+        viewModelScope.launch(Dispatchers.IO) {
+            try { resultsFile.delete() } catch (_: Exception) {}
+        }
+    }
+
+    private val _pendingGalleryDelete = MutableStateFlow<Uri?>(null)
+    val pendingGalleryDelete: StateFlow<Uri?> = _pendingGalleryDelete.asStateFlow()
+
+    fun clearPendingGalleryDelete() { _pendingGalleryDelete.value = null }
 
     // --- Payment History (last 90 days) ---
     private val historyWindowStart = System.currentTimeMillis() - 90L * 24 * 3600 * 1000
@@ -352,6 +450,18 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                 }
 
                 // Step 1: ML Kit always runs first — needed for source detection + amount.
+                // Try to delete the shared image from the gallery silently.
+                // If the OS requires user confirmation (Android 10+), we store the URI
+                // and MainActivity will launch the system delete dialog.
+                withContext(Dispatchers.IO) {
+                    try {
+                        val deleted = context.contentResolver.delete(imageUri, null, null)
+                        if (deleted == 0) _pendingGalleryDelete.value = imageUri
+                    } catch (e: SecurityException) {
+                        _pendingGalleryDelete.value = imageUri
+                    } catch (_: Exception) {}
+                }
+
                 val mlKitResult = runMlKitOcr(originalBitmap)
                 val mlKitText   = mlKitResult?.text
                 val mlKitAmount = mlKitResult?.amount
@@ -383,6 +493,19 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                         Log.d("AmountCrop", if (it != null) "Crop amount: $it" else "Crop also failed")
                     }
                 } else null
+
+                // Save image to cache for tester feedback (debug builds only)
+                val feedbackImageUri: Uri? = if (BuildConfig.DEBUG) {
+                    withContext(Dispatchers.IO) {
+                        try {
+                            val dir = File(context.cacheDir, "ocr_feedback").also { it.mkdirs() }
+                            val file = File(dir, "ocr_${System.currentTimeMillis()}.jpg")
+                            FileOutputStream(file).use { originalBitmap.compress(Bitmap.CompressFormat.JPEG, 85, it) }
+                            androidx.core.content.FileProvider.getUriForFile(context, "${context.packageName}.provider", file)
+                        } catch (e: Exception) { null }
+                    }
+                } else null
+
                 originalBitmap.recycle()
 
                 // Step 3: Parse with the appropriate parser.
@@ -395,7 +518,20 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                         _uiEvent.send(UiEvent.ShowError("לא נמצאו פרטי תשלום. ודא שמדובר באישור תשלום PayBox."))
                         return@launch
                     }
-                    ListenerManager.onPaymentParsed(paymentData)
+                    if (BuildConfig.DEBUG && feedbackImageUri != null) {
+                        _ocrDebugInfo.value = OcrDebugInfo(
+                            source = "paybox",
+                            tesseractText = tesseractText ?: "",
+                            mlKitText = mlKitText ?: "",
+                            parsedName = paymentData.senderName,
+                            parsedAmount = paymentData.amount,
+                            parsedTimestamp = paymentData.timestamp,
+                            imageUri = feedbackImageUri,
+                            pendingPaymentData = paymentData
+                        )
+                    } else {
+                        ListenerManager.onPaymentParsed(paymentData)
+                    }
                 } else {
                     val combinedText = "${tesseractText ?: ""}\n${mlKitText ?: ""}"
                     if (BitShareParser.isExpired(combinedText)) {
@@ -414,7 +550,20 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                         _uiEvent.send(UiEvent.ShowError("לא נמצאו פרטי תשלום בתמונה. ודא שמדובר בתמונת אישור תשלום ביט."))
                         return@launch
                     }
-                    ListenerManager.onPaymentParsed(paymentData)
+                    if (BuildConfig.DEBUG && feedbackImageUri != null) {
+                        _ocrDebugInfo.value = OcrDebugInfo(
+                            source = "bit",
+                            tesseractText = tesseractText ?: "",
+                            mlKitText = mlKitText ?: "",
+                            parsedName = paymentData.senderName,
+                            parsedAmount = paymentData.amount,
+                            parsedTimestamp = paymentData.timestamp,
+                            imageUri = feedbackImageUri,
+                            pendingPaymentData = paymentData
+                        )
+                    } else {
+                        ListenerManager.onPaymentParsed(paymentData)
+                    }
                 }
             } catch (e: Exception) {
                 Log.e("ShareOCR", "Unexpected exception during share processing", e)

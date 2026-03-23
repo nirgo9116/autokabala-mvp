@@ -6,6 +6,10 @@ plugins {
     alias(libs.plugins.kotlin.compose)
     alias(libs.plugins.kotlin.serialization)
     alias(libs.plugins.ksp) // Use alias for consistency
+ id("com.google.gms.google-services")
+  id("com.google.firebase.appdistribution")
+  id("com.google.firebase.crashlytics")
+
 }
 
 // Load properties from local.properties file
@@ -47,6 +51,11 @@ android {
                 "proguard-rules.pro"
             )
         }
+ debug {
+      firebaseAppDistribution {
+      }
+  }
+
     }
     compileOptions {
         sourceCompatibility = JavaVersion.VERSION_11
@@ -94,6 +103,11 @@ dependencies {
     implementation("androidx.room:room-runtime:2.6.1")
     implementation("androidx.room:room-ktx:2.6.1")
     ksp("androidx.room:room-compiler:2.6.1")
+
+    // Firebase
+    implementation(platform("com.google.firebase:firebase-bom:33.7.0"))
+    implementation("com.google.firebase:firebase-analytics")
+    implementation("com.google.firebase:firebase-crashlytics")
 
     testImplementation(libs.junit)
     androidTestImplementation(libs.androidx.junit)

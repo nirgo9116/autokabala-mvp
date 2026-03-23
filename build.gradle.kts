@@ -4,4 +4,7 @@ plugins {
     alias(libs.plugins.kotlin.android) apply false
     alias(libs.plugins.kotlin.compose) apply false
     alias(libs.plugins.ksp) apply false // Use alias for consistency
+    id("com.google.gms.google-services") version "4.4.2" apply false
+    id("com.google.firebase.appdistribution") version "5.0.0" apply false
+    id("com.google.firebase.crashlytics") version "3.0.3" apply false
 }
