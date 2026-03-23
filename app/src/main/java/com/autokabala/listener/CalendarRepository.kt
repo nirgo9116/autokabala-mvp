@@ -51,7 +51,7 @@ class CalendarRepository(
                 val calendarId = getPrimaryCalendarId() ?: return@withContext null
                 val values = ContentValues().apply {
                     put(CalendarContract.Events.CALENDAR_ID, calendarId)
-                    put(CalendarContract.Events.TITLE, "${session.clientName} — ₪${session.amount.toInt()}")
+                    put(CalendarContract.Events.TITLE, "${session.clientName} — ${session.amount.toFormattedAmount()}")
                     put(CalendarContract.Events.DESCRIPTION, session.description.ifBlank { "פגישה מתוכננת" })
                     put(CalendarContract.Events.DTSTART, session.scheduledDate)
                     put(CalendarContract.Events.DTEND, session.scheduledDate + session.durationMinutes * 60 * 1000L)

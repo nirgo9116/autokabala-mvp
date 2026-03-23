@@ -57,14 +57,8 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
-import java.text.SimpleDateFormat
 import java.util.Calendar
 import java.util.Date
-import java.util.Locale
-
-private val scheduledDateFormat     = SimpleDateFormat("dd/MM/yyyy",       Locale.getDefault())
-private val scheduledTimeFormat     = SimpleDateFormat("HH:mm",            Locale.getDefault())
-private val scheduledDateTimeFormat = SimpleDateFormat("dd/MM/yyyy HH:mm", Locale.getDefault())
 
 private val durationOptions = listOf(
     30  to "30 דקות",
@@ -126,17 +120,13 @@ fun ScheduledPaymentsScreen(
         val sorted = remember(scheduledPayments) { scheduledPayments.sortedBy { it.scheduledDate } }
 
         if (sorted.isEmpty()) {
-            Box(modifier = Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
-                Column(horizontalAlignment = Alignment.CenterHorizontally) {
-                    Text("אין פגישות מתוכננות", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Medium)
-                    Spacer(Modifier.height(4.dp))
-                    Text(
-                        "צור פגישה מתוכננת כדי לקבל תזכורות",
-                        style = MaterialTheme.typography.bodySmall,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant
-                    )
-                }
-            }
+            EmptyState(
+                icon        = Icons.Outlined.CalendarMonth,
+                title       = "אין פגישות מתוכננות",
+                subtitle    = "צור את הפגישה הראשונה שלך כדי לעקוב אחר המפגשים ולסנכרן עם לוח השנה",
+                actionLabel = "צור פגישה",
+                onAction    = { showCreateDialog = true }
+            )
         } else {
             LazyColumn(
                 modifier = Modifier.fillMaxSize(),
@@ -225,14 +215,14 @@ fun ScheduledPaymentCard(
                     Row(verticalAlignment = Alignment.CenterVertically) {
                         Icon(Icons.Outlined.CalendarMonth, contentDescription = null, modifier = Modifier.size(14.dp), tint = MaterialTheme.colorScheme.onSurfaceVariant)
                         Spacer(Modifier.width(4.dp))
-                        Text(scheduledDateTimeFormat.format(Date(payment.scheduledDate)), style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                        Text(dateTimeFormat.format(Date(payment.scheduledDate)), style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
                     }
                     if (payment.reminderRecurrenceDays > 0) {
                         val label = recurrenceOptions.find { it.first == payment.reminderRecurrenceDays }?.second ?: "כל ${payment.reminderRecurrenceDays} ימים"
                         Text("🔁 $label", style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.secondary)
                     }
                 }
-                Text("₪${payment.amount.toInt()}", style = MaterialTheme.typography.headlineSmall, fontWeight = FontWeight.Bold, color = MaterialTheme.colorScheme.primary)
+                Text(payment.amount.toFormattedAmount(), style = MaterialTheme.typography.headlineSmall, fontWeight = FontWeight.Bold, color = MaterialTheme.colorScheme.primary)
             }
             Spacer(Modifier.height(8.dp))
             HorizontalDivider()
@@ -444,7 +434,7 @@ fun CreateScheduledPaymentDialog(
                 // Date + Time row
                 Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                     OutlinedTextField(
-                        value = scheduledDateFormat.format(Date(selectedDateMs)), onValueChange = {}, readOnly = true,
+                        value = dateOnlyFormat.format(Date(selectedDateMs)), onValueChange = {}, readOnly = true,
                         label = { Text("תאריך") },
                         trailingIcon = { IconButton(onClick = { showDatePicker = true }) { Icon(Icons.Outlined.CalendarMonth, null) } },
                         modifier = Modifier.weight(1.5f)

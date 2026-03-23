@@ -161,9 +161,20 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
 
     // --- Calendar / Scheduled Payments State ---
     val calendarEvents = MutableStateFlow<List<CalendarEventEntity>>(emptyList())
-    val scheduledPayments: StateFlow<List<ScheduledPaymentEntity>> =
-        scheduledPaymentDao.getAllScheduledPayments()
-            .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), emptyList())
+
+    private val _pendingDeletedSessionIds  = MutableStateFlow<Set<Int>>(emptySet())
+    private val _pendingDeletedSeriesIds   = MutableStateFlow<Set<String>>(emptySet())
+    private val pendingDeleteJobs          = mutableMapOf<Int, kotlinx.coroutines.Job>()
+    private val pendingDeleteSeriesJobs    = mutableMapOf<String, kotlinx.coroutines.Job>()
+
+    val scheduledPayments: StateFlow<List<ScheduledPaymentEntity>> = combine(
+        scheduledPaymentDao.getAllScheduledPayments(),
+        _pendingDeletedSessionIds,
+        _pendingDeletedSeriesIds
+    ) { payments, ids, seriesIds ->
+        payments.filter { p -> p.id !in ids && (p.seriesId == null || p.seriesId !in seriesIds) }
+    }.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), emptyList())
+
     val pendingSessionLinks = MutableStateFlow<Map<Int, ScheduledPaymentEntity>>(emptyMap())
 
     // --- One-time Events ---
@@ -182,6 +193,8 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         data class ShowError(val message: String) : UiEvent()
         data class ShowMessage(val message: String) : UiEvent()
         data class RequestImageDeletion(val uri: Uri) : UiEvent()
+        data class ShowUndoableDeleteSession(val id: Int, val message: String) : UiEvent()
+        data class ShowUndoableDeleteSeries(val seriesId: String, val count: Int) : UiEvent()
     }
 
     // --- Event Handlers ---
@@ -521,19 +534,46 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
     }
 
     fun deleteScheduledPayment(payment: ScheduledPaymentEntity) {
-        viewModelScope.launch {
+        _pendingDeletedSessionIds.value = _pendingDeletedSessionIds.value + payment.id
+        val job = viewModelScope.launch {
+            kotlinx.coroutines.delay(4_000)
+            _pendingDeletedSessionIds.value = _pendingDeletedSessionIds.value - payment.id
             payment.calendarEventId?.let { calendarRepository.deleteCalendarEvent(it) }
             scheduledPaymentDao.deleteScheduledPayment(payment)
         }
+        pendingDeleteJobs[payment.id] = job
+        viewModelScope.launch {
+            _uiEvent.send(UiEvent.ShowUndoableDeleteSession(payment.id, "הפגישה נמחקה"))
+        }
+    }
+
+    fun undoDeleteSession(id: Int) {
+        pendingDeleteJobs[id]?.cancel()
+        pendingDeleteJobs.remove(id)
+        _pendingDeletedSessionIds.value = _pendingDeletedSessionIds.value - id
     }
 
     fun deleteScheduledPaymentSeries(payment: ScheduledPaymentEntity) {
+        val seriesId = payment.seriesId ?: return
         viewModelScope.launch {
-            val seriesId = payment.seriesId ?: return@launch
             val allInSeries = scheduledPaymentDao.getBySeriesId(seriesId)
-            allInSeries.forEach { it.calendarEventId?.let { id -> calendarRepository.deleteCalendarEvent(id) } }
-            scheduledPaymentDao.deleteBySeriesId(seriesId)
+            val ids = allInSeries.map { it.id }.toSet()
+            _pendingDeletedSeriesIds.value = _pendingDeletedSeriesIds.value + seriesId
+            val job = viewModelScope.launch {
+                kotlinx.coroutines.delay(4_000)
+                _pendingDeletedSeriesIds.value = _pendingDeletedSeriesIds.value - seriesId
+                allInSeries.forEach { it.calendarEventId?.let { id -> calendarRepository.deleteCalendarEvent(id) } }
+                scheduledPaymentDao.deleteBySeriesId(seriesId)
+            }
+            pendingDeleteSeriesJobs[seriesId] = job
+            _uiEvent.send(UiEvent.ShowUndoableDeleteSeries(seriesId, allInSeries.size))
         }
+    }
+
+    fun undoDeleteSeries(seriesId: String) {
+        pendingDeleteSeriesJobs[seriesId]?.cancel()
+        pendingDeleteSeriesJobs.remove(seriesId)
+        _pendingDeletedSeriesIds.value = _pendingDeletedSeriesIds.value - seriesId
     }
 
     // ── Name matching ─────────────────────────────────────────────────────────

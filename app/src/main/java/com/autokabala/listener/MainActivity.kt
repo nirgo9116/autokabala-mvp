@@ -62,6 +62,9 @@ import androidx.compose.material.icons.filled.Settings
 import androidx.compose.material.icons.outlined.CalendarMonth
 import androidx.compose.material.icons.outlined.History
 import androidx.compose.material.icons.outlined.Notifications
+import androidx.compose.material.icons.outlined.Payments
+import androidx.compose.material.icons.outlined.ReceiptLong
+import androidx.compose.material.icons.outlined.TrendingUp
 import androidx.compose.ui.draw.alpha
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.draw.drawBehind
@@ -329,7 +332,7 @@ private fun MainTabsScreen(
 
     val snackbarHostState = remember { SnackbarHostState() }
     LaunchedEffect(Unit) {
-        viewModel.uiEvent.collectLatest { event ->
+        viewModel.uiEvent.collect { event ->
             when (event) {
                 is MainViewModel.UiEvent.ShowError   -> snackbarHostState.showSnackbar(event.message)
                 is MainViewModel.UiEvent.ShowMessage -> snackbarHostState.showSnackbar(event.message)
@@ -341,6 +344,26 @@ private fun MainTabsScreen(
                             )
                             deleteImageLauncher.launch(IntentSenderRequest.Builder(pi).build())
                         } catch (_: Exception) { }
+                    }
+                }
+                is MainViewModel.UiEvent.ShowUndoableDeleteSession -> {
+                    val result = snackbarHostState.showSnackbar(
+                        message     = event.message,
+                        actionLabel = "בטל",
+                        duration    = androidx.compose.material3.SnackbarDuration.Short
+                    )
+                    if (result == androidx.compose.material3.SnackbarResult.ActionPerformed) {
+                        viewModel.undoDeleteSession(event.id)
+                    }
+                }
+                is MainViewModel.UiEvent.ShowUndoableDeleteSeries -> {
+                    val result = snackbarHostState.showSnackbar(
+                        message     = "${event.count} פגישות נמחקו",
+                        actionLabel = "בטל",
+                        duration    = androidx.compose.material3.SnackbarDuration.Short
+                    )
+                    if (result == androidx.compose.material3.SnackbarResult.ActionPerformed) {
+                        viewModel.undoDeleteSeries(event.seriesId)
                     }
                 }
             }
@@ -424,8 +447,23 @@ private fun MainTabsScreen(
             )
         } else {
             when (selectedTab) {
-                0 -> PaymentsTab(
+                0 -> {
+                    val now = System.currentTimeMillis()
+                    val cal = remember { java.util.Calendar.getInstance() }
+                    val thisMonth = remember(paymentHistory) {
+                        paymentHistory.filter { p ->
+                            val c = java.util.Calendar.getInstance().apply { timeInMillis = p.timestamp }
+                            c.get(java.util.Calendar.MONTH) == cal.get(java.util.Calendar.MONTH) &&
+                            c.get(java.util.Calendar.YEAR)  == cal.get(java.util.Calendar.YEAR)
+                        }.sumOf { it.issuedAmount ?: it.amount }
+                    }
+                    val nextMeeting = remember(scheduledPayments) {
+                        scheduledPayments.filter { it.scheduledDate > now }.minByOrNull { it.scheduledDate }
+                    }
+                    PaymentsTab(
                     modifier = Modifier.padding(innerPadding),
+                    monthlyRevenue = thisMonth,
+                    nextMeeting = nextMeeting,
                     paymentStates = paymentStates,
                     allClients = allClients,
                     calendarEvents = calendarEvents,
@@ -458,7 +496,7 @@ private fun MainTabsScreen(
                     onDismissSessionLink = { paymentId ->
                         viewModel.onDismissSessionLink(paymentId)
                     }
-                )
+                ) }
                 1 -> SettingsTab(
                     modifier = Modifier.padding(innerPadding),
                     isEnabled = isEnabled,
@@ -490,7 +528,7 @@ private fun MainTabsScreen(
                             val msg = if (tookPlace) {
                                 "שלום ${payment.clientName},\n" +
                                 "תודה על הפגישה! 😊\n" +
-                                "מחכה לתשלום של ₪${payment.amount.toInt()} עבור ${payment.description.ifBlank { "הפגישה" }}.\n" +
+                                "מחכה לתשלום של ${payment.amount.toFormattedAmount()} עבור ${payment.description.ifBlank { "הפגישה" }}.\n" +
                                 "תודה רבה! 🙏"
                             } else {
                                 "שלום ${payment.clientName},\n" +
@@ -505,7 +543,7 @@ private fun MainTabsScreen(
                     onSendReminder = { scheduled, client ->
                         val reminderText = "שלום ${scheduled.clientName},\n" +
                             "רציתי להזכיר לגבי התשלום עבור ${scheduled.description.ifBlank { "השיעור" }} שלנו.\n" +
-                            "סכום: ₪${scheduled.amount.toInt()}\n\nתודה רבה! 🙏"
+                            "סכום: ${scheduled.amount.toFormattedAmount()}\n\nתודה רבה! 🙏"
                         launchWhatsApp(context, clientPhone = client?.phone, text = reminderText)
                     }
                 )
@@ -526,12 +564,93 @@ private fun MainTabsScreen(
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
+// Dashboard summary card
+// ─────────────────────────────────────────────────────────────────────────────
+
+@Composable
+fun DashboardCard(
+    monthlyRevenue: Double,
+    pendingCount: Int,
+    nextMeeting: ScheduledPaymentEntity?
+) {
+    Card(
+        modifier = Modifier.fillMaxWidth(),
+        colors   = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.primaryContainer)
+    ) {
+        Column(modifier = Modifier.padding(16.dp)) {
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.SpaceBetween,
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                Column {
+                    Text(
+                        "הכנסות החודש",
+                        style = MaterialTheme.typography.labelSmall,
+                        color = MaterialTheme.colorScheme.onPrimaryContainer.copy(alpha = 0.7f)
+                    )
+                    Text(
+                        monthlyRevenue.toFormattedAmount(),
+                        style = MaterialTheme.typography.headlineSmall,
+                        fontWeight = FontWeight.Bold,
+                        color = MaterialTheme.colorScheme.onPrimaryContainer
+                    )
+                }
+                Column(horizontalAlignment = Alignment.End) {
+                    Text(
+                        "ממתינים לעיבוד",
+                        style = MaterialTheme.typography.labelSmall,
+                        color = MaterialTheme.colorScheme.onPrimaryContainer.copy(alpha = 0.7f)
+                    )
+                    Text(
+                        if (pendingCount == 0) "הכל מעודכן ✓" else "$pendingCount תשלומים",
+                        style = MaterialTheme.typography.titleMedium,
+                        fontWeight = FontWeight.Bold,
+                        color = if (pendingCount == 0)
+                            MaterialTheme.colorScheme.secondary
+                        else
+                            MaterialTheme.colorScheme.onPrimaryContainer
+                    )
+                }
+            }
+            if (nextMeeting != null) {
+                Spacer(Modifier.height(10.dp))
+                HorizontalDivider(color = MaterialTheme.colorScheme.onPrimaryContainer.copy(alpha = 0.15f))
+                Spacer(Modifier.height(10.dp))
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    Icon(
+                        Icons.Outlined.CalendarMonth,
+                        contentDescription = null,
+                        modifier = Modifier.size(15.dp),
+                        tint = MaterialTheme.colorScheme.onPrimaryContainer.copy(alpha = 0.7f)
+                    )
+                    Spacer(Modifier.width(6.dp))
+                    Text(
+                        "פגישה הבאה: ",
+                        style = MaterialTheme.typography.labelSmall,
+                        color = MaterialTheme.colorScheme.onPrimaryContainer.copy(alpha = 0.7f)
+                    )
+                    Text(
+                        "${nextMeeting.clientName}  ·  ${dateTimeFormat.format(java.util.Date(nextMeeting.scheduledDate))}",
+                        style = MaterialTheme.typography.labelMedium,
+                        fontWeight = FontWeight.SemiBold,
+                        color = MaterialTheme.colorScheme.onPrimaryContainer
+                    )
+                }
+            }
+        }
+    }
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
 // Payments tab
 // ─────────────────────────────────────────────────────────────────────────────
 
 @Composable
 fun PaymentsTab(
     modifier: Modifier,
+    monthlyRevenue: Double,
+    nextMeeting: ScheduledPaymentEntity?,
     paymentStates: List<PaymentProcessingState>,
     allClients: List<ClientEntity>,
     calendarEvents: List<CalendarEventEntity>,
@@ -552,7 +671,11 @@ fun PaymentsTab(
     onDismissSessionLink: (Int) -> Unit
 ) {
     Column(modifier = modifier.fillMaxSize().padding(horizontal = 8.dp)) {
-        Spacer(Modifier.height(12.dp))
+        Spacer(Modifier.height(8.dp))
+
+        // ── Dashboard summary card ────────────────────────────────────────────
+        DashboardCard(monthlyRevenue = monthlyRevenue, pendingCount = paymentStates.size, nextMeeting = nextMeeting)
+        Spacer(Modifier.height(8.dp))
 
         if (isProcessingShare) {
             Card(modifier = Modifier.fillMaxWidth()) {
@@ -569,21 +692,11 @@ fun PaymentsTab(
         }
 
         if (paymentStates.isEmpty() && justIssuedCards.isEmpty()) {
-            Box(modifier = Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
-                Column(horizontalAlignment = Alignment.CenterHorizontally) {
-                    Text(
-                        "אין תשלומים ממתינים",
-                        style = MaterialTheme.typography.titleMedium,
-                        fontWeight = FontWeight.Medium
-                    )
-                    Spacer(Modifier.height(4.dp))
-                    Text(
-                        "תשלומים יופיעו כאן לאחר קבלת התראת ביט\nאו שיתוף תמונת אישור תשלום",
-                        style = MaterialTheme.typography.bodySmall,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant
-                    )
-                }
-            }
+            EmptyState(
+                icon     = Icons.Outlined.Payments,
+                title    = "אין תשלומים ממתינים",
+                subtitle = "תשלומים יופיעו כאן לאחר קבלת התראת ביט או שיתוף תמונת אישור תשלום"
+            )
         } else {
             LazyColumn(verticalArrangement = Arrangement.spacedBy(12.dp)) {
                 // Issued receipt cards shown above pending
@@ -1136,9 +1249,7 @@ fun IssuedReceiptCard(
     onDismiss: () -> Unit
 ) {
     val isDark = isSystemInDarkTheme()
-    val amountStr = info.amount?.let {
-        if (it % 1.0 == 0.0) "₪${it.toInt()}" else "₪${"%.2f".format(it)}"
-    }
+    val amountStr = info.amount?.toFormattedAmount()
     val dateFmt = remember { SimpleDateFormat("dd/MM/yyyy", Locale.getDefault()) }
 
     // ── Colors ────────────────────────────────────────────────────────────────
@@ -1775,12 +1886,11 @@ fun HistoryScreen(
         } else {
             // ── Payment history grouped by month ──────────────────────────
             if (payments.isEmpty()) {
-                Box(modifier = Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
-                    Text(
-                        "אין פעילות ב-14 הימים האחרונים",
-                        color = MaterialTheme.colorScheme.onSurfaceVariant
-                    )
-                }
+                EmptyState(
+                    icon     = Icons.Outlined.ReceiptLong,
+                    title    = "אין היסטוריית תשלומים",
+                    subtitle = "קבלות שיופקו יופיעו כאן מסודרות לפי חודש"
+                )
             } else {
                 LazyColumn {
                     groupedPayments.forEach { (yearMonth, groupPayments, monthTotal) ->
@@ -1822,7 +1932,7 @@ private fun MonthHeader(year: Int, month: Int, total: Double? = null) {
             color = MaterialTheme.colorScheme.onSurfaceVariant
         )
         if (total != null) {
-            val totalStr = if (total % 1.0 == 0.0) "₪${total.toInt()}" else "₪${"%.2f".format(total)}"
+            val totalStr = total.toFormattedAmount()
             Text(
                 text = totalStr,
                 style = MaterialTheme.typography.titleSmall,
@@ -1874,8 +1984,7 @@ fun HistoryRow(
     val displayName = payment.clientName ?: payment.senderName
     val displayAmount = payment.issuedAmount ?: payment.amount
     val wasAmountEdited = payment.issuedAmount != null && payment.issuedAmount != payment.amount
-    val amountStr = if (displayAmount % 1.0 == 0.0) "₪${displayAmount.toInt()}"
-                    else "₪${"%.2f".format(displayAmount)}"
+    val amountStr = displayAmount.toFormattedAmount()
     val dateStr = remember(payment.timestamp) {
         SimpleDateFormat("dd/MM", Locale.getDefault()).format(Date(payment.timestamp))
     }
