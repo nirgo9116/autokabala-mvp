@@ -439,7 +439,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         }
     }
 
-    fun markSessionTookPlace(payment: ScheduledPaymentEntity, tookPlace: Boolean) {
+    fun markSessionTookPlace(payment: ScheduledPaymentEntity, tookPlace: Boolean?) {
         viewModelScope.launch {
             scheduledPaymentDao.updateScheduledPayment(payment.copy(tookPlace = tookPlace))
         }
@@ -471,6 +471,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                     docUrl = outcome.docUrl, clientPhone = phone, docNum = outcome.docNum,
                     clientName = client.name, amount = payment.amount, timestamp = payment.timestamp
                 ))
+                scheduledPaymentDao.updateScheduledPayment(session.copy(tookPlace = true, receiptIssued = true))
                 _uiEvent.send(UiEvent.ShowMessage("קבלה הופקה בהצלחה ✓"))
             } else {
                 _uiEvent.send(UiEvent.ShowError("שגיאה בהפקת קבלה. בדוק חיבור לאינטרנט ונסה שוב."))

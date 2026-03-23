@@ -18,5 +18,6 @@ data class ScheduledPaymentEntity(
     val serviceCompletedTime: Long? = null,
     val reminderHoursAfter: Int = 24,
     val reminderRecurrenceDays: Int = 0,
-    val tookPlace: Boolean? = null  // null = not answered, true = happened, false = didn't happen
+    val tookPlace: Boolean? = null,  // null = not answered, true = happened, false = didn't happen
+    val receiptIssued: Boolean = false
 )

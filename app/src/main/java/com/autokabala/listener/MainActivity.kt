@@ -469,17 +469,19 @@ private fun MainTabsScreen(
                     calendarEvents = calendarEvents,
                     onInsert = { viewModel.insertScheduledPayment(it) },
                     onDelete = { viewModel.deleteScheduledPayment(it) },
-                    onMarkTookPlace = { payment, tookPlace, client ->
+                    onMarkTookPlace = { payment, tookPlace: Boolean?, client ->
                         viewModel.markSessionTookPlace(payment, tookPlace)
-                        if (tookPlace) {
-                            val msg = "שלום ${payment.clientName},\n" +
+                        // Only send WhatsApp on first answer — not on reset (null) or correction
+                        if (tookPlace != null && payment.tookPlace == null) {
+                            val msg = if (tookPlace) {
+                                "שלום ${payment.clientName},\n" +
                                 "תודה על הפגישה! 😊\n" +
                                 "מחכה לתשלום של ₪${payment.amount.toInt()} עבור ${payment.description.ifBlank { "הפגישה" }}.\n" +
                                 "תודה רבה! 🙏"
-                            launchWhatsApp(context, clientPhone = client?.phone, text = msg)
-                        } else {
-                            val msg = "שלום ${payment.clientName},\n" +
+                            } else {
+                                "שלום ${payment.clientName},\n" +
                                 "לא הצלחנו להיפגש הפעם. בואו נקבע תאריך חדש? 😊"
+                            }
                             launchWhatsApp(context, clientPhone = client?.phone, text = msg)
                         }
                     },

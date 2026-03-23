@@ -86,7 +86,7 @@ fun ScheduledPaymentsScreen(
     onInsert: (ScheduledPaymentEntity) -> Unit,
     onDelete: (ScheduledPaymentEntity) -> Unit,
     onSendReminder: (ScheduledPaymentEntity, ClientEntity?) -> Unit,
-    onMarkTookPlace: (ScheduledPaymentEntity, Boolean, ClientEntity?) -> Unit,
+    onMarkTookPlace: (ScheduledPaymentEntity, Boolean?, ClientEntity?) -> Unit,
     onIssueReceiptForSession: (ScheduledPaymentEntity, ClientEntity?) -> Unit
 ) {
     var showCreateDialog by remember { mutableStateOf(false) }
@@ -168,7 +168,7 @@ fun ScheduledPaymentCard(
     payment: ScheduledPaymentEntity,
     onDelete: () -> Unit,
     onSendReminder: () -> Unit,
-    onMarkTookPlace: (Boolean) -> Unit,
+    onMarkTookPlace: (Boolean?) -> Unit,
     onIssueReceipt: () -> Unit,
     onReschedule: () -> Unit
 ) {
@@ -226,26 +226,42 @@ fun ScheduledPaymentCard(
                         Spacer(Modifier.height(4.dp))
                     }
                     true -> {
-                        Text(
-                            "✓ הפגישה התקיימה",
-                            style = MaterialTheme.typography.labelMedium,
-                            color = Color(0xFF2E7D32)
-                        )
+                        Row(
+                            verticalAlignment = Alignment.CenterVertically,
+                            horizontalArrangement = Arrangement.SpaceBetween,
+                            modifier = Modifier.fillMaxWidth()
+                        ) {
+                            Text("✓ הפגישה התקיימה", style = MaterialTheme.typography.labelMedium, color = Color(0xFF2E7D32))
+                            TextButton(
+                                onClick = { onMarkTookPlace(null) },
+                                contentPadding = PaddingValues(horizontal = 4.dp)
+                            ) { Text("שנה", fontSize = 11.sp, color = MaterialTheme.colorScheme.onSurfaceVariant) }
+                        }
                         Spacer(Modifier.height(4.dp))
-                        FilledTonalButton(
-                            onClick = onIssueReceipt,
-                            contentPadding = PaddingValues(horizontal = 12.dp, vertical = 4.dp)
-                        ) { Text("הפק קבלה", fontSize = 12.sp) }
+                        if (payment.receiptIssued) {
+                            Text("קבלה הופקה ✓", style = MaterialTheme.typography.labelMedium, color = MaterialTheme.colorScheme.primary)
+                        } else {
+                            FilledTonalButton(
+                                onClick = onIssueReceipt,
+                                contentPadding = PaddingValues(horizontal = 12.dp, vertical = 4.dp)
+                            ) { Text("הפק קבלה", fontSize = 12.sp) }
+                        }
                         Spacer(Modifier.height(4.dp))
                         HorizontalDivider()
                         Spacer(Modifier.height(4.dp))
                     }
                     false -> {
-                        Text(
-                            "✗ הפגישה לא התקיימה",
-                            style = MaterialTheme.typography.labelMedium,
-                            color = MaterialTheme.colorScheme.error
-                        )
+                        Row(
+                            verticalAlignment = Alignment.CenterVertically,
+                            horizontalArrangement = Arrangement.SpaceBetween,
+                            modifier = Modifier.fillMaxWidth()
+                        ) {
+                            Text("✗ הפגישה לא התקיימה", style = MaterialTheme.typography.labelMedium, color = MaterialTheme.colorScheme.error)
+                            TextButton(
+                                onClick = { onMarkTookPlace(null) },
+                                contentPadding = PaddingValues(horizontal = 4.dp)
+                            ) { Text("שנה", fontSize = 11.sp, color = MaterialTheme.colorScheme.onSurfaceVariant) }
+                        }
                         Spacer(Modifier.height(4.dp))
                         FilledTonalButton(
                             onClick = onReschedule,
