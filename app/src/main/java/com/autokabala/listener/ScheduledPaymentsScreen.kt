@@ -1,5 +1,6 @@
 package com.autokabala.listener
 
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -23,6 +24,7 @@ import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
+import androidx.compose.material3.FilledTonalButton
 import androidx.compose.material3.DatePicker
 import androidx.compose.material3.DatePickerDialog
 import androidx.compose.material3.DropdownMenuItem
@@ -46,6 +48,7 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.unit.dp
@@ -82,9 +85,12 @@ fun ScheduledPaymentsScreen(
     calendarEvents: List<CalendarEventEntity> = emptyList(),
     onInsert: (ScheduledPaymentEntity) -> Unit,
     onDelete: (ScheduledPaymentEntity) -> Unit,
-    onSendReminder: (ScheduledPaymentEntity, ClientEntity?) -> Unit
+    onSendReminder: (ScheduledPaymentEntity, ClientEntity?) -> Unit,
+    onMarkTookPlace: (ScheduledPaymentEntity, Boolean, ClientEntity?) -> Unit,
+    onIssueReceiptForSession: (ScheduledPaymentEntity, ClientEntity?) -> Unit
 ) {
     var showCreateDialog by remember { mutableStateOf(false) }
+    var rescheduleFor by remember { mutableStateOf<Pair<ScheduledPaymentEntity, ClientEntity?>?>(null) }
 
     Column(modifier = modifier.fillMaxSize()) {
         Row(
@@ -92,11 +98,11 @@ fun ScheduledPaymentsScreen(
             horizontalArrangement = Arrangement.SpaceBetween,
             verticalAlignment = Alignment.CenterVertically
         ) {
-            Text("תשלומים מתוכננים", style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.Bold)
+            Text("פגישות מתוכננות", style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.Bold)
             Button(onClick = { showCreateDialog = true }) {
                 Icon(Icons.Default.Add, contentDescription = null, modifier = Modifier.size(18.dp))
                 Spacer(Modifier.width(4.dp))
-                Text("צור תשלום")
+                Text("צור פגישה")
             }
         }
         HorizontalDivider()
@@ -106,10 +112,10 @@ fun ScheduledPaymentsScreen(
         if (sorted.isEmpty()) {
             Box(modifier = Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
                 Column(horizontalAlignment = Alignment.CenterHorizontally) {
-                    Text("אין תשלומים מתוכננים", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Medium)
+                    Text("אין פגישות מתוכננות", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Medium)
                     Spacer(Modifier.height(4.dp))
                     Text(
-                        "צור תשלום מתוכנן כדי לקבל תזכורות",
+                        "צור פגישה מתוכננת כדי לקבל תזכורות",
                         style = MaterialTheme.typography.bodySmall,
                         color = MaterialTheme.colorScheme.onSurfaceVariant
                     )
@@ -126,7 +132,10 @@ fun ScheduledPaymentsScreen(
                     ScheduledPaymentCard(
                         payment = payment,
                         onDelete = { onDelete(payment) },
-                        onSendReminder = { onSendReminder(payment, client) }
+                        onSendReminder = { onSendReminder(payment, client) },
+                        onMarkTookPlace = { tookPlace -> onMarkTookPlace(payment, tookPlace, client) },
+                        onIssueReceipt = { onIssueReceiptForSession(payment, client) },
+                        onReschedule = { rescheduleFor = payment to client }
                     )
                 }
             }
@@ -141,14 +150,29 @@ fun ScheduledPaymentsScreen(
             onCreate = { entity -> onInsert(entity); showCreateDialog = false }
         )
     }
+
+    rescheduleFor?.let { (session, client) ->
+        CreateScheduledPaymentDialog(
+            allClients = allClients,
+            calendarEvents = calendarEvents,
+            initialClient = client,
+            initialAmount = session.amount,
+            onDismiss = { rescheduleFor = null },
+            onCreate = { entity -> onInsert(entity); rescheduleFor = null }
+        )
+    }
 }
 
 @Composable
 fun ScheduledPaymentCard(
     payment: ScheduledPaymentEntity,
     onDelete: () -> Unit,
-    onSendReminder: () -> Unit
+    onSendReminder: () -> Unit,
+    onMarkTookPlace: (Boolean) -> Unit,
+    onIssueReceipt: () -> Unit,
+    onReschedule: () -> Unit
 ) {
+    val isPast = payment.scheduledDate < System.currentTimeMillis()
     Card(modifier = Modifier.fillMaxWidth(), elevation = CardDefaults.cardElevation(defaultElevation = 2.dp)) {
         Column(modifier = Modifier.padding(12.dp)) {
             Row(
@@ -176,6 +200,64 @@ fun ScheduledPaymentCard(
             Spacer(Modifier.height(8.dp))
             HorizontalDivider()
             Spacer(Modifier.height(4.dp))
+
+            // Took-place indicator
+            if (isPast) {
+                when (payment.tookPlace) {
+                    null -> {
+                        Text(
+                            "האם הפגישה התקיימה?",
+                            style = MaterialTheme.typography.labelMedium,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant
+                        )
+                        Spacer(Modifier.height(4.dp))
+                        Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                            FilledTonalButton(
+                                onClick = { onMarkTookPlace(true) },
+                                contentPadding = PaddingValues(horizontal = 12.dp, vertical = 4.dp)
+                            ) { Text("✓ כן", fontSize = 12.sp) }
+                            OutlinedButton(
+                                onClick = { onMarkTookPlace(false) },
+                                contentPadding = PaddingValues(horizontal = 12.dp, vertical = 4.dp)
+                            ) { Text("✗ לא", fontSize = 12.sp) }
+                        }
+                        Spacer(Modifier.height(4.dp))
+                        HorizontalDivider()
+                        Spacer(Modifier.height(4.dp))
+                    }
+                    true -> {
+                        Text(
+                            "✓ הפגישה התקיימה",
+                            style = MaterialTheme.typography.labelMedium,
+                            color = Color(0xFF2E7D32)
+                        )
+                        Spacer(Modifier.height(4.dp))
+                        FilledTonalButton(
+                            onClick = onIssueReceipt,
+                            contentPadding = PaddingValues(horizontal = 12.dp, vertical = 4.dp)
+                        ) { Text("הפק קבלה", fontSize = 12.sp) }
+                        Spacer(Modifier.height(4.dp))
+                        HorizontalDivider()
+                        Spacer(Modifier.height(4.dp))
+                    }
+                    false -> {
+                        Text(
+                            "✗ הפגישה לא התקיימה",
+                            style = MaterialTheme.typography.labelMedium,
+                            color = MaterialTheme.colorScheme.error
+                        )
+                        Spacer(Modifier.height(4.dp))
+                        FilledTonalButton(
+                            onClick = onReschedule,
+                            contentPadding = PaddingValues(horizontal = 12.dp, vertical = 4.dp)
+                        ) { Text("קבע פגישה חדשה", fontSize = 12.sp) }
+                        Spacer(Modifier.height(4.dp))
+                        HorizontalDivider()
+                        Spacer(Modifier.height(4.dp))
+                    }
+                }
+            }
+
             Row(
                 modifier = Modifier.fillMaxWidth(),
                 horizontalArrangement = Arrangement.SpaceBetween,
@@ -197,14 +279,35 @@ fun ScheduledPaymentCard(
 fun CreateScheduledPaymentDialog(
     allClients: List<ClientEntity>,
     calendarEvents: List<CalendarEventEntity> = emptyList(),
+    initialClient: ClientEntity? = null,
+    initialAmount: Double? = null,
     onDismiss: () -> Unit,
     onCreate: (ScheduledPaymentEntity) -> Unit
 ) {
-    var selectedClient by remember { mutableStateOf<ClientEntity?>(null) }
-    var amountText by remember { mutableStateOf("") }
+    var selectedClient by remember { mutableStateOf(initialClient) }
+    var clientSearch by remember { mutableStateOf(initialClient?.name ?: "") }
+    var amountText by remember { mutableStateOf(initialAmount?.toInt()?.toString() ?: "") }
     var description by remember { mutableStateOf("") }
     var showDatePicker by remember { mutableStateOf(false) }
     var clientDropdownExpanded by remember { mutableStateOf(false) }
+
+    val filteredClients = remember(clientSearch, allClients) {
+        if (clientSearch.isBlank()) allClients
+        else {
+            val searchWords = clientSearch.trim().split(Regex("\\s+")).filter { it.isNotBlank() }
+            allClients.filter { client ->
+                val clientWords = client.name.trim().split(Regex("\\s+")).filter { it.isNotBlank() }
+                searchWords.all { sw -> clientWords.any { cw -> cw.startsWith(sw, ignoreCase = true) } }
+            }
+        }
+    }
+
+    // Auto-select when search narrows down to exactly one match
+    LaunchedEffect(filteredClients) {
+        if (filteredClients.size == 1 && clientSearch.isNotBlank()) {
+            selectedClient = filteredClients.first()
+        }
+    }
     var reminderHours by remember { mutableStateOf(24) }
     var reminderHoursExpanded by remember { mutableStateOf(false) }
     var recurrenceDays by remember { mutableStateOf(0) }
@@ -228,20 +331,25 @@ fun CreateScheduledPaymentDialog(
 
     AlertDialog(
         onDismissRequest = onDismiss,
-        title = { Text("תשלום מתוכנן חדש", fontWeight = FontWeight.Bold) },
+        title = { Text("פגישה מתוכננת חדשה", fontWeight = FontWeight.Bold) },
         text = {
             Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
                 // Client
                 ExposedDropdownMenuBox(expanded = clientDropdownExpanded, onExpandedChange = { clientDropdownExpanded = it }) {
                     OutlinedTextField(
-                        value = selectedClient?.name ?: "", onValueChange = {}, readOnly = true,
+                        value = clientSearch,
+                        onValueChange = { clientSearch = it; selectedClient = null; clientDropdownExpanded = true },
                         label = { Text("לקוח") },
                         trailingIcon = { ExposedDropdownMenuDefaults.TrailingIcon(expanded = clientDropdownExpanded) },
-                        modifier = Modifier.fillMaxWidth().menuAnchor()
+                        modifier = Modifier.fillMaxWidth().menuAnchor(),
+                        singleLine = true
                     )
                     ExposedDropdownMenu(expanded = clientDropdownExpanded, onDismissRequest = { clientDropdownExpanded = false }) {
-                        allClients.forEach { client ->
-                            DropdownMenuItem(text = { Text(client.name) }, onClick = { selectedClient = client; clientDropdownExpanded = false })
+                        filteredClients.forEach { client ->
+                            DropdownMenuItem(
+                                text = { Text(client.name) },
+                                onClick = { selectedClient = client; clientSearch = client.name; clientDropdownExpanded = false }
+                            )
                         }
                     }
                 }

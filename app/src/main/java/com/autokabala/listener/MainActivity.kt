@@ -5,8 +5,11 @@ import android.app.Application
 import android.content.Intent
 import android.content.pm.PackageManager
 import android.net.Uri
+import android.os.Build
 import android.os.Bundle
+import android.provider.MediaStore
 import android.provider.Settings
+import androidx.activity.result.IntentSenderRequest
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
@@ -189,6 +192,10 @@ class MainActivity : ComponentActivity() {
                     this, MainViewModelFactory(application)
                 )[MainViewModel::class.java]
                 viewModel.onShareIntentReceived(uri)
+                // Drop all references to the image immediately — no trace left in the Activity.
+                intent.removeExtra(Intent.EXTRA_STREAM)
+                intent.clipData = null
+                setIntent(Intent(this, MainActivity::class.java))
             }
         }
     }
@@ -271,6 +278,9 @@ private fun MainTabsScreen(
             viewModel.onSyncCalendarClicked()
         }
     }
+    val deleteImageLauncher = rememberLauncherForActivityResult(
+        ActivityResultContracts.StartIntentSenderForResult()
+    ) { /* result not needed */ }
     // Map of paymentId → chosen client ID (store ID only so effectiveClient always reflects DB)
     var selectedClientIdsMap by remember { mutableStateOf<Map<Int, String>>(emptyMap()) }
     // Which payment's sheet is open
@@ -310,6 +320,16 @@ private fun MainTabsScreen(
             when (event) {
                 is MainViewModel.UiEvent.ShowError   -> snackbarHostState.showSnackbar(event.message)
                 is MainViewModel.UiEvent.ShowMessage -> snackbarHostState.showSnackbar(event.message)
+                is MainViewModel.UiEvent.RequestImageDeletion -> {
+                    if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
+                        try {
+                            val pi = MediaStore.createDeleteRequest(
+                                context.contentResolver, listOf(event.uri)
+                            )
+                            deleteImageLauncher.launch(IntentSenderRequest.Builder(pi).build())
+                        } catch (_: Exception) { }
+                    }
+                }
             }
         }
     }
@@ -365,8 +385,8 @@ private fun MainTabsScreen(
                 NavigationBarItem(
                     selected = selectedTab == 4,
                     onClick = { viewModel.onTabSelected(4) },
-                    icon = { Icon(Icons.Outlined.CalendarMonth, contentDescription = "לוח שנה") },
-                    label = { Text("יומן") }
+                    icon = { Icon(Icons.Outlined.Notifications, contentDescription = "תזכורות") },
+                    label = { Text("תזכורות") }
                 )
             }
         }
@@ -449,6 +469,23 @@ private fun MainTabsScreen(
                     calendarEvents = calendarEvents,
                     onInsert = { viewModel.insertScheduledPayment(it) },
                     onDelete = { viewModel.deleteScheduledPayment(it) },
+                    onMarkTookPlace = { payment, tookPlace, client ->
+                        viewModel.markSessionTookPlace(payment, tookPlace)
+                        if (tookPlace) {
+                            val msg = "שלום ${payment.clientName},\n" +
+                                "תודה על הפגישה! 😊\n" +
+                                "מחכה לתשלום של ₪${payment.amount.toInt()} עבור ${payment.description.ifBlank { "הפגישה" }}.\n" +
+                                "תודה רבה! 🙏"
+                            launchWhatsApp(context, clientPhone = client?.phone, text = msg)
+                        } else {
+                            val msg = "שלום ${payment.clientName},\n" +
+                                "לא הצלחנו להיפגש הפעם. בואו נקבע תאריך חדש? 😊"
+                            launchWhatsApp(context, clientPhone = client?.phone, text = msg)
+                        }
+                    },
+                    onIssueReceiptForSession = { session, client ->
+                        viewModel.issueReceiptForSession(session, client)
+                    },
                     onSendReminder = { scheduled, client ->
                         val reminderText = "שלום ${scheduled.clientName},\n" +
                             "רציתי להזכיר לגבי התשלום עבור ${scheduled.description.ifBlank { "השיעור" }} שלנו.\n" +
@@ -456,15 +493,16 @@ private fun MainTabsScreen(
                         launchWhatsApp(context, clientPhone = client?.phone, text = reminderText)
                     }
                 )
-                4 -> CalendarTab(
+                4 -> OverdueClientsScreen(
                     modifier = Modifier.padding(innerPadding),
-                    events = calendarEvents,
-                    hasPermission = hasCalendarPermission,
-                    onRequestPermission = {
-                        calendarPermissionLauncher.launch(Manifest.permission.READ_CALENDAR)
+                    overdueClients = overdueClients,
+                    filterDays = overdueFilterDays,
+                    onFilterChanged = { viewModel.onOverdueFilterChanged(it) },
+                    onSendReminder = { client ->
+                        val msg = "שלום ${client.name},\nרציתי להזכיר שיש תשלום פתוח. תודה רבה! 🙏"
+                        launchWhatsApp(context, clientPhone = client.phone, text = msg)
                     },
-                    onSync = { viewModel.onSyncCalendarClicked() },
-                    onEventClick = { viewModel.onCalendarEventClicked(it) }
+                    onOpenClientDetail = { viewModel.onOpenClientDetail(it) }
                 )
             }
         }

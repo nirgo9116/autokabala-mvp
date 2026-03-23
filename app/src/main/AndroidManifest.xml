@@ -2,6 +2,8 @@
 
     <!-- Allow the app to access the internet -->
     <uses-permission android:name="android.permission.INTERNET"/>
+    <!-- Required on Android 13+ to show notifications -->
+    <uses-permission android:name="android.permission.POST_NOTIFICATIONS"/>
     <!-- Allow reading calendar events for payment matching -->
     <uses-permission android:name="android.permission.READ_CALENDAR"/>
 
