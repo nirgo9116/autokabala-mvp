@@ -271,12 +271,11 @@ private fun MainTabsScreen(
         )
     }
     val calendarPermissionLauncher = rememberLauncherForActivityResult(
-        ActivityResultContracts.RequestPermission()
-    ) { granted ->
+        ActivityResultContracts.RequestMultiplePermissions()
+    ) { results ->
+        val granted = results[Manifest.permission.READ_CALENDAR] == true
         hasCalendarPermission = granted
-        if (granted) {
-            viewModel.onSyncCalendarClicked()
-        }
+        if (granted) viewModel.onSyncCalendarClicked()
     }
     val deleteImageLauncher = rememberLauncherForActivityResult(
         ActivityResultContracts.StartIntentSenderForResult()
@@ -304,6 +303,20 @@ private fun MainTabsScreen(
     LaunchedEffect(hasCalendarPermission) {
         if (hasCalendarPermission) {
             viewModel.onSyncCalendarClicked()
+        }
+    }
+
+    // Request WRITE_CALENDAR permission when user opens the scheduled meetings tab
+    LaunchedEffect(selectedTab) {
+        if (selectedTab == 3) {
+            val hasWrite = ContextCompat.checkSelfPermission(
+                context, Manifest.permission.WRITE_CALENDAR
+            ) == PackageManager.PERMISSION_GRANTED
+            if (!hasWrite) {
+                calendarPermissionLauncher.launch(
+                    arrayOf(Manifest.permission.READ_CALENDAR, Manifest.permission.WRITE_CALENDAR)
+                )
+            }
         }
     }
 
@@ -469,6 +482,7 @@ private fun MainTabsScreen(
                     calendarEvents = calendarEvents,
                     onInsert = { viewModel.insertScheduledPayment(it) },
                     onDelete = { viewModel.deleteScheduledPayment(it) },
+                    onDeleteSeries = { viewModel.deleteScheduledPaymentSeries(it) },
                     onMarkTookPlace = { payment, tookPlace: Boolean?, client ->
                         viewModel.markSessionTookPlace(payment, tookPlace)
                         // Only send WhatsApp on first answer — not on reset (null) or correction

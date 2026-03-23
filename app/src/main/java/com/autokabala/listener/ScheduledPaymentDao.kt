@@ -54,4 +54,10 @@ interface ScheduledPaymentDao {
         LIMIT 1
     """)
     suspend fun findScheduledPaymentInRange(clientId: String, startTime: Long, endTime: Long): ScheduledPaymentEntity?
+
+    @Query("SELECT * FROM scheduled_payments WHERE seriesId = :seriesId")
+    suspend fun getBySeriesId(seriesId: String): List<ScheduledPaymentEntity>
+
+    @Query("DELETE FROM scheduled_payments WHERE seriesId = :seriesId")
+    suspend fun deleteBySeriesId(seriesId: String)
 }

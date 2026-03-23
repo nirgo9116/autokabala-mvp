@@ -38,6 +38,7 @@ import kotlin.coroutines.resume
 class MainViewModel(application: Application) : AndroidViewModel(application) {
 
     private val receiptRepository = (application as AutoKabalaApplication).receiptRepository
+    private val calendarRepository = (application as AutoKabalaApplication).calendarRepository
     private val scheduledPaymentDao = (application as AutoKabalaApplication).scheduledPaymentDao
 
     // --- Navigation State ---
@@ -435,7 +436,47 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
 
     fun insertScheduledPayment(payment: ScheduledPaymentEntity) {
         viewModelScope.launch {
-            scheduledPaymentDao.insertScheduledPayment(payment)
+            val seriesId = if (payment.reminderRecurrenceDays > 0) java.util.UUID.randomUUID().toString() else null
+            val occurrences = generateOccurrences(payment, seriesId)
+            var calendarFailed = false
+            for (occurrence in occurrences) {
+                val rowId = scheduledPaymentDao.insertScheduledPayment(occurrence)
+                val eventId = calendarRepository.insertCalendarEvent(occurrence)
+                if (eventId != null) {
+                    val inserted = scheduledPaymentDao.getScheduledPaymentById(rowId.toInt())
+                    if (inserted != null) {
+                        scheduledPaymentDao.updateScheduledPayment(inserted.copy(calendarEventId = eventId))
+                    }
+                } else {
+                    calendarFailed = true
+                }
+            }
+            if (calendarFailed) {
+                _uiEvent.send(UiEvent.ShowMessage("הפגישה נשמרה, אך לא ניתן לסנכרן עם לוח השנה. בדוק הרשאות."))
+            }
+        }
+    }
+
+    private fun generateOccurrences(template: ScheduledPaymentEntity, seriesId: String?): List<ScheduledPaymentEntity> {
+        if (template.reminderRecurrenceDays == 0) return listOf(template.copy(seriesId = seriesId))
+        val occurrences = mutableListOf<ScheduledPaymentEntity>()
+        val limit = System.currentTimeMillis() + 6L * 30 * 24 * 60 * 60 * 1000 // 6 months ahead
+        var date = template.scheduledDate
+        repeat(12) {
+            if (date > limit) return occurrences
+            occurrences.add(template.copy(id = 0, scheduledDate = date, seriesId = seriesId))
+            date = nextOccurrenceDate(date, template.reminderRecurrenceDays)
+        }
+        return occurrences
+    }
+
+    private fun nextOccurrenceDate(from: Long, intervalDays: Int): Long {
+        return if (intervalDays == 30) {
+            val cal = java.util.Calendar.getInstance().apply { timeInMillis = from }
+            cal.add(java.util.Calendar.MONTH, 1)
+            cal.timeInMillis
+        } else {
+            from + intervalDays.toLong() * 24 * 60 * 60 * 1000
         }
     }
 
@@ -481,7 +522,17 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
 
     fun deleteScheduledPayment(payment: ScheduledPaymentEntity) {
         viewModelScope.launch {
+            payment.calendarEventId?.let { calendarRepository.deleteCalendarEvent(it) }
             scheduledPaymentDao.deleteScheduledPayment(payment)
+        }
+    }
+
+    fun deleteScheduledPaymentSeries(payment: ScheduledPaymentEntity) {
+        viewModelScope.launch {
+            val seriesId = payment.seriesId ?: return@launch
+            val allInSeries = scheduledPaymentDao.getBySeriesId(seriesId)
+            allInSeries.forEach { it.calendarEventId?.let { id -> calendarRepository.deleteCalendarEvent(id) } }
+            scheduledPaymentDao.deleteBySeriesId(seriesId)
         }
     }
 

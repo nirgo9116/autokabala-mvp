@@ -1,6 +1,8 @@
 package com.autokabala.listener
 
 import android.content.ContentResolver
+import android.content.ContentUris
+import android.content.ContentValues
 import android.content.Context
 import android.database.Cursor
 import android.provider.CalendarContract
@@ -8,6 +10,7 @@ import android.util.Log
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.withContext
+import java.util.TimeZone
 
 class CalendarRepository(
     private val context: Context,
@@ -40,6 +43,70 @@ class CalendarRepository(
     suspend fun clearOldEvents(daysOld: Int = 60) {
         val cutoff = System.currentTimeMillis() - daysOld.toLong() * 24 * 60 * 60 * 1000
         calendarEventDao.clearOldEvents(cutoff)
+    }
+
+    suspend fun insertCalendarEvent(session: ScheduledPaymentEntity): Long? {
+        return withContext(Dispatchers.IO) {
+            try {
+                val calendarId = getPrimaryCalendarId() ?: return@withContext null
+                val values = ContentValues().apply {
+                    put(CalendarContract.Events.CALENDAR_ID, calendarId)
+                    put(CalendarContract.Events.TITLE, "${session.clientName} — ₪${session.amount.toInt()}")
+                    put(CalendarContract.Events.DESCRIPTION, session.description.ifBlank { "פגישה מתוכננת" })
+                    put(CalendarContract.Events.DTSTART, session.scheduledDate)
+                    put(CalendarContract.Events.DTEND, session.scheduledDate + session.durationMinutes * 60 * 1000L)
+                    put(CalendarContract.Events.EVENT_TIMEZONE, TimeZone.getDefault().id)
+                }
+                val uri = context.contentResolver.insert(CalendarContract.Events.CONTENT_URI, values)
+                uri?.lastPathSegment?.toLongOrNull()
+            } catch (e: SecurityException) {
+                Log.e(TAG, "Calendar write permission not granted", e)
+                null
+            } catch (e: Exception) {
+                Log.e(TAG, "Error inserting calendar event", e)
+                null
+            }
+        }
+    }
+
+    suspend fun deleteCalendarEvent(eventId: Long) {
+        withContext(Dispatchers.IO) {
+            try {
+                val uri = ContentUris.withAppendedId(CalendarContract.Events.CONTENT_URI, eventId)
+                context.contentResolver.delete(uri, null, null)
+            } catch (e: Exception) {
+                Log.e(TAG, "Error deleting calendar event", e)
+            }
+        }
+    }
+
+    private suspend fun getPrimaryCalendarId(): Long? {
+        return withContext(Dispatchers.IO) {
+            try {
+                val projection = arrayOf(
+                    CalendarContract.Calendars._ID,
+                    CalendarContract.Calendars.IS_PRIMARY,
+                    CalendarContract.Calendars.ACCOUNT_TYPE
+                )
+                // First choice: the calendar marked as primary
+                val primaryCursor = context.contentResolver.query(
+                    CalendarContract.Calendars.CONTENT_URI, projection,
+                    "${CalendarContract.Calendars.IS_PRIMARY} = 1", null, null
+                )
+                val primaryId = primaryCursor?.use { if (it.moveToFirst()) it.getLong(0) else null }
+                if (primaryId != null) return@withContext primaryId
+
+                // Fallback: first Google account calendar (works on Samsung/Xiaomi where IS_PRIMARY is missing)
+                val googleCursor = context.contentResolver.query(
+                    CalendarContract.Calendars.CONTENT_URI, projection,
+                    "${CalendarContract.Calendars.ACCOUNT_TYPE} = ?", arrayOf("com.google"), null
+                )
+                googleCursor?.use { if (it.moveToFirst()) it.getLong(0) else null }
+            } catch (e: Exception) {
+                Log.e(TAG, "Error finding primary calendar", e)
+                null
+            }
+        }
     }
 
     private suspend fun readDeviceCalendarEvents(startTime: Long, endTime: Long): List<CalendarEventEntity> {
