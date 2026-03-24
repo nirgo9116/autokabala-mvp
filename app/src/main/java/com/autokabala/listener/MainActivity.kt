@@ -62,9 +62,6 @@ import androidx.compose.material.icons.filled.Settings
 import androidx.compose.material.icons.outlined.CalendarMonth
 import androidx.compose.material.icons.outlined.History
 import androidx.compose.material.icons.outlined.Notifications
-import androidx.compose.material.icons.outlined.Payments
-import androidx.compose.material.icons.outlined.ReceiptLong
-import androidx.compose.material.icons.outlined.TrendingUp
 import androidx.compose.ui.draw.alpha
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.draw.drawBehind
@@ -163,7 +160,7 @@ class MainActivity : ComponentActivity() {
         setContent {
             val factory = remember { MainViewModelFactory(application) }
             val mainViewModel: MainViewModel = viewModel(factory = factory)
-            AutoKabalaListenerTheme(dynamicColor = false) {
+            AutoKabalaListenerTheme {
                 MainScreen(
                     viewModel = mainViewModel,
                     onOpenSettingsClicked = {
@@ -693,7 +690,7 @@ fun PaymentsTab(
 
         if (paymentStates.isEmpty() && justIssuedCards.isEmpty()) {
             EmptyState(
-                icon     = Icons.Outlined.Payments,
+                icon     = Icons.Default.List,
                 title    = "אין תשלומים ממתינים",
                 subtitle = "תשלומים יופיעו כאן לאחר קבלת התראת ביט או שיתוף תמונת אישור תשלום"
             )
@@ -1887,7 +1884,7 @@ fun HistoryScreen(
             // ── Payment history grouped by month ──────────────────────────
             if (payments.isEmpty()) {
                 EmptyState(
-                    icon     = Icons.Outlined.ReceiptLong,
+                    icon     = Icons.Outlined.History,
                     title    = "אין היסטוריית תשלומים",
                     subtitle = "קבלות שיופקו יופיעו כאן מסודרות לפי חודש"
                 )

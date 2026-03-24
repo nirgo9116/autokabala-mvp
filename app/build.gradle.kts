@@ -30,15 +30,17 @@ android {
         val icountCid = localProperties.getProperty("icount.cid") ?: ""
         val icountUser = localProperties.getProperty("icount.user") ?: ""
         val icountPass = localProperties.getProperty("icount.pass") ?: ""
+        val backendUrl = localProperties.getProperty("backend.url") ?: "http://192.168.1.198:3000"
 
         buildConfigField("String", "ICOUNT_CID", "\"$icountCid\"")
         buildConfigField("String", "ICOUNT_USER", "\"$icountUser\"")
         buildConfigField("String", "ICOUNT_PASS", "\"$icountPass\"")
+        buildConfigField("String", "BACKEND_URL", "\"$backendUrl\"")
     }
 
     buildTypes {
         release {
-            isMinifyEnabled = false
+            isMinifyEnabled = true
             proguardFiles(getDefaultProguardFile("proguard-android-optimize.txt"), "proguard-rules.pro")
         }
         getByName("debug") {

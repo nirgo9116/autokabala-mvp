@@ -32,7 +32,7 @@ class AutoKabalaNotificationService : NotificationListenerService() {
         val requestBody = json.toRequestBody(mediaType)
 
         val request = Request.Builder()
-            .url("http://192.168.1.198:3000/extract-payment")
+            .url("${BuildConfig.BACKEND_URL}/extract-payment")
             .post(requestBody)
             .build()
 
@@ -42,8 +42,7 @@ class AutoKabalaNotificationService : NotificationListenerService() {
             }
 
             override fun onResponse(call: Call, response: Response) {
-                val responseBody = response.body?.string()
-                Log.d("NotificationService", "Backend response: $responseBody")
+                response.body?.close()
             }
         })
     }
