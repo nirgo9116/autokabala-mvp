@@ -78,6 +78,7 @@ import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.FilterChip
+import androidx.compose.material3.FloatingActionButton
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
@@ -225,15 +226,19 @@ private val ChipGrayBorder  = Color(0xFFBDBDBD)
 fun MainScreen(viewModel: MainViewModel, onOpenSettingsClicked: () -> Unit) {
     val currentScreen by viewModel.currentScreen.collectAsState()
 
-    BackHandler(enabled = currentScreen == Screen.CLIENT_DETAIL) {
+    BackHandler(enabled = currentScreen == Screen.CLIENT_DETAIL || currentScreen == Screen.CHAT) {
         viewModel.onBackToMain()
     }
 
-    MainTabsScreen(
-        viewModel = viewModel,
-        context = LocalContext.current,
-        onOpenSettingsClicked = onOpenSettingsClicked
-    )
+    if (currentScreen == Screen.CHAT) {
+        ChatScreen(onBack = { viewModel.onBackToMain() })
+    } else {
+        MainTabsScreen(
+            viewModel = viewModel,
+            context = LocalContext.current,
+            onOpenSettingsClicked = onOpenSettingsClicked
+        )
+    }
 }
 
 @OptIn(ExperimentalMaterial3Api::class)
@@ -389,6 +394,20 @@ private fun MainTabsScreen(
 
     Scaffold(
         snackbarHost = { SnackbarHost(snackbarHostState) },
+        floatingActionButton = {
+            if (currentScreen != Screen.CLIENT_DETAIL) {
+                FloatingActionButton(
+                    onClick = { viewModel.navigateToChat() },
+                    containerColor = MaterialTheme.colorScheme.primaryContainer
+                ) {
+                    Icon(
+                        imageVector = Icons.Default.HelpOutline,
+                        contentDescription = "עוזר חכם",
+                        tint = MaterialTheme.colorScheme.onPrimaryContainer
+                    )
+                }
+            }
+        },
         bottomBar = {
             NavigationBar {
                 NavigationBarItem(

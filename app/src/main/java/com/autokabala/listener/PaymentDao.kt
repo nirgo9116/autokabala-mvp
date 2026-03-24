@@ -63,4 +63,10 @@ interface PaymentDao {
         LIMIT 1
     """)
     suspend fun getPaymentByClientInRange(clientId: String, startTime: Long, endTime: Long): PaymentEntity?
+
+    @Query("SELECT * FROM pending_payments WHERE status = 'pending' ORDER BY timestamp DESC")
+    suspend fun getPendingPaymentsSnapshot(): List<PaymentEntity>
+
+    @Query("SELECT * FROM pending_payments WHERE status != 'ignored' AND timestamp >= :since ORDER BY timestamp DESC")
+    suspend fun getRecentPaymentsSnapshot(since: Long): List<PaymentEntity>
 }

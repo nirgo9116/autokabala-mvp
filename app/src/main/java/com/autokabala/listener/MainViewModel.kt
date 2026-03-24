@@ -333,6 +333,10 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         _selectedClient.value = null
     }
 
+    fun navigateToChat() {
+        _currentScreen.value = Screen.CHAT
+    }
+
     fun onShareIntentReceived(imageUri: Uri) {
         viewModelScope.launch {
             _isProcessingShare.value = true

@@ -2,5 +2,6 @@ package com.autokabala.listener
 
 enum class Screen {
     MAIN,
-    CLIENT_DETAIL
+    CLIENT_DETAIL,
+    CHAT
 }
