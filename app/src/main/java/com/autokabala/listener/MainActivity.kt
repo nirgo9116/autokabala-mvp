@@ -1,11 +1,19 @@
 package com.autokabala.listener
 
+import android.Manifest
 import android.app.Application
 import android.content.Intent
+import android.content.pm.PackageManager
 import android.net.Uri
+import android.os.Build
 import android.os.Bundle
+import android.provider.MediaStore
 import android.provider.Settings
+import androidx.activity.result.IntentSenderRequest
 import androidx.activity.ComponentActivity
+import androidx.activity.compose.rememberLauncherForActivityResult
+import androidx.activity.result.contract.ActivityResultContracts
+import androidx.core.content.ContextCompat
 import androidx.activity.compose.BackHandler
 import androidx.activity.compose.setContent
 import androidx.activity.enableEdgeToEdge
@@ -54,6 +62,7 @@ import androidx.compose.material.icons.filled.Edit
 import androidx.compose.material.icons.filled.Person
 import androidx.compose.material.icons.filled.Search
 import androidx.compose.material.icons.filled.Settings
+import androidx.compose.material.icons.outlined.CalendarMonth
 import androidx.compose.material.icons.outlined.History
 import androidx.compose.material.icons.outlined.Notifications
 import androidx.compose.ui.draw.alpha
@@ -72,6 +81,7 @@ import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.FilterChip
+import androidx.compose.material3.FloatingActionButton
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
@@ -143,6 +153,7 @@ import com.autokabala.listener.ui.theme.AutoKabalaListenerTheme
 import com.autokabala.listener.BuildConfig
 import kotlinx.coroutines.flow.collectLatest
 import java.text.SimpleDateFormat
+import java.util.Calendar
 import java.util.Date
 import java.util.Locale
 
@@ -260,6 +271,10 @@ class MainActivity : ComponentActivity() {
                     this, MainViewModelFactory(application)
                 )[MainViewModel::class.java]
                 viewModel.onShareIntentReceived(uri)
+                // Drop all references to the image immediately — no trace left in the Activity.
+                intent.removeExtra(Intent.EXTRA_STREAM)
+                intent.clipData = null
+                setIntent(Intent(this, MainActivity::class.java))
             }
         }
     }
@@ -289,16 +304,20 @@ private val ChipGrayBorder  = Color(0xFFBDBDBD)
 fun MainScreen(viewModel: MainViewModel, onOpenSettingsClicked: () -> Unit, onShowTutorial: () -> Unit) {
     val currentScreen by viewModel.currentScreen.collectAsState()
 
-    BackHandler(enabled = currentScreen == Screen.CLIENT_DETAIL) {
+    BackHandler(enabled = currentScreen == Screen.CLIENT_DETAIL || currentScreen == Screen.CHAT) {
         viewModel.onBackToMain()
     }
 
-    MainTabsScreen(
-        viewModel = viewModel,
-        context = LocalContext.current,
-        onOpenSettingsClicked = onOpenSettingsClicked,
-        onShowTutorial = onShowTutorial
-    )
+    if (currentScreen == Screen.CHAT) {
+        ChatScreen(onBack = { viewModel.onBackToMain() })
+    } else {
+        MainTabsScreen(
+            viewModel = viewModel,
+            context = LocalContext.current,
+            onOpenSettingsClicked = onOpenSettingsClicked,
+            onShowTutorial = onShowTutorial
+        )
+    }
 }
 
 @OptIn(ExperimentalMaterial3Api::class)
@@ -321,14 +340,32 @@ private fun MainTabsScreen(
     val overdueClients by viewModel.overdueClients.collectAsState()
     val overdueFilterDays by viewModel.overdueFilterDays.collectAsState()
     val justIssuedCards by viewModel.justIssuedCards.collectAsState()
+    val pendingSessionLinks by viewModel.pendingSessionLinks.collectAsState()
     val pendingNewClients by viewModel.pendingNewClients.collectAsState()
     val testResults by viewModel.parseTestResults.collectAsState()
+    val calendarEvents by viewModel.calendarEvents.collectAsState()
+    val scheduledPayments by viewModel.scheduledPayments.collectAsState()
     val lifecycleOwner = LocalLifecycleOwner.current
     var hasNotificationPermission by remember {
         mutableStateOf(
             NotificationManagerCompat.getEnabledListenerPackages(context).contains(context.packageName)
         )
     }
+    var hasCalendarPermission by remember {
+        mutableStateOf(
+            ContextCompat.checkSelfPermission(context, Manifest.permission.READ_CALENDAR) == PackageManager.PERMISSION_GRANTED
+        )
+    }
+    val calendarPermissionLauncher = rememberLauncherForActivityResult(
+        ActivityResultContracts.RequestMultiplePermissions()
+    ) { results ->
+        val granted = results[Manifest.permission.READ_CALENDAR] == true
+        hasCalendarPermission = granted
+        if (granted) viewModel.onSyncCalendarClicked()
+    }
+    val deleteImageLauncher = rememberLauncherForActivityResult(
+        ActivityResultContracts.StartIntentSenderForResult()
+    ) { /* result not needed */ }
     // Map of paymentId → chosen client ID (store ID only so effectiveClient always reflects DB)
     var selectedClientIdsMap by remember { mutableStateOf<Map<Int, String>>(emptyMap()) }
     // Which payment's sheet is open
@@ -339,24 +376,79 @@ private fun MainTabsScreen(
             if (event == Lifecycle.Event.ON_RESUME) {
                 hasNotificationPermission = NotificationManagerCompat
                     .getEnabledListenerPackages(context).contains(context.packageName)
+                hasCalendarPermission = ContextCompat.checkSelfPermission(
+                    context, Manifest.permission.READ_CALENDAR
+                ) == PackageManager.PERMISSION_GRANTED
             }
         }
         lifecycleOwner.lifecycle.addObserver(observer)
         onDispose { lifecycleOwner.lifecycle.removeObserver(observer) }
     }
 
+    // Sync calendar on launch if permission is already granted
+    LaunchedEffect(hasCalendarPermission) {
+        if (hasCalendarPermission) {
+            viewModel.onSyncCalendarClicked()
+        }
+    }
+
+    // Request WRITE_CALENDAR permission when user opens the scheduled meetings tab
+    LaunchedEffect(selectedTab) {
+        if (selectedTab == 3) {
+            val hasWrite = ContextCompat.checkSelfPermission(
+                context, Manifest.permission.WRITE_CALENDAR
+            ) == PackageManager.PERMISSION_GRANTED
+            if (!hasWrite) {
+                calendarPermissionLauncher.launch(
+                    arrayOf(Manifest.permission.READ_CALENDAR, Manifest.permission.WRITE_CALENDAR)
+                )
+            }
+        }
+    }
+
     // Clean up stale map entries when payments disappear from DB
-    val currentPaymentIds = remember(paymentStates) { paymentStates.map { it.payment.id }.toSet() }
+    val currentPaymentIds =
+        remember(paymentStates) { paymentStates.map { it.payment.id }.toSet() }
     LaunchedEffect(currentPaymentIds) {
         selectedClientIdsMap = selectedClientIdsMap.filterKeys { it in currentPaymentIds }
     }
 
     val snackbarHostState = remember { SnackbarHostState() }
     LaunchedEffect(Unit) {
-        viewModel.uiEvent.collectLatest { event ->
+        viewModel.uiEvent.collect { event ->
             when (event) {
                 is MainViewModel.UiEvent.ShowError   -> snackbarHostState.showSnackbar(event.message)
                 is MainViewModel.UiEvent.ShowMessage -> snackbarHostState.showSnackbar(event.message)
+                is MainViewModel.UiEvent.RequestImageDeletion -> {
+                    if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
+                        try {
+                            val pi = MediaStore.createDeleteRequest(
+                                context.contentResolver, listOf(event.uri)
+                            )
+                            deleteImageLauncher.launch(IntentSenderRequest.Builder(pi).build())
+                        } catch (_: Exception) { }
+                    }
+                }
+                is MainViewModel.UiEvent.ShowUndoableDeleteSession -> {
+                    val result = snackbarHostState.showSnackbar(
+                        message     = event.message,
+                        actionLabel = "בטל",
+                        duration    = androidx.compose.material3.SnackbarDuration.Short
+                    )
+                    if (result == androidx.compose.material3.SnackbarResult.ActionPerformed) {
+                        viewModel.undoDeleteSession(event.id)
+                    }
+                }
+                is MainViewModel.UiEvent.ShowUndoableDeleteSeries -> {
+                    val result = snackbarHostState.showSnackbar(
+                        message     = "${event.count} פגישות נמחקו",
+                        actionLabel = "בטל",
+                        duration    = androidx.compose.material3.SnackbarDuration.Short
+                    )
+                    if (result == androidx.compose.material3.SnackbarResult.ActionPerformed) {
+                        viewModel.undoDeleteSeries(event.seriesId)
+                    }
+                }
             }
         }
     }
@@ -383,6 +475,20 @@ private fun MainTabsScreen(
 
     Scaffold(
         snackbarHost = { SnackbarHost(snackbarHostState) },
+        floatingActionButton = {
+            if (currentScreen != Screen.CLIENT_DETAIL) {
+                FloatingActionButton(
+                    onClick = { viewModel.navigateToChat() },
+                    containerColor = MaterialTheme.colorScheme.primaryContainer
+                ) {
+                    Icon(
+                        imageVector = Icons.Default.HelpOutline,
+                        contentDescription = "עוזר חכם",
+                        tint = MaterialTheme.colorScheme.onPrimaryContainer
+                    )
+                }
+            }
+        },
         bottomBar = {
             NavigationBar {
                 NavigationBarItem(
@@ -406,6 +512,12 @@ private fun MainTabsScreen(
                 NavigationBarItem(
                     selected = selectedTab == 3,
                     onClick = { viewModel.onTabSelected(3) },
+                    icon = { Icon(Icons.Outlined.CalendarMonth, contentDescription = "מתוכנן") },
+                    label = { Text("מתוכנן") }
+                )
+                NavigationBarItem(
+                    selected = selectedTab == 4,
+                    onClick = { viewModel.onTabSelected(4) },
                     icon = { Icon(Icons.Outlined.Notifications, contentDescription = "תזכורות") },
                     label = { Text("תזכורות") }
                 )
@@ -432,13 +544,30 @@ private fun MainTabsScreen(
             )
         } else {
             when (selectedTab) {
-                0 -> PaymentsTab(
+                0 -> {
+                    val now = System.currentTimeMillis()
+                    val cal = remember { java.util.Calendar.getInstance() }
+                    val thisMonth = remember(paymentHistory) {
+                        paymentHistory.filter { p ->
+                            val c = java.util.Calendar.getInstance().apply { timeInMillis = p.timestamp }
+                            c.get(java.util.Calendar.MONTH) == cal.get(java.util.Calendar.MONTH) &&
+                            c.get(java.util.Calendar.YEAR)  == cal.get(java.util.Calendar.YEAR)
+                        }.sumOf { it.issuedAmount ?: it.amount }
+                    }
+                    val nextMeeting = remember(scheduledPayments) {
+                        scheduledPayments.filter { it.scheduledDate > now }.minByOrNull { it.scheduledDate }
+                    }
+                    PaymentsTab(
                     modifier = Modifier.padding(innerPadding),
+                    monthlyRevenue = thisMonth,
+                    nextMeeting = nextMeeting,
                     paymentStates = paymentStates,
                     allClients = allClients,
+                    calendarEvents = calendarEvents,
                     selectedClientIdsMap = selectedClientIdsMap,
                     pendingNewClients = pendingNewClients,
                     justIssuedCards = justIssuedCards,
+                    pendingSessionLinks = pendingSessionLinks,
                     isProcessingShare = isProcessingShare,
                     onIssueReceipt = { payment, client, description ->
                         viewModel.onIssueReceiptForClientClicked(payment, client, description)
@@ -457,8 +586,14 @@ private fun MainTabsScreen(
                     },
                     onSendEmailFromCard = { info ->
                         info.docNum?.let { viewModel.onSendEmailFromIssuedCard(it) }
+                    },
+                    onConfirmSessionLink = { payment, client, session ->
+                        viewModel.onConfirmSessionLink(payment, client, session)
+                    },
+                    onDismissSessionLink = { paymentId ->
+                        viewModel.onDismissSessionLink(paymentId)
                     }
-                )
+                ) }
                 1 -> SettingsTab(
                     modifier = Modifier.padding(innerPadding),
                     isEnabled = isEnabled,
@@ -479,20 +614,130 @@ private fun MainTabsScreen(
                     allClients = allClients,
                     onOpenClientDetail = { client -> viewModel.onOpenClientDetail(client) }
                 )
-                3 -> OverdueClientsScreen(
+                3 -> ScheduledPaymentsScreen(
+                    modifier = Modifier.padding(innerPadding),
+                    scheduledPayments = scheduledPayments,
+                    allClients = allClients,
+                    calendarEvents = calendarEvents,
+                    onInsert = { viewModel.insertScheduledPayment(it) },
+                    onDelete = { viewModel.deleteScheduledPayment(it) },
+                    onDeleteSeries = { viewModel.deleteScheduledPaymentSeries(it) },
+                    onMarkTookPlace = { payment, tookPlace: Boolean?, client ->
+                        viewModel.markSessionTookPlace(payment, tookPlace)
+                        // Only send WhatsApp on first answer — not on reset (null) or correction
+                        if (tookPlace != null && payment.tookPlace == null) {
+                            val msg = if (tookPlace) {
+                                "שלום ${payment.clientName},\n" +
+                                "תודה על הפגישה! 😊\n" +
+                                "מחכה לתשלום של ${payment.amount.toFormattedAmount()} עבור ${payment.description.ifBlank { "הפגישה" }}.\n" +
+                                "תודה רבה! 🙏"
+                            } else {
+                                "שלום ${payment.clientName},\n" +
+                                "לא הצלחנו להיפגש הפעם. בואו נקבע תאריך חדש? 😊"
+                            }
+                            launchWhatsApp(context, clientPhone = client?.phone, text = msg)
+                        }
+                    },
+                    onIssueReceiptForSession = { session, client ->
+                        viewModel.issueReceiptForSession(session, client)
+                    },
+                    onSendReminder = { scheduled, client ->
+                        val reminderText = "שלום ${scheduled.clientName},\n" +
+                            "רציתי להזכיר לגבי התשלום עבור ${scheduled.description.ifBlank { "השיעור" }} שלנו.\n" +
+                            "סכום: ${scheduled.amount.toFormattedAmount()}\n\nתודה רבה! 🙏"
+                        launchWhatsApp(context, clientPhone = client?.phone, text = reminderText)
+                    }
+                )
+                4 -> OverdueClientsScreen(
                     modifier = Modifier.padding(innerPadding),
                     overdueClients = overdueClients,
                     filterDays = overdueFilterDays,
                     onFilterChanged = { viewModel.onOverdueFilterChanged(it) },
                     onSendReminder = { client ->
-                        launchWhatsApp(
-                            context,
-                            clientPhone = client.phone,
-                            text = "שלום ${client.name}, רצינו להזכירך לגבי תשלום. תודה! 🙏"
-                        )
+                        val msg = "שלום ${client.name},\nרציתי להזכיר שיש תשלום פתוח. תודה רבה! 🙏"
+                        launchWhatsApp(context, clientPhone = client.phone, text = msg)
                     },
-                    onOpenClientDetail = { client -> viewModel.onOpenClientDetail(client) }
+                    onOpenClientDetail = { viewModel.onOpenClientDetail(it) }
                 )
+            }
+        }
+    }
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Dashboard summary card
+// ─────────────────────────────────────────────────────────────────────────────
+
+@Composable
+fun DashboardCard(
+    monthlyRevenue: Double,
+    pendingCount: Int,
+    nextMeeting: ScheduledPaymentEntity?
+) {
+    Card(
+        modifier = Modifier.fillMaxWidth(),
+        colors   = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.primaryContainer)
+    ) {
+        Column(modifier = Modifier.padding(16.dp)) {
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.SpaceBetween,
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                Column {
+                    Text(
+                        "הכנסות החודש",
+                        style = MaterialTheme.typography.labelSmall,
+                        color = MaterialTheme.colorScheme.onPrimaryContainer.copy(alpha = 0.7f)
+                    )
+                    Text(
+                        monthlyRevenue.toFormattedAmount(),
+                        style = MaterialTheme.typography.headlineSmall,
+                        fontWeight = FontWeight.Bold,
+                        color = MaterialTheme.colorScheme.onPrimaryContainer
+                    )
+                }
+                Column(horizontalAlignment = Alignment.End) {
+                    Text(
+                        "ממתינים לעיבוד",
+                        style = MaterialTheme.typography.labelSmall,
+                        color = MaterialTheme.colorScheme.onPrimaryContainer.copy(alpha = 0.7f)
+                    )
+                    Text(
+                        if (pendingCount == 0) "הכל מעודכן ✓" else "$pendingCount תשלומים",
+                        style = MaterialTheme.typography.titleMedium,
+                        fontWeight = FontWeight.Bold,
+                        color = if (pendingCount == 0)
+                            MaterialTheme.colorScheme.secondary
+                        else
+                            MaterialTheme.colorScheme.onPrimaryContainer
+                    )
+                }
+            }
+            if (nextMeeting != null) {
+                Spacer(Modifier.height(10.dp))
+                HorizontalDivider(color = MaterialTheme.colorScheme.onPrimaryContainer.copy(alpha = 0.15f))
+                Spacer(Modifier.height(10.dp))
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    Icon(
+                        Icons.Outlined.CalendarMonth,
+                        contentDescription = null,
+                        modifier = Modifier.size(15.dp),
+                        tint = MaterialTheme.colorScheme.onPrimaryContainer.copy(alpha = 0.7f)
+                    )
+                    Spacer(Modifier.width(6.dp))
+                    Text(
+                        "פגישה הבאה: ",
+                        style = MaterialTheme.typography.labelSmall,
+                        color = MaterialTheme.colorScheme.onPrimaryContainer.copy(alpha = 0.7f)
+                    )
+                    Text(
+                        "${nextMeeting.clientName}  ·  ${dateTimeFormat.format(java.util.Date(nextMeeting.scheduledDate))}",
+                        style = MaterialTheme.typography.labelMedium,
+                        fontWeight = FontWeight.SemiBold,
+                        color = MaterialTheme.colorScheme.onPrimaryContainer
+                    )
+                }
             }
         }
     }
@@ -505,11 +750,15 @@ private fun MainTabsScreen(
 @Composable
 fun PaymentsTab(
     modifier: Modifier,
+    monthlyRevenue: Double,
+    nextMeeting: ScheduledPaymentEntity?,
     paymentStates: List<PaymentProcessingState>,
     allClients: List<ClientEntity>,
+    calendarEvents: List<CalendarEventEntity>,
     selectedClientIdsMap: Map<Int, String>,
     pendingNewClients: Map<Int, PendingNewClient>,
     justIssuedCards: Map<Int, IssuedReceiptInfo>,
+    pendingSessionLinks: Map<Int, ScheduledPaymentEntity>,
     isProcessingShare: Boolean,
     onIssueReceipt: (PaymentEntity, ClientEntity, String) -> Unit,
     onDeletePayment: (PaymentProcessingState) -> Unit,
@@ -518,10 +767,16 @@ fun PaymentsTab(
     onDismissIssuedCard: (Int) -> Unit,
     onFakeIssueReceipt: (PaymentEntity) -> Unit,
     onSendWhatsAppFromCard: (IssuedReceiptInfo) -> Unit,
-    onSendEmailFromCard: (IssuedReceiptInfo) -> Unit
+    onSendEmailFromCard: (IssuedReceiptInfo) -> Unit,
+    onConfirmSessionLink: (PaymentEntity, ClientEntity, ScheduledPaymentEntity) -> Unit,
+    onDismissSessionLink: (Int) -> Unit
 ) {
     Column(modifier = modifier.fillMaxSize().padding(horizontal = 8.dp)) {
-        Spacer(Modifier.height(12.dp))
+        Spacer(Modifier.height(8.dp))
+
+        // ── Dashboard summary card ────────────────────────────────────────────
+        DashboardCard(monthlyRevenue = monthlyRevenue, pendingCount = paymentStates.size, nextMeeting = nextMeeting)
+        Spacer(Modifier.height(8.dp))
 
         if (isProcessingShare) {
             Card(modifier = Modifier.fillMaxWidth()) {
@@ -538,21 +793,11 @@ fun PaymentsTab(
         }
 
         if (paymentStates.isEmpty() && justIssuedCards.isEmpty()) {
-            Box(modifier = Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
-                Column(horizontalAlignment = Alignment.CenterHorizontally) {
-                    Text(
-                        "אין תשלומים ממתינים",
-                        style = MaterialTheme.typography.titleMedium,
-                        fontWeight = FontWeight.Medium
-                    )
-                    Spacer(Modifier.height(4.dp))
-                    Text(
-                        "תשלומים יופיעו כאן לאחר קבלת התראת ביט\nאו שיתוף תמונת אישור תשלום",
-                        style = MaterialTheme.typography.bodySmall,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant
-                    )
-                }
-            }
+            EmptyState(
+                icon     = Icons.Default.List,
+                title    = "אין תשלומים ממתינים",
+                subtitle = "תשלומים יופיעו כאן לאחר קבלת התראת ביט או שיתוף תמונת אישור תשלום"
+            )
         } else {
             LazyColumn(verticalArrangement = Arrangement.spacedBy(12.dp)) {
                 // Issued receipt cards shown above pending
@@ -574,6 +819,7 @@ fun PaymentsTab(
                     PaymentCard(
                         state = state,
                         selectedClient = selectedClient,
+                        calendarEvents = calendarEvents,
                         onIssueReceipt = { client, amount, ts, description ->
                             onIssueReceipt(state.payment.copy(amount = amount, timestamp = ts), client, description)
                         },
@@ -584,6 +830,18 @@ fun PaymentsTab(
                         },
                         onFakeIssueReceipt = { onFakeIssueReceipt(state.payment) }
                     )
+                    val linkedSession = pendingSessionLinks[state.payment.id]
+                    if (linkedSession != null) {
+                        val linkedClient = allClients.find { it.id == state.payment.clientId }
+                        if (linkedClient != null) {
+                            SessionPaymentLinkBanner(
+                                payment        = state.payment,
+                                matchedSession = linkedSession,
+                                onConfirmLink  = { onConfirmSessionLink(state.payment, linkedClient, linkedSession) },
+                                onDismiss      = { onDismissSessionLink(state.payment.id) }
+                            )
+                        }
+                    }
                 }
                 item { Spacer(Modifier.height(8.dp)) }
             }
@@ -600,6 +858,7 @@ fun PaymentsTab(
 fun PaymentCard(
     state: PaymentProcessingState,
     selectedClient: ClientEntity?,
+    calendarEvents: List<CalendarEventEntity> = emptyList(),
     onIssueReceipt: (ClientEntity, Double, Long, String) -> Unit,
     onDelete: () -> Unit,
     onOpenSheet: () -> Unit,
@@ -719,6 +978,18 @@ fun PaymentCard(
             }
 
             // ── RECEIPT FORM BODY ────────────────────────────────────────────
+            val eventsOnDay = remember(payment.timestamp, calendarEvents) {
+                val cal = Calendar.getInstance()
+                cal.timeInMillis = payment.timestamp
+                cal.set(Calendar.HOUR_OF_DAY, 0)
+                cal.set(Calendar.MINUTE, 0)
+                cal.set(Calendar.SECOND, 0)
+                cal.set(Calendar.MILLISECOND, 0)
+                val dayStart = cal.timeInMillis
+                val dayEnd = dayStart + 24L * 60 * 60 * 1000
+                calendarEvents.filter { it.startTime >= dayStart && it.startTime < dayEnd }
+            }
+
             val paperBg    = Color(0xFFF4F1EB)
             val divColor   = Color(0xFFDDD8CC)
             val lblColor   = Color(0xFF888888)
@@ -869,6 +1140,39 @@ fun PaymentCard(
                 ) {
                     Text("תיאור השירות", color = Color(0xFF999999), style = MaterialTheme.typography.bodyMedium, fontWeight = FontWeight.Bold)
                     Text("סכום", color = Color(0xFF999999), style = MaterialTheme.typography.bodyMedium, fontWeight = FontWeight.Bold)
+                }
+
+                // ── Calendar event chips ──────────────────────────────────────
+                if (eventsOnDay.isNotEmpty()) {
+                    Column(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .padding(start = 16.dp, end = 16.dp, top = 8.dp, bottom = 8.dp)
+                    ) {
+                        Text("אירועי יומן:", color = lblColor, style = MaterialTheme.typography.labelSmall)
+                        Spacer(Modifier.height(6.dp))
+                        FlowRow(
+                            horizontalArrangement = Arrangement.spacedBy(6.dp),
+                            verticalArrangement = Arrangement.spacedBy(6.dp)
+                        ) {
+                            eventsOnDay.forEach { event ->
+                                val isSelected = editedDescription == event.title
+                                Box(
+                                    modifier = Modifier
+                                        .clip(RoundedCornerShape(20.dp))
+                                        .background(amtC.copy(alpha = if (isSelected) 0.15f else 0.05f))
+                                        .border(1.dp, amtC.copy(alpha = if (isSelected) 0.8f else 0.35f), RoundedCornerShape(20.dp))
+                                        .clickable {
+                                            editedDescription = if (isSelected) "" else event.title
+                                        }
+                                        .padding(horizontal = 12.dp, vertical = 6.dp)
+                                ) {
+                                    Text(event.title, color = amtC, style = MaterialTheme.typography.labelMedium, fontWeight = if (isSelected) FontWeight.Bold else FontWeight.Normal)
+                                }
+                            }
+                        }
+                    }
+                    HorizontalDivider(color = divColor)
                 }
 
                 // ── Item row ──────────────────────────────────────────────────
@@ -1058,9 +1362,7 @@ fun IssuedReceiptCard(
     onDismiss: () -> Unit
 ) {
     val isDark = isSystemInDarkTheme()
-    val amountStr = info.amount?.let {
-        if (it % 1.0 == 0.0) "₪${it.toInt()}" else "₪${"%.2f".format(it)}"
-    }
+    val amountStr = info.amount?.toFormattedAmount()
     val dateFmt = remember { SimpleDateFormat("dd/MM/yyyy", Locale.getDefault()) }
 
     // ── Colors ────────────────────────────────────────────────────────────────
@@ -1697,12 +1999,11 @@ fun HistoryScreen(
         } else {
             // ── Payment history grouped by month ──────────────────────────
             if (payments.isEmpty()) {
-                Box(modifier = Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
-                    Text(
-                        "אין פעילות ב-14 הימים האחרונים",
-                        color = MaterialTheme.colorScheme.onSurfaceVariant
-                    )
-                }
+                EmptyState(
+                    icon     = Icons.Outlined.History,
+                    title    = "אין היסטוריית תשלומים",
+                    subtitle = "קבלות שיופקו יופיעו כאן מסודרות לפי חודש"
+                )
             } else {
                 LazyColumn {
                     groupedPayments.forEach { (yearMonth, groupPayments, monthTotal) ->
@@ -1744,7 +2045,7 @@ private fun MonthHeader(year: Int, month: Int, total: Double? = null) {
             color = MaterialTheme.colorScheme.onSurfaceVariant
         )
         if (total != null) {
-            val totalStr = if (total % 1.0 == 0.0) "₪${total.toInt()}" else "₪${"%.2f".format(total)}"
+            val totalStr = total.toFormattedAmount()
             Text(
                 text = totalStr,
                 style = MaterialTheme.typography.titleSmall,
@@ -1796,8 +2097,7 @@ fun HistoryRow(
     val displayName = payment.clientName ?: payment.senderName
     val displayAmount = payment.issuedAmount ?: payment.amount
     val wasAmountEdited = payment.issuedAmount != null && payment.issuedAmount != payment.amount
-    val amountStr = if (displayAmount % 1.0 == 0.0) "₪${displayAmount.toInt()}"
-                    else "₪${"%.2f".format(displayAmount)}"
+    val amountStr = displayAmount.toFormattedAmount()
     val dateStr = remember(payment.timestamp) {
         SimpleDateFormat("dd/MM", Locale.getDefault()).format(Date(payment.timestamp))
     }
@@ -2125,6 +2425,133 @@ private fun OverdueClientRow(
         }
     }
     HorizontalDivider(modifier = Modifier.padding(horizontal = 16.dp))
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Calendar tab
+// ─────────────────────────────────────────────────────────────────────────────
+
+@Composable
+fun CalendarTab(
+    modifier: Modifier = Modifier,
+    events: List<CalendarEventEntity>,
+    hasPermission: Boolean,
+    onRequestPermission: () -> Unit,
+    onSync: () -> Unit,
+    onEventClick: (CalendarEventEntity) -> Unit = {}
+) {
+    val timeFmt = remember { SimpleDateFormat("HH:mm", Locale.getDefault()) }
+    val dateFmt = remember { SimpleDateFormat("EEEE, d בMMMM", Locale("he")) }
+    val todayStart = remember {
+        java.util.Calendar.getInstance().apply {
+            set(java.util.Calendar.HOUR_OF_DAY, 0); set(java.util.Calendar.MINUTE, 0)
+            set(java.util.Calendar.SECOND, 0); set(java.util.Calendar.MILLISECOND, 0)
+        }.timeInMillis
+    }
+    val grouped = remember(events) {
+        val cal = java.util.Calendar.getInstance()
+        events.groupBy { event ->
+            cal.timeInMillis = event.startTime
+            cal.set(java.util.Calendar.HOUR_OF_DAY, 0); cal.set(java.util.Calendar.MINUTE, 0)
+            cal.set(java.util.Calendar.SECOND, 0); cal.set(java.util.Calendar.MILLISECOND, 0)
+            cal.timeInMillis
+        }.toSortedMap()
+    }
+
+    Column(modifier = modifier.fillMaxSize()) {
+        Row(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(start = 16.dp, end = 8.dp, top = 16.dp, bottom = 8.dp),
+            horizontalArrangement = Arrangement.SpaceBetween,
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            Text(
+                "לוח שנה",
+                style = MaterialTheme.typography.headlineSmall,
+                fontWeight = FontWeight.Bold
+            )
+            TextButton(onClick = if (hasPermission) onSync else onRequestPermission) {
+                Text(if (hasPermission) "רענן" else "אשר הרשאה")
+            }
+        }
+        when {
+            !hasPermission -> {
+                Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
+                    Column(
+                        horizontalAlignment = Alignment.CenterHorizontally,
+                        verticalArrangement = Arrangement.spacedBy(12.dp)
+                    ) {
+                        Text(
+                            "נדרשת הרשאה לגישה ללוח השנה",
+                            color = MaterialTheme.colorScheme.onSurfaceVariant
+                        )
+                        Button(onClick = onRequestPermission) { Text("אשר הרשאה") }
+                    }
+                }
+            }
+            events.isEmpty() -> {
+                Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
+                    Text("אין אירועים בלוח השנה", color = MaterialTheme.colorScheme.onSurfaceVariant)
+                }
+            }
+            else -> {
+                LazyColumn(Modifier.fillMaxSize()) {
+                    grouped.forEach { (dayStart, dayEvents) ->
+                        val isToday = dayStart == todayStart
+                        val isTomorrow = dayStart == todayStart + 24L * 60 * 60 * 1000
+                        item(key = "header_$dayStart") {
+                            val dayLabel = when {
+                                isToday -> "היום"
+                                isTomorrow -> "מחר"
+                                else -> dateFmt.format(Date(dayStart))
+                            }
+                            Text(
+                                dayLabel,
+                                style = MaterialTheme.typography.labelLarge,
+                                fontWeight = FontWeight.Bold,
+                                color = if (isToday) MaterialTheme.colorScheme.primary
+                                        else MaterialTheme.colorScheme.onSurfaceVariant,
+                                modifier = Modifier.padding(start = 16.dp, top = 16.dp, bottom = 4.dp)
+                            )
+                        }
+                        items(dayEvents, key = { it.eventId }) { event ->
+                            Card(
+                                onClick = { onEventClick(event) },
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .padding(horizontal = 12.dp, vertical = 4.dp)
+                            ) {
+                                Column(Modifier.padding(horizontal = 16.dp, vertical = 10.dp)) {
+                                    Text(
+                                        event.title,
+                                        fontWeight = FontWeight.SemiBold,
+                                        style = MaterialTheme.typography.bodyMedium
+                                    )
+                                    Spacer(Modifier.height(2.dp))
+                                    val timeStr = timeFmt.format(Date(event.startTime)) +
+                                        if (event.endTime > event.startTime) " – ${timeFmt.format(Date(event.endTime))}" else ""
+                                    Text(
+                                        timeStr,
+                                        style = MaterialTheme.typography.bodySmall,
+                                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                                    )
+                                    if (!event.location.isNullOrBlank()) {
+                                        Text(
+                                            event.location,
+                                            style = MaterialTheme.typography.bodySmall,
+                                            color = MaterialTheme.colorScheme.onSurfaceVariant
+                                        )
+                                    }
+                                }
+                            }
+                        }
+                    }
+                    item { Spacer(Modifier.height(16.dp)) }
+                }
+            }
+        }
+    }
 }
 
 // ─────────────────────────────────────────────────────────────────────────────

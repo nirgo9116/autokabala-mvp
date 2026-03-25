@@ -88,11 +88,12 @@ data class PaymentProcessingState(
     val matchResult: MatchResult
 )
 
-enum class Screen { MAIN, CLIENT_DETAIL }
 
 class MainViewModel(application: Application) : AndroidViewModel(application) {
 
     private val receiptRepository = (application as AutoKabalaApplication).receiptRepository
+    private val calendarRepository = (application as AutoKabalaApplication).calendarRepository
+    private val scheduledPaymentDao = (application as AutoKabalaApplication).scheduledPaymentDao
 
     // --- Navigation State ---
     private val _currentScreen = MutableStateFlow(Screen.MAIN)
@@ -282,6 +283,24 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
     private val _isProcessingShare = MutableStateFlow(false)
     val isProcessingShare: StateFlow<Boolean> = _isProcessingShare.asStateFlow()
 
+    // --- Calendar / Scheduled Payments State ---
+    val calendarEvents = MutableStateFlow<List<CalendarEventEntity>>(emptyList())
+
+    private val _pendingDeletedSessionIds  = MutableStateFlow<Set<Int>>(emptySet())
+    private val _pendingDeletedSeriesIds   = MutableStateFlow<Set<String>>(emptySet())
+    private val pendingDeleteJobs          = mutableMapOf<Int, kotlinx.coroutines.Job>()
+    private val pendingDeleteSeriesJobs    = mutableMapOf<String, kotlinx.coroutines.Job>()
+
+    val scheduledPayments: StateFlow<List<ScheduledPaymentEntity>> = combine(
+        scheduledPaymentDao.getAllScheduledPayments(),
+        _pendingDeletedSessionIds,
+        _pendingDeletedSeriesIds
+    ) { payments, ids, seriesIds ->
+        payments.filter { p -> p.id !in ids && (p.seriesId == null || p.seriesId !in seriesIds) }
+    }.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), emptyList())
+
+    val pendingSessionLinks = MutableStateFlow<Map<Int, ScheduledPaymentEntity>>(emptyMap())
+
     // --- One-time Events ---
     private val _uiEvent = Channel<UiEvent>()
     val uiEvent: Flow<UiEvent> = _uiEvent.receiveAsFlow()
@@ -297,6 +316,9 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
     sealed class UiEvent {
         data class ShowError(val message: String) : UiEvent()
         data class ShowMessage(val message: String) : UiEvent()
+        data class RequestImageDeletion(val uri: Uri) : UiEvent()
+        data class ShowUndoableDeleteSession(val id: Int, val message: String) : UiEvent()
+        data class ShowUndoableDeleteSeries(val seriesId: String, val count: Int) : UiEvent()
     }
 
     // --- Event Handlers ---
@@ -320,7 +342,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                     payment, pending.name, pending.phone, pending.email, description
                 )
                 if (docUrl != null) {
-                    _justIssuedCards.value = _justIssuedCards.value + (payment.id to IssuedReceiptInfo(docUrl, pending.phone, clientName = pending.name, amount = payment.amount, timestamp = payment.timestamp))
+                    _justIssuedCards.value = _justIssuedCards.value + (payment.id to IssuedReceiptInfo(docUrl = docUrl, clientPhone = pending.phone, clientName = pending.name, amount = payment.amount, timestamp = payment.timestamp))
                     _pendingNewClients.value = _pendingNewClients.value - payment.id
                 } else {
                     _uiEvent.send(UiEvent.ShowError("שגיאה ביצירת לקוח או הפקת קבלה."))
@@ -329,7 +351,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                 val outcome = receiptRepository.issueReceiptForClient(payment, client, description)
                 if (outcome != null) {
                     val phone = client.phone ?: receiptRepository.fetchAndCachePhone(client.id)
-                    _justIssuedCards.value = _justIssuedCards.value + (payment.id to IssuedReceiptInfo(outcome.docUrl, phone, outcome.docNum, clientName = client.name, amount = payment.amount, timestamp = payment.timestamp))
+                    _justIssuedCards.value = _justIssuedCards.value + (payment.id to IssuedReceiptInfo(docUrl = outcome.docUrl, clientPhone = phone, docNum = outcome.docNum, clientName = client.name, amount = payment.amount, timestamp = payment.timestamp))
                 } else {
                     _uiEvent.send(UiEvent.ShowError("שגיאה בהפקת קבלה. בדוק חיבור לאינטרנט ונסה שוב."))
                 }
@@ -338,7 +360,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
     }
 
     fun onConfirmNewClient(paymentId: Int, name: String, phone: String?, email: String?) {
-        _pendingNewClients.value = _pendingNewClients.value + (paymentId to PendingNewClient(name, phone, email))
+        _pendingNewClients.value = _pendingNewClients.value + (paymentId to PendingNewClient(name = name, phone = phone, email = email))
     }
 
     fun onDismissIssuedCard(paymentId: Int) {
@@ -433,6 +455,10 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
     fun onBackToMain() {
         _currentScreen.value = Screen.MAIN
         _selectedClient.value = null
+    }
+
+    fun navigateToChat() {
+        _currentScreen.value = Screen.CHAT
     }
 
     fun onShareIntentReceived(imageUri: Uri) {
@@ -578,8 +604,162 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                 _uiEvent.send(UiEvent.ShowError("שגיאה בעיבוד התמונה: ${e.message}"))
             } finally {
                 _isProcessingShare.value = false
+                tryDeleteImage(imageUri)
             }
         }
+    }
+
+    private suspend fun tryDeleteImage(uri: Uri) {
+        val context = getApplication<Application>()
+        try {
+            withContext(Dispatchers.IO) { context.contentResolver.delete(uri, null, null) }
+        } catch (_: SecurityException) {
+            // Android 10+ blocks deletion of files owned by other apps — ask the user via system dialog
+            _uiEvent.send(UiEvent.RequestImageDeletion(uri))
+        } catch (_: Exception) {
+            // Not a MediaStore URI or already deleted — ignore
+        }
+    }
+
+    // --- Calendar / Scheduled Payments Handlers (WIP) ---
+
+    fun onSyncCalendarClicked() {}
+
+    fun onCalendarEventClicked(event: CalendarEventEntity) {}
+
+    fun onDismissSessionLink(paymentId: Int) {
+        pendingSessionLinks.value = pendingSessionLinks.value - paymentId
+    }
+
+    fun onConfirmSessionLink(payment: PaymentEntity, client: ClientEntity, session: ScheduledPaymentEntity) {}
+
+    fun insertScheduledPayment(payment: ScheduledPaymentEntity) {
+        viewModelScope.launch {
+            val seriesId = if (payment.reminderRecurrenceDays > 0) java.util.UUID.randomUUID().toString() else null
+            val occurrences = generateOccurrences(payment, seriesId)
+            var calendarFailed = false
+            for (occurrence in occurrences) {
+                val rowId = scheduledPaymentDao.insertScheduledPayment(occurrence)
+                val eventId = calendarRepository.insertCalendarEvent(occurrence)
+                if (eventId != null) {
+                    val inserted = scheduledPaymentDao.getScheduledPaymentById(rowId.toInt())
+                    if (inserted != null) {
+                        scheduledPaymentDao.updateScheduledPayment(inserted.copy(calendarEventId = eventId))
+                    }
+                } else {
+                    calendarFailed = true
+                }
+            }
+            if (calendarFailed) {
+                _uiEvent.send(UiEvent.ShowMessage("הפגישה נשמרה, אך לא ניתן לסנכרן עם לוח השנה. בדוק הרשאות."))
+            }
+        }
+    }
+
+    private fun generateOccurrences(template: ScheduledPaymentEntity, seriesId: String?): List<ScheduledPaymentEntity> {
+        if (template.reminderRecurrenceDays == 0) return listOf(template.copy(seriesId = seriesId))
+        val occurrences = mutableListOf<ScheduledPaymentEntity>()
+        val limit = System.currentTimeMillis() + 6L * 30 * 24 * 60 * 60 * 1000 // 6 months ahead
+        var date = template.scheduledDate
+        repeat(12) {
+            if (date > limit) return occurrences
+            occurrences.add(template.copy(id = 0, scheduledDate = date, seriesId = seriesId))
+            date = nextOccurrenceDate(date, template.reminderRecurrenceDays)
+        }
+        return occurrences
+    }
+
+    private fun nextOccurrenceDate(from: Long, intervalDays: Int): Long {
+        return if (intervalDays == 30) {
+            val cal = java.util.Calendar.getInstance().apply { timeInMillis = from }
+            cal.add(java.util.Calendar.MONTH, 1)
+            cal.timeInMillis
+        } else {
+            from + intervalDays.toLong() * 24 * 60 * 60 * 1000
+        }
+    }
+
+    fun markSessionTookPlace(payment: ScheduledPaymentEntity, tookPlace: Boolean?) {
+        viewModelScope.launch {
+            scheduledPaymentDao.updateScheduledPayment(payment.copy(tookPlace = tookPlace))
+        }
+    }
+
+    fun issueReceiptForSession(session: ScheduledPaymentEntity, client: ClientEntity?) {
+        if (client == null) {
+            viewModelScope.launch { _uiEvent.send(UiEvent.ShowError("לא נמצא לקוח לפגישה זו.")) }
+            return
+        }
+        viewModelScope.launch {
+            val syntheticPayment = PaymentEntity(
+                source = "session",
+                senderName = session.clientName,
+                amount = session.amount,
+                isConfirmed = true,
+                timestamp = System.currentTimeMillis()
+            )
+            val rowId = receiptRepository.addPayment(syntheticPayment)
+            if (rowId == -1L) {
+                _uiEvent.send(UiEvent.ShowError("שגיאה בהפקת קבלה."))
+                return@launch
+            }
+            val payment = syntheticPayment.copy(id = rowId.toInt())
+            val outcome = receiptRepository.issueReceiptForClient(payment, client, session.description)
+            if (outcome != null) {
+                val phone = client.phone ?: receiptRepository.fetchAndCachePhone(client.id)
+                _justIssuedCards.value = _justIssuedCards.value + (payment.id to IssuedReceiptInfo(
+                    docUrl = outcome.docUrl, clientPhone = phone, docNum = outcome.docNum,
+                    clientName = client.name, amount = payment.amount, timestamp = payment.timestamp
+                ))
+                scheduledPaymentDao.updateScheduledPayment(session.copy(tookPlace = true, receiptIssued = true))
+                _uiEvent.send(UiEvent.ShowMessage("קבלה הופקה בהצלחה ✓"))
+            } else {
+                _uiEvent.send(UiEvent.ShowError("שגיאה בהפקת קבלה. בדוק חיבור לאינטרנט ונסה שוב."))
+            }
+        }
+    }
+
+    fun deleteScheduledPayment(payment: ScheduledPaymentEntity) {
+        _pendingDeletedSessionIds.value = _pendingDeletedSessionIds.value + payment.id
+        val job = viewModelScope.launch {
+            kotlinx.coroutines.delay(4_000)
+            _pendingDeletedSessionIds.value = _pendingDeletedSessionIds.value - payment.id
+            payment.calendarEventId?.let { calendarRepository.deleteCalendarEvent(it) }
+            scheduledPaymentDao.deleteScheduledPayment(payment)
+        }
+        pendingDeleteJobs[payment.id] = job
+        viewModelScope.launch {
+            _uiEvent.send(UiEvent.ShowUndoableDeleteSession(payment.id, "הפגישה נמחקה"))
+        }
+    }
+
+    fun undoDeleteSession(id: Int) {
+        pendingDeleteJobs[id]?.cancel()
+        pendingDeleteJobs.remove(id)
+        _pendingDeletedSessionIds.value = _pendingDeletedSessionIds.value - id
+    }
+
+    fun deleteScheduledPaymentSeries(payment: ScheduledPaymentEntity) {
+        val seriesId = payment.seriesId ?: return
+        viewModelScope.launch {
+            val allInSeries = scheduledPaymentDao.getBySeriesId(seriesId)
+            val ids = allInSeries.map { it.id }.toSet()
+            _pendingDeletedSeriesIds.value = _pendingDeletedSeriesIds.value + seriesId
+            val job = viewModelScope.launch {
+                kotlinx.coroutines.delay(4_000)
+                _pendingDeletedSeriesIds.value = _pendingDeletedSeriesIds.value - seriesId
+                allInSeries.forEach { it.calendarEventId?.let { id -> calendarRepository.deleteCalendarEvent(id) } }
+                scheduledPaymentDao.deleteBySeriesId(seriesId)
+            }
+            pendingDeleteSeriesJobs[seriesId] = job
+            _uiEvent.send(UiEvent.ShowUndoableDeleteSeries(seriesId, allInSeries.size))
+        }
+    }
+
+    fun undoDeleteSeries(seriesId: String) {
+        pendingDeleteSeriesJobs[seriesId]?.cancel()
+        pendingDeleteSeriesJobs.remove(seriesId)
+        _pendingDeletedSeriesIds.value = _pendingDeletedSeriesIds.value - seriesId
     }
 
     // ── Name matching ─────────────────────────────────────────────────────────

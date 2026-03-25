@@ -19,13 +19,18 @@ import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.cancel
 import kotlinx.coroutines.launch
+import okhttp3.*
+import okhttp3.MediaType.Companion.toMediaType
+import okhttp3.RequestBody.Companion.toRequestBody
+import java.io.IOException
 
 class AutoKabalaNotificationService : NotificationListenerService() {
 
     companion object {
         private val PAYMENT_PACKAGES = setOf(
             "com.bnhp.payments.paymentsapp",  // Bit
-            "com.payboxapp"                    // Paybox
+            "com.payboxapp",                   // Paybox
+            "com.paybox.android"               // Paybox (alternative package)
         )
         private const val POLL_INTERVAL_MS = 1500L
     }
@@ -33,6 +38,7 @@ class AutoKabalaNotificationService : NotificationListenerService() {
     private val serviceScope = CoroutineScope(Dispatchers.IO)
     private val handler = Handler(Looper.getMainLooper())
     private var lastForegroundPkg: String? = null
+    private val httpClient = OkHttpClient()
 
     private val foregroundPoller = object : Runnable {
         override fun run() {
@@ -74,8 +80,6 @@ class AutoKabalaNotificationService : NotificationListenerService() {
         }
 
         if (current in PAYMENT_PACKAGES) {
-            // Always re-show: covers fast app-switcher round-trips where lastForegroundPkg
-            // never changed but the system hid the overlay while in the recents screen.
             if (current != lastForegroundPkg) {
                 Log.d("AutoKabalaNL", "Payment app opened: $current — showing bubble")
             }
@@ -85,7 +89,6 @@ class AutoKabalaNotificationService : NotificationListenerService() {
             if (current == lastForegroundPkg) return
             lastForegroundPkg = current
             if (current != null) {
-                // User switched to a different app — hide the bubble
                 BubbleService.hide(this)
             }
         }
@@ -103,53 +106,59 @@ class AutoKabalaNotificationService : NotificationListenerService() {
 
     override fun onNotificationPosted(sbn: StatusBarNotification) {
         val packageName = sbn.packageName
-        val extras = sbn.notification.extras ?: return
+        if (packageName !in PAYMENT_PACKAGES) return
 
+        val extras = sbn.notification.extras
+        val rawText = extras.getString("android.text") ?: return
         val timestamp = sbn.postTime
 
-        val title = extras.getCharSequence(Notification.EXTRA_TITLE)?.toString() ?: ""
-        val text = extras.getCharSequence(Notification.EXTRA_TEXT)?.toString() ?: ""
+        // Send raw text to backend for Claude-based extraction
+        sendToBackend(rawText)
 
-        val rawText = listOf(title, text)
-            .map { it.trim() }
-            .filter { it.isNotEmpty() }
-            .joinToString(" | ")
-
-        if (rawText.isBlank()) return
-
+        // Also parse locally as fallback
         val paymentData = PaymentParser.parse(packageName, rawText, timestamp)
-
         if (paymentData != null) {
-            Log.d("AutoKabalaNL", "Successfully parsed payment: $paymentData")
+            Log.d("AutoKabalaNL", "Parsed payment locally: $paymentData")
             serviceScope.launch {
                 ListenerManager.onPaymentParsed(paymentData)
             }
-            Log.d("AutoKabalaNL", "Attempting to show confirmation notification...")
             showConfirmationNotification(paymentData)
         } else {
-            if (packageName in PAYMENT_PACKAGES) {
-                Log.w("AutoKabalaNL", "Failed to parse notification from $packageName: $rawText")
-            }
+            Log.w("AutoKabalaNL", "Failed to parse notification from $packageName: $rawText")
         }
+    }
+
+    private fun sendToBackend(notificationText: String) {
+        val json = "{\"text\":\"$notificationText\"}"
+        val requestBody = json.toRequestBody("application/json".toMediaType())
+        val request = Request.Builder()
+            .url("${BuildConfig.BACKEND_URL}/extract-payment")
+            .post(requestBody)
+            .build()
+        httpClient.newCall(request).enqueue(object : Callback {
+            override fun onFailure(call: Call, e: IOException) {
+                Log.e("AutoKabalaNL", "Failed to send to backend", e)
+            }
+            override fun onResponse(call: Call, response: Response) {
+                response.body?.close()
+            }
+        })
     }
 
     private fun showConfirmationNotification(paymentData: PaymentData) {
         val intent = Intent(this, MainActivity::class.java).apply {
             flags = Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_SINGLE_TOP
         }
-        val pendingIntent: PendingIntent = PendingIntent.getActivity(this, 0, intent, PendingIntent.FLAG_IMMUTABLE)
-
+        val pendingIntent = PendingIntent.getActivity(this, 0, intent, PendingIntent.FLAG_IMMUTABLE)
         val builder = NotificationCompat.Builder(this, "new_payment_channel")
             .setSmallIcon(R.drawable.ic_launcher_foreground)
-            .setContentTitle("New Payment Detected")
-            .setContentText("From: ${paymentData.senderName}, Amount: ${paymentData.amount}")
+            .setContentTitle("תשלום התקבל")
+            .setContentText("מ-${paymentData.senderName}: ₪${paymentData.amount.toInt()}")
             .setPriority(NotificationCompat.PRIORITY_DEFAULT)
             .setContentIntent(pendingIntent)
             .setAutoCancel(true)
-
         with(NotificationManagerCompat.from(this)) {
-            val notificationId = (paymentData.timestamp % Int.MAX_VALUE).toInt()
-            notify(notificationId, builder.build())
+            notify((paymentData.timestamp % Int.MAX_VALUE).toInt(), builder.build())
         }
     }
 }

@@ -171,7 +171,6 @@ object ReceiptApiClient {
                 )),
                 cash = CashPayment(sum = paymentData.amount)
             )
-            Log.d("AutoKabalaAPI", "Sending request to /doc/create with body: $requestBody")
             val response = client.post("$BASE_URL/doc/create") {
                 contentType(ContentType.Application.Json)
                 setBody(requestBody)
@@ -201,13 +200,11 @@ object ReceiptApiClient {
                 docNum = num,
                 emailToClient = true
             )
-            Log.d("AutoKabalaAPI", "sendDocumentByEmail request: $requestBody")
             val response = client.post("$BASE_URL/doc/email") {
                 contentType(ContentType.Application.Json)
                 setBody(requestBody)
             }
             val rawBody = response.body<String>()
-            Log.d("AutoKabalaAPI", "sendDocumentByEmail($docNum) raw: $rawBody")
             val result = Json { ignoreUnknownKeys = true; isLenient = true }
                 .decodeFromString<SendEmailResponse>(rawBody)
             Log.i("AutoKabalaAPI", "sendDocumentByEmail($docNum) status=${result.status} error=${result.error}")
@@ -313,7 +310,6 @@ object ReceiptApiClient {
                 .decodeFromString<ClientInfoResponse>(response.body<String>())
             val mobile = parsed.clientInfo?.mobile?.ifBlank { null }
                 ?: parsed.clientInfo?.phone?.ifBlank { null }
-            Log.d("AutoKabalaAPI", "getClientMobile($clientId) = $mobile")
             mobile
         } catch (e: Exception) {
             Log.w("AutoKabalaAPI", "getClientMobile failed", e)

@@ -11,5 +11,6 @@ data class ClientEntity(
     val email: String?,
     val phone: String?,
     val autoSend: Boolean = false,
-    val whatsappMessage: String? = null
+    val whatsappMessage: String? = null,
+    val billingType: BillingType = BillingType.PER_SESSION
 )

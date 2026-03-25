@@ -44,6 +44,9 @@ interface ClientDao {
     @Query("SELECT * FROM clients")
     suspend fun getAllClientsSnapshot(): List<ClientEntity>
 
+    @Query("SELECT * FROM clients WHERE id = :clientId LIMIT 1")
+    suspend fun getClientById(clientId: String): ClientEntity?
+
     /**
      * Safely replaces all clients in the database with a new list,
      * preserving the autoSend flag and locally-cached phone for existing clients.
