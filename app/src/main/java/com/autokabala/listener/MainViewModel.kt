@@ -135,6 +135,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
     fun onTestResultSubmitted(isSuccess: Boolean) {
         val info = _ocrDebugInfo.value ?: return
         _ocrDebugInfo.value = null
+        _selectedTabIndex.value = 0  // Navigate to payments tab after approval
         viewModelScope.launch {
             ListenerManager.onPaymentParsed(info.pendingPaymentData)
             val imagePath: String? = if (!isSuccess) {
@@ -451,15 +452,20 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
 
                 // Step 1: ML Kit always runs first — needed for source detection + amount.
                 // Try to delete the shared image from the gallery silently.
+                // Skip deletion for FileProvider URIs (bubble captures) — they live in app cache.
                 // If the OS requires user confirmation (Android 10+), we store the URI
                 // and MainActivity will launch the system delete dialog.
-                withContext(Dispatchers.IO) {
-                    try {
-                        val deleted = context.contentResolver.delete(imageUri, null, null)
-                        if (deleted == 0) _pendingGalleryDelete.value = imageUri
-                    } catch (e: SecurityException) {
-                        _pendingGalleryDelete.value = imageUri
-                    } catch (_: Exception) {}
+                val isGalleryImage = imageUri.scheme == "content" &&
+                    imageUri.authority?.contains(context.packageName) == false
+                if (isGalleryImage) {
+                    withContext(Dispatchers.IO) {
+                        try {
+                            val deleted = context.contentResolver.delete(imageUri, null, null)
+                            if (deleted == 0) _pendingGalleryDelete.value = imageUri
+                        } catch (e: SecurityException) {
+                            _pendingGalleryDelete.value = imageUri
+                        } catch (_: Exception) {}
+                    }
                 }
 
                 val mlKitResult = runMlKitOcr(originalBitmap)
@@ -546,21 +552,23 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                         hebrewText  = bitText,
                         latinText   = mlKitText ?: bitText,
                         mlKitAmount = mlKitAmount
-                    ) ?: run {
-                        _uiEvent.send(UiEvent.ShowError("לא נמצאו פרטי תשלום בתמונה. ודא שמדובר בתמונת אישור תשלום ביט."))
-                        return@launch
-                    }
+                    )
                     if (BuildConfig.DEBUG && feedbackImageUri != null) {
+                        // In debug, always show OcrCheckScreen so devs can inspect image + OCR text
+                        val debugPayment = paymentData ?: PaymentData("bit", "", 0.0, false, 0L)
                         _ocrDebugInfo.value = OcrDebugInfo(
                             source = "bit",
                             tesseractText = tesseractText ?: "",
                             mlKitText = mlKitText ?: "",
-                            parsedName = paymentData.senderName,
-                            parsedAmount = paymentData.amount,
-                            parsedTimestamp = paymentData.timestamp,
+                            parsedName = paymentData?.senderName,
+                            parsedAmount = paymentData?.amount,
+                            parsedTimestamp = paymentData?.timestamp,
                             imageUri = feedbackImageUri,
-                            pendingPaymentData = paymentData
+                            pendingPaymentData = debugPayment
                         )
+                    } else if (paymentData == null) {
+                        _uiEvent.send(UiEvent.ShowError("לא נמצאו פרטי תשלום בתמונה. ודא שמדובר בתמונת אישור תשלום ביט."))
+                        return@launch
                     } else {
                         ListenerManager.onPaymentParsed(paymentData)
                     }
@@ -626,10 +634,9 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                         val candidateBlocks = result.textBlocks.filter { block ->
                             val text = block.text.normDigits().trim()
                             // Strip one leading non-digit char (handles misread ₪ → „, B, etc.)
-                            val core = if (text.isNotEmpty() && !text.first().isDigit()) {
-                                val rest = text.drop(1).replace(",", "")
-                                if (rest.isNotEmpty() && rest.all { it.isDigit() }) text.drop(1) else text
-                            } else text
+                            val stripped = if (text.isNotEmpty() && !text.first().isDigit()) text.drop(1) else text
+                            // Strip one trailing non-digit char (Paybox shows "900-" with trailing minus)
+                            val core = if (stripped.isNotEmpty() && !stripped.last().isDigit()) stripped.dropLast(1) else stripped
                             // Strip commas to handle thousand-separator format (e.g. "1,000")
                             val coreDigits = core.replace(",", "")
                             coreDigits.length in 1..5 &&

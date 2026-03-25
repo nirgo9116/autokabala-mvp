@@ -168,6 +168,7 @@ class MainActivity : ComponentActivity() {
             var showTutorial by remember { mutableStateOf(!prefs.getBoolean("tutorial_shown", false)) }
             AutoKabalaListenerTheme(dynamicColor = false) {
                 val ocrDebugInfo by mainViewModel.ocrDebugInfo.collectAsState()
+                val isProcessingShare by mainViewModel.isProcessingShare.collectAsState()
 
                 // Gallery delete — kept at top level so it's always in composition
                 val pendingGalleryDelete by mainViewModel.pendingGalleryDelete.collectAsState()
@@ -197,11 +198,26 @@ class MainActivity : ComponentActivity() {
                     }
                 }
 
+                // Collect bubble captures from BubbleService → process as share intent
+                val app = application as AutoKabalaApplication
+                LaunchedEffect(Unit) {
+                    app.pendingCaptureFlow.collect { uri ->
+                        mainViewModel.onShareIntentReceived(uri)
+                    }
+                }
+
                 if (showTutorial) {
                     TutorialScreen(onDone = {
                         prefs.edit().putBoolean("tutorial_shown", true).apply()
                         showTutorial = false
                     })
+                } else if (isProcessingShare) {
+                    Box(modifier = Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
+                        Column(horizontalAlignment = Alignment.CenterHorizontally, verticalArrangement = Arrangement.spacedBy(16.dp)) {
+                            CircularProgressIndicator()
+                            Text("מעבד תמונה...", style = MaterialTheme.typography.bodyMedium)
+                        }
+                    }
                 } else if (BuildConfig.DEBUG && ocrDebugInfo != null) {
                     val capturedInfo = ocrDebugInfo!!
                     OcrCheckScreen(
@@ -2193,6 +2209,62 @@ fun SettingsTab(
             Text("הצג מדריך למשתמש")
         }
 
+        // Bubble overlay permission button
+        val context = LocalContext.current
+        val hasOverlayPermission = remember { mutableStateOf(android.provider.Settings.canDrawOverlays(context)) }
+        val overlayPermLauncher = rememberLauncherForActivityResult(
+            ActivityResultContracts.StartActivityForResult()
+        ) { hasOverlayPermission.value = android.provider.Settings.canDrawOverlays(context) }
+
+        val notifService = remember {
+            context.getSystemService(android.content.Context.NOTIFICATION_SERVICE)
+            // Use a lambda so it re-reads on recomposition trigger
+        }
+        val hasUsagePermission = remember { mutableStateOf(
+            (context.applicationContext as? AutoKabalaApplication)?.let {
+                val ops = context.getSystemService(android.content.Context.APP_OPS_SERVICE) as android.app.AppOpsManager
+                ops.unsafeCheckOpNoThrow(android.app.AppOpsManager.OPSTR_GET_USAGE_STATS,
+                    android.os.Process.myUid(), context.packageName) == android.app.AppOpsManager.MODE_ALLOWED
+            } ?: false
+        )}
+        val usagePermLauncher = rememberLauncherForActivityResult(
+            ActivityResultContracts.StartActivityForResult()
+        ) {
+            val ops = context.getSystemService(android.content.Context.APP_OPS_SERVICE) as android.app.AppOpsManager
+            hasUsagePermission.value = ops.unsafeCheckOpNoThrow(android.app.AppOpsManager.OPSTR_GET_USAGE_STATS,
+                android.os.Process.myUid(), context.packageName) == android.app.AppOpsManager.MODE_ALLOWED
+        }
+
+        if (!hasOverlayPermission.value) {
+            Button(
+                onClick = {
+                    overlayPermLauncher.launch(
+                        Intent(android.provider.Settings.ACTION_MANAGE_OVERLAY_PERMISSION,
+                            android.net.Uri.parse("package:${context.packageName}"))
+                    )
+                },
+                modifier = Modifier.fillMaxWidth(),
+                colors = ButtonDefaults.buttonColors(containerColor = MaterialTheme.colorScheme.tertiary)
+            ) { Text("אפשר הצגת בועה מעל אפליקציות") }
+        }
+
+        if (!hasUsagePermission.value) {
+            Button(
+                onClick = {
+                    usagePermLauncher.launch(Intent(android.provider.Settings.ACTION_USAGE_ACCESS_SETTINGS))
+                },
+                modifier = Modifier.fillMaxWidth(),
+                colors = ButtonDefaults.buttonColors(containerColor = MaterialTheme.colorScheme.tertiary)
+            ) { Text("אפשר זיהוי פתיחת ביט / פייבוקס") }
+        }
+
+        if (hasOverlayPermission.value) {
+            OutlinedButton(
+                onClick = { BubbleService.show(context) },
+                modifier = Modifier.fillMaxWidth()
+            ) { Text("🫧  הצג בועה עכשיו (בדיקה)") }
+        }
+
         if (BuildConfig.DEBUG && testResults.isNotEmpty()) {
             val ok = testResults.count { it.isSuccess }
             val fail = testResults.count { !it.isSuccess }
@@ -2284,12 +2356,23 @@ private fun OcrCheckScreen(
                 )
             } ?: Spacer(Modifier.weight(1f))
             // Parsed data card
+            var showRawOcr by remember { mutableStateOf(false) }
             Card(modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp)) {
                 Column(
-                    modifier 2= Modifier.padding(horizontal = 16.dp, vertical = 10.dp),
+                    modifier = Modifier.padding(horizontal = 16.dp, vertical = 10.dp),
                     verticalArrangement = Arrangement.spacedBy(6.dp)
                 ) {
-                    Text("נתוני הפענוח", style = MaterialTheme.typography.titleSmall, fontWeight = FontWeight.Bold)
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.SpaceBetween,
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Text("נתוני הפענוח", style = MaterialTheme.typography.titleSmall, fontWeight = FontWeight.Bold)
+                        TextButton(
+                            onClick = { showRawOcr = !showRawOcr },
+                            contentPadding = androidx.compose.foundation.layout.PaddingValues(0.dp)
+                        ) { Text(if (showRawOcr) "הסתר OCR" else "הצג OCR", style = MaterialTheme.typography.labelSmall) }
+                    }
                     Row(horizontalArrangement = Arrangement.spacedBy(8.dp), verticalAlignment = Alignment.CenterVertically) {
                         Text(if (nameOk) "✓" else "✗", color = if (nameOk) Color(0xFF4CAF50) else Color(0xFFF44336))
                         Column {
@@ -2312,6 +2395,13 @@ private fun OcrCheckScreen(
                                 Text(it, style = MaterialTheme.typography.bodyMedium, fontWeight = FontWeight.Medium)
                             }
                         }
+                    }
+                    if (showRawOcr) {
+                        HorizontalDivider()
+                        Text("ML Kit:", style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                        Text(info.mlKitText.ifBlank { "(ריק)" }, style = MaterialTheme.typography.bodySmall, fontFamily = androidx.compose.ui.text.font.FontFamily.Monospace)
+                        Text("Tesseract:", style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                        Text(info.tesseractText.ifBlank { "(ריק)" }, style = MaterialTheme.typography.bodySmall, fontFamily = androidx.compose.ui.text.font.FontFamily.Monospace)
                     }
                 }
             }

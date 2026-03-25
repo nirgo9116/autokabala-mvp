@@ -1,8 +1,15 @@
 package com.autokabala.listener
 
+import android.app.AppOpsManager
 import android.app.Notification
 import android.app.PendingIntent
+import android.app.usage.UsageEvents
+import android.app.usage.UsageStatsManager
+import android.content.Context
 import android.content.Intent
+import android.os.Handler
+import android.os.Looper
+import android.provider.Settings
 import android.service.notification.NotificationListenerService
 import android.service.notification.StatusBarNotification
 import android.util.Log
@@ -15,13 +22,83 @@ import kotlinx.coroutines.launch
 
 class AutoKabalaNotificationService : NotificationListenerService() {
 
-    // Create a coroutine scope for this service.
+    companion object {
+        private val PAYMENT_PACKAGES = setOf(
+            "com.bnhp.payments.paymentsapp",  // Bit
+            "com.payboxapp"                    // Paybox
+        )
+        private const val POLL_INTERVAL_MS = 1500L
+    }
+
     private val serviceScope = CoroutineScope(Dispatchers.IO)
+    private val handler = Handler(Looper.getMainLooper())
+    private var lastForegroundPkg: String? = null
+
+    private val foregroundPoller = object : Runnable {
+        override fun run() {
+            checkForegroundApp()
+            handler.postDelayed(this, POLL_INTERVAL_MS)
+        }
+    }
+
+    override fun onListenerConnected() {
+        Log.d("AutoKabalaNL", "Notification listener connected")
+        handler.post(foregroundPoller)
+    }
+
+    override fun onListenerDisconnected() {
+        Log.d("AutoKabalaNL", "Notification listener disconnected")
+        handler.removeCallbacks(foregroundPoller)
+    }
 
     override fun onDestroy() {
         super.onDestroy()
+        handler.removeCallbacks(foregroundPoller)
         serviceScope.cancel()
-        Log.d("AutoKabalaNL", "Service destroyed and coroutine scope cancelled.")
+    }
+
+    private fun checkForegroundApp() {
+        if (!hasUsageStatsPermission()) return
+        if (!Settings.canDrawOverlays(this)) return
+
+        val usm = getSystemService(Context.USAGE_STATS_SERVICE) as UsageStatsManager
+        val now = System.currentTimeMillis()
+        val events = usm.queryEvents(now - POLL_INTERVAL_MS * 2, now)
+        val event = UsageEvents.Event()
+        var current: String? = null
+        while (events.hasNextEvent()) {
+            events.getNextEvent(event)
+            if (event.eventType == UsageEvents.Event.MOVE_TO_FOREGROUND) {
+                current = event.packageName
+            }
+        }
+
+        if (current in PAYMENT_PACKAGES) {
+            // Always re-show: covers fast app-switcher round-trips where lastForegroundPkg
+            // never changed but the system hid the overlay while in the recents screen.
+            if (current != lastForegroundPkg) {
+                Log.d("AutoKabalaNL", "Payment app opened: $current — showing bubble")
+            }
+            lastForegroundPkg = current
+            BubbleService.show(this)
+        } else {
+            if (current == lastForegroundPkg) return
+            lastForegroundPkg = current
+            if (current != null) {
+                // User switched to a different app — hide the bubble
+                BubbleService.hide(this)
+            }
+        }
+    }
+
+    fun hasUsageStatsPermission(): Boolean {
+        val appOps = getSystemService(Context.APP_OPS_SERVICE) as AppOpsManager
+        val mode = appOps.unsafeCheckOpNoThrow(
+            AppOpsManager.OPSTR_GET_USAGE_STATS,
+            android.os.Process.myUid(),
+            packageName
+        )
+        return mode == AppOpsManager.MODE_ALLOWED
     }
 
     override fun onNotificationPosted(sbn: StatusBarNotification) {
@@ -44,14 +121,13 @@ class AutoKabalaNotificationService : NotificationListenerService() {
 
         if (paymentData != null) {
             Log.d("AutoKabalaNL", "Successfully parsed payment: $paymentData")
-            // Launch a coroutine to call the suspend function.
             serviceScope.launch {
                 ListenerManager.onPaymentParsed(paymentData)
             }
-            Log.d("AutoKabalaNL", "Attempting to show confirmation notification...") 
+            Log.d("AutoKabalaNL", "Attempting to show confirmation notification...")
             showConfirmationNotification(paymentData)
         } else {
-            if (packageName in setOf("com.bnhp.payments.paymentsapp", "com.payboxapp")) {
+            if (packageName in PAYMENT_PACKAGES) {
                 Log.w("AutoKabalaNL", "Failed to parse notification from $packageName: $rawText")
             }
         }
@@ -72,17 +148,8 @@ class AutoKabalaNotificationService : NotificationListenerService() {
             .setAutoCancel(true)
 
         with(NotificationManagerCompat.from(this)) {
-            // Use a safer ID generation based on the payment's unique timestamp
             val notificationId = (paymentData.timestamp % Int.MAX_VALUE).toInt()
             notify(notificationId, builder.build())
         }
-    }
-
-    override fun onListenerConnected() {
-        Log.d("AutoKabalaNL", "Notification listener connected")
-    }
-
-    override fun onListenerDisconnected() {
-        Log.d("AutoKabalaNL", "Notification listener disconnected")
     }
 }

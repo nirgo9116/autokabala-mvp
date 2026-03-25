@@ -2,4 +2,5 @@
 <paths>
     <cache-path name="ocr_feedback" path="ocr_feedback/" />
     <files-path name="ocr_debug" path="ocr_debug/" />
+    <cache-path name="bubble_capture" path="bubble_capture/" />
 </paths>

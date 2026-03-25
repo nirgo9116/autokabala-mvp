@@ -6,6 +6,16 @@
     <uses-permission android:name="android.permission.INTERNET" />
     <!-- Required for showing notifications on Android 13+ -->
     <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
+    <!-- Bubble overlay -->
+    <uses-permission android:name="android.permission.SYSTEM_ALERT_WINDOW" />
+    <uses-permission android:name="android.permission.FOREGROUND_SERVICE" />
+    <uses-permission android:name="android.permission.FOREGROUND_SERVICE_MEDIA_PROJECTION" />
+    <uses-permission android:name="android.permission.FOREGROUND_SERVICE_SPECIAL_USE" />
+    <uses-permission android:name="android.permission.PACKAGE_USAGE_STATS"
+        tools:ignore="ProtectedPermissions" />
+    <!-- Calendar sync -->
+    <uses-permission android:name="android.permission.READ_CALENDAR" />
+    <uses-permission android:name="android.permission.WRITE_CALENDAR" />
 
     <!-- The android:name attribute registers the Application class with the system -->
     <application
@@ -52,6 +62,26 @@
                 android:name="android.support.FILE_PROVIDER_PATHS"
                 android:resource="@xml/file_paths" />
         </provider>
+
+        <!-- Transparent activity for MediaProjection consent dialog -->
+        <!-- taskAffinity="" ensures it runs in its own task, not Autokabala's task.
+             When it finishes, the foreground app (e.g. Bit) stays visible for capture. -->
+        <activity
+            android:name=".ScreenCaptureActivity"
+            android:exported="false"
+            android:excludeFromRecents="true"
+            android:taskAffinity=""
+            android:theme="@android:style/Theme.Translucent.NoTitleBar" />
+
+        <!-- Bubble overlay foreground service -->
+        <service
+            android:name=".BubbleService"
+            android:exported="false"
+            android:foregroundServiceType="specialUse|mediaProjection">
+            <property
+                android:name="android.app.PROPERTY_SPECIAL_USE_FGS_SUBTYPE"
+                android:value="overlay_bubble_for_payment_receipt" />
+        </service>
 
         <!-- Notification Listener Service -->
         <service

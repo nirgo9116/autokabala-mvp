@@ -17,7 +17,7 @@ object ListenerManager {
 
     // This is now a SharedFlow. It emits events to any collectors without holding state.
     // This is perfect for one-time events like a new notification.
-    private val _newPaymentEvent = MutableSharedFlow<PaymentData>()
+    private val _newPaymentEvent = MutableSharedFlow<PaymentData>(extraBufferCapacity = 1)
     val newPaymentEvent: SharedFlow<PaymentData> = _newPaymentEvent.asSharedFlow()
 
     fun enable() {

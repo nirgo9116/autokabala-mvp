@@ -38,9 +38,14 @@ android {
         val icountUser = localProperties.getProperty("icount.user") ?: ""
         val icountPass = localProperties.getProperty("icount.pass") ?: ""
 
+        val backendUrl = localProperties.getProperty("backend.url") ?: "http://192.168.1.198:3000"
+        val claudeApiKey = localProperties.getProperty("claude.api.key") ?: ""
+
         buildConfigField("String", "ICOUNT_CID", "\"$icountCid\"")
         buildConfigField("String", "ICOUNT_USER", "\"$icountUser\"")
         buildConfigField("String", "ICOUNT_PASS", "\"$icountPass\"")
+        buildConfigField("String", "BACKEND_URL", "\"$backendUrl\"")
+        buildConfigField("String", "CLAUDE_API_KEY", "\"$claudeApiKey\"")
     }
 
     buildTypes {
@@ -98,6 +103,12 @@ dependencies {
 
     // ML Kit Text Recognition — bundled model (included in APK, works without Play Services download)
     implementation("com.google.mlkit:text-recognition:16.0.1")
+
+    // OkHttp (Nir's backend integration)
+    implementation("com.squareup.okhttp3:okhttp:4.12.0")
+
+    // WorkManager (reminders & scheduled tasks)
+    implementation("androidx.work:work-runtime-ktx:2.9.1")
 
     // Room for local database
     implementation("androidx.room:room-runtime:2.6.1")
