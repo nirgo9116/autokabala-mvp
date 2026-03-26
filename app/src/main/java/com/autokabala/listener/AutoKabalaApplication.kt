@@ -4,7 +4,12 @@ import android.app.Application
 import android.app.NotificationChannel
 import android.app.NotificationManager
 import android.content.Context
+import android.content.Intent
 import android.net.Uri
+import androidx.core.app.Person
+import androidx.core.content.pm.ShortcutInfoCompat
+import androidx.core.content.pm.ShortcutManagerCompat
+import androidx.core.graphics.drawable.IconCompat
 import androidx.work.Constraints
 import androidx.work.ExistingPeriodicWorkPolicy
 import androidx.work.NetworkType
@@ -30,6 +35,7 @@ class AutoKabalaApplication : Application() {
 
     override fun onCreate() {
         super.onCreate()
+        publishShareShortcut()
         receiptRepository.startListeningForPayments(applicationScope)
 
         applicationScope.launch {
@@ -48,5 +54,25 @@ class AutoKabalaApplication : Application() {
         notificationManager.createNotificationChannel(
             NotificationChannel("new_payment_channel", "New Payments", NotificationManager.IMPORTANCE_DEFAULT)
         )
+    }
+
+    /**
+     * Publishes a Direct Share shortcut so AutoKabala appears in the top row of the
+     * system share sheet when sharing images from Bit / Paybox.
+     * The shortcut is long-lived so the system can promote it even after app restart.
+     */
+    private fun publishShareShortcut() {
+        val shortcut = ShortcutInfoCompat.Builder(this, "autokabala_share_target")
+            .setShortLabel("AutoKabala")
+            .setLongLabel("הפק קבלה")
+            .setIcon(IconCompat.createWithResource(this, R.mipmap.ic_launcher))
+            .setPerson(Person.Builder().setName("AutoKabala").build())
+            .setIntent(Intent(this, ShareHandlerActivity::class.java).apply {
+                action = Intent.ACTION_SEND
+            })
+            .setCategories(setOf("com.autokabala.listener.SHARE_TARGET"))
+            .setLongLived(true)
+            .build()
+        ShortcutManagerCompat.pushDynamicShortcut(this, shortcut)
     }
 }

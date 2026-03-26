@@ -1,0 +1,13 @@
+<?xml version="1.0" encoding="utf-8"?>
+<shortcuts xmlns:android="http://schemas.android.com/apk/res/android">
+    <!--
+        Declares AutoKabala as a Direct Share target for image/* content.
+        Combined with a dynamic ShortcutInfo published at startup, this causes
+        the app icon to appear in the top (direct-share) row of the system
+        share sheet when sharing images from Bit / Paybox.
+    -->
+    <share-target android:targetClass="com.autokabala.listener.ShareHandlerActivity">
+        <data android:mimeType="image/*" />
+        <category android:name="com.autokabala.listener.SHARE_TARGET" />
+    </share-target>
+</shortcuts>

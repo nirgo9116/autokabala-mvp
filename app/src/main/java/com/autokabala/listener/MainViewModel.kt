@@ -40,17 +40,6 @@ import java.io.File
 import java.io.FileOutputStream
 import kotlin.coroutines.resume
 
-data class OverdueClient(val client: ClientEntity, val daysSinceLastPayment: Int)
-data class IssuedReceiptInfo(
-    val docUrl: String?,
-    val clientPhone: String?,
-    val docNum: String? = null,
-    val clientName: String? = null,
-    val amount: Double? = null,
-    val timestamp: Long? = null
-)
-data class PendingNewClient(val name: String, val phone: String?, val email: String?)
-
 data class OcrDebugInfo(
     val source: String,
     val tesseractText: String,
@@ -75,18 +64,6 @@ data class ParseTestResult(
     val mlKitText: String
 )
 
-// Represents the result of matching a payment to existing clients
-sealed class MatchResult {
-    object NoMatch : MatchResult()
-    data class SingleMatch(val client: ClientEntity, val isStrong: Boolean = true) : MatchResult()
-    data class MultipleMatches(val clients: List<ClientEntity>) : MatchResult()
-}
-
-// Holds the combined state for a single payment, ready for the UI
-data class PaymentProcessingState(
-    val payment: PaymentEntity,
-    val matchResult: MatchResult
-)
 
 
 class MainViewModel(application: Application) : AndroidViewModel(application) {

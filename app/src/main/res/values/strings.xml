@@ -1,3 +1,4 @@
 <resources>
     <string name="app_name">AutoKabalaListener</string>
+    <string name="accessibility_service_description">מאפשר לאוטוקבלה לצלם מסך לצורך זיהוי אישורי תשלום ללא יציאה מהאפליקציה</string>
 </resources>

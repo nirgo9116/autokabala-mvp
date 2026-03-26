@@ -84,6 +84,9 @@ class AutoKabalaNotificationService : NotificationListenerService() {
                 Log.d("AutoKabalaNL", "Payment app opened: $current — showing bubble")
             }
             lastForegroundPkg = current
+            val bubbleEnabled = getSharedPreferences(BubbleService.PREFS_NAME, MODE_PRIVATE)
+                .getBoolean(BubbleService.KEY_BUBBLE_ENABLED, true)
+            if (!bubbleEnabled) return
             BubbleService.show(this)
         } else {
             if (current == lastForegroundPkg) return

@@ -124,10 +124,12 @@ import androidx.compose.foundation.Image
 import androidx.compose.ui.graphics.painter.BitmapPainter
 import androidx.compose.ui.graphics.asImageBitmap
 import androidx.compose.ui.layout.ContentScale
+import androidx.compose.ui.layout.onSizeChanged
 import androidx.compose.runtime.produceState
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.platform.LocalLifecycleOwner
+import androidx.compose.foundation.gestures.detectDragGestures
 import androidx.compose.foundation.gestures.detectTapGestures
 import androidx.compose.foundation.text.KeyboardActions
 import androidx.compose.foundation.text.KeyboardOptions
@@ -138,11 +140,6 @@ import androidx.compose.ui.text.input.ImeAction
 import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
-import android.os.Build
-import android.provider.MediaStore
-import androidx.activity.compose.rememberLauncherForActivityResult
-import androidx.activity.result.IntentSenderRequest
-import androidx.activity.result.contract.ActivityResultContracts
 import androidx.core.app.NotificationManagerCompat
 import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.LifecycleEventObserver
@@ -177,7 +174,7 @@ class MainActivity : ComponentActivity() {
             val mainViewModel: MainViewModel = viewModel(factory = factory)
             val prefs = remember { getSharedPreferences("autokabala_prefs", android.content.Context.MODE_PRIVATE) }
             var showTutorial by remember { mutableStateOf(!prefs.getBoolean("tutorial_shown", false)) }
-            AutoKabalaListenerTheme(dynamicColor = false) {
+            AutoKabalaListenerTheme {
                 val ocrDebugInfo by mainViewModel.ocrDebugInfo.collectAsState()
                 val isProcessingShare by mainViewModel.isProcessingShare.collectAsState()
 
@@ -863,7 +860,16 @@ fun PaymentCard(
     onDelete: () -> Unit,
     onOpenSheet: () -> Unit,
     onSelectClient: (ClientEntity) -> Unit = {},
-    onFakeIssueReceipt: () -> Unit = {}
+    onFakeIssueReceipt: () -> Unit = {},
+    /**
+     * When non-null, rendered inside the "לכבוד" row instead of the
+     * bottom-sheet trigger. Used by the overlay to show an inline dropdown.
+     */
+    clientDropdown: (@Composable () -> Unit)? = null,
+    showHero: Boolean = true,
+    showActions: Boolean = true,
+    onHeaderDrag: ((Float, Float) -> Unit)? = null,
+    onLkbdBoxWidth: ((Int) -> Unit)? = null
 ) {
     val payment = state.payment
     val isDark = isSystemInDarkTheme()
@@ -904,7 +910,7 @@ fun PaymentCard(
         Column(modifier = Modifier.pointerInput(Unit) { detectTapGestures { focusManager.clearFocus() } }) {
 
             // ── HERO ────────────────────────────────────────────────────────
-            Box(
+            if (showHero) Box(
                 modifier = Modifier
                     .fillMaxWidth()
                     .background(heroGradient)
@@ -1011,6 +1017,12 @@ fun PaymentCard(
                     modifier = Modifier
                         .fillMaxWidth()
                         .background(hdrGradient)
+                        .then(if (onHeaderDrag != null) Modifier.pointerInput(Unit) {
+                            detectDragGestures { change, dragAmount ->
+                                change.consume()
+                                onHeaderDrag(dragAmount.x, dragAmount.y)
+                            }
+                        } else Modifier)
                         .padding(horizontal = 16.dp, vertical = 10.dp),
                     horizontalArrangement = Arrangement.SpaceBetween,
                     verticalAlignment = Alignment.CenterVertically
@@ -1024,6 +1036,7 @@ fun PaymentCard(
                 val showBubbles = selectedClient == null
                     && mr is MatchResult.MultipleMatches
                     && mr.clients.size in 2..3
+                    && clientDropdown == null  // suppress chips while popup is open
                 val bubbleC = if (isBit) Color(0xFF1565C0) else Color(0xFF6A1B9A)
 
                 if (showBubbles) {
@@ -1046,9 +1059,9 @@ fun PaymentCard(
                                         .border(1.5.dp, bubbleC.copy(alpha = 0.5f), RoundedCornerShape(20.dp))
                                         .background(bubbleC.copy(alpha = 0.08f))
                                         .clickable { onSelectClient(client) }
-                                        .padding(horizontal = 18.dp, vertical = 10.dp)
+                                        .padding(horizontal = 10.dp, vertical = 5.dp)
                                 ) {
-                                    Text(client.name, color = bubbleC, style = MaterialTheme.typography.bodyLarge, fontWeight = FontWeight.SemiBold)
+                                    Text(client.name, color = bubbleC, style = MaterialTheme.typography.bodyMedium, fontWeight = FontWeight.SemiBold)
                                 }
                             }
                         }
@@ -1063,34 +1076,57 @@ fun PaymentCard(
                         horizontalArrangement = Arrangement.spacedBy(10.dp)
                     ) {
                         Text("לכבוד", color = lblColor, style = MaterialTheme.typography.bodyMedium, fontWeight = FontWeight.SemiBold)
-                        if (effectiveClient != null) {
-                            Row(
-                                modifier = Modifier
-                                    .weight(1f)
-                                    .clip(RoundedCornerShape(20.dp))
-                                    .background(Color(0xFF43A047).copy(alpha = 0.14f))
-                                    .border(1.5.dp, Color(0xFF43A047).copy(alpha = 0.4f), RoundedCornerShape(20.dp))
-                                    .clickable { onOpenSheet() }
-                                    .padding(horizontal = 14.dp, vertical = 8.dp),
-                                verticalAlignment = Alignment.CenterVertically,
-                                horizontalArrangement = Arrangement.spacedBy(8.dp)
-                            ) {
-                                Text("✓", color = Color(0xFF2E7D32), style = MaterialTheme.typography.bodyMedium)
-                                Text(effectiveClient.name, color = Color(0xFF2E7D32), style = MaterialTheme.typography.bodyLarge, fontWeight = FontWeight.Bold, modifier = Modifier.weight(1f))
-                                Text("▼", color = Color(0xFFAAAAAA), style = MaterialTheme.typography.bodyMedium)
+                        // Anchor box — oval chip always visible; clientDropdown (Popup) floats above
+                        Box(
+                            modifier = Modifier
+                                .weight(1f)
+                                .onSizeChanged { onLkbdBoxWidth?.invoke(it.width) }
+                        ) {
+                            if (effectiveClient != null) {
+                                val searchOpen = clientDropdown != null
+                                Row(
+                                    modifier = Modifier
+                                        .fillMaxWidth()
+                                        .clip(RoundedCornerShape(20.dp))
+                                        .background(
+                                            if (searchOpen) Color.Black.copy(alpha = 0.05f)
+                                            else Color(0xFF43A047).copy(alpha = 0.14f)
+                                        )
+                                        .border(
+                                            1.5.dp,
+                                            if (searchOpen) Color(0xFF1565C0).copy(alpha = 0.5f)
+                                            else Color(0xFF43A047).copy(alpha = 0.4f),
+                                            RoundedCornerShape(20.dp)
+                                        )
+                                        .clickable { onOpenSheet() }
+                                        .padding(horizontal = 14.dp, vertical = 8.dp),
+                                    verticalAlignment = Alignment.CenterVertically,
+                                    horizontalArrangement = Arrangement.spacedBy(8.dp)
+                                ) {
+                                    if (searchOpen) {
+                                        Text("✏", color = Color(0xFF1565C0), style = MaterialTheme.typography.bodyMedium)
+                                        Text("חפש לקוח...", color = Color(0xFF999999), style = MaterialTheme.typography.bodyLarge, fontStyle = FontStyle.Italic, modifier = Modifier.weight(1f))
+                                    } else {
+                                        Text("✓", color = Color(0xFF2E7D32), style = MaterialTheme.typography.bodyMedium)
+                                        Text(effectiveClient.name, color = Color(0xFF2E7D32), style = MaterialTheme.typography.bodyLarge, fontWeight = FontWeight.Bold, modifier = Modifier.weight(1f))
+                                        Text("▼", color = Color(0xFFAAAAAA), style = MaterialTheme.typography.bodyMedium)
+                                    }
+                                }
+                            } else {
+                                Box(
+                                    modifier = Modifier
+                                        .fillMaxWidth()
+                                        .clip(RoundedCornerShape(20.dp))
+                                        .background(Color.Black.copy(alpha = 0.05f))
+                                        .border(1.5.dp, Color(0xFFCCCCCC), RoundedCornerShape(20.dp))
+                                        .clickable { onOpenSheet() }
+                                        .padding(horizontal = 14.dp, vertical = 8.dp)
+                                ) {
+                                    Text("חפש לקוח...", color = Color(0xFFAAAAAA), style = MaterialTheme.typography.bodyLarge, fontStyle = FontStyle.Italic)
+                                }
                             }
-                        } else {
-                            Box(
-                                modifier = Modifier
-                                    .weight(1f)
-                                    .clip(RoundedCornerShape(20.dp))
-                                    .background(Color.Black.copy(alpha = 0.05f))
-                                    .border(1.5.dp, Color(0xFFCCCCCC), RoundedCornerShape(20.dp))
-                                    .clickable { onOpenSheet() }
-                                    .padding(horizontal = 14.dp, vertical = 8.dp)
-                            ) {
-                                Text("חפש לקוח...", color = Color(0xFFAAAAAA), style = MaterialTheme.typography.bodyLarge, fontStyle = FontStyle.Italic)
-                            }
+                            // Popup anchor — invoked here so Popup floats downward from chip
+                            clientDropdown?.invoke()
                         }
                     }
                     HorizontalDivider(color = divColor)
@@ -1301,48 +1337,50 @@ fun PaymentCard(
                 Brush.horizontalGradient(listOf(Color(0xFF7B61FF), Color(0xFFCE93D8)))
 
             val btnEnabled = effectiveClient != null
-            Row(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .background(Color(0xFF121212))
-                    .padding(horizontal = 14.dp, vertical = 10.dp),
-                horizontalArrangement = Arrangement.spacedBy(10.dp),
-                verticalAlignment = Alignment.CenterVertically
-            ) {
-                Box(
+            if (showActions) {
+                Row(
                     modifier = Modifier
-                        .weight(1f)
-                        .height(54.dp)
-                        .alpha(if (btnEnabled) 1f else 0.45f)
-                        .clip(RoundedCornerShape(14.dp))
-                        .background(issueGrad)
-                        .clickable(enabled = btnEnabled) {
-                            effectiveClient?.let { c ->
-                                onIssueReceipt(c, parsedAmt, parsedTs ?: payment.timestamp, editedDescription)
-                            }
-                        },
-                    contentAlignment = Alignment.Center
+                        .fillMaxWidth()
+                        .background(Color(0xFF121212))
+                        .padding(horizontal = 14.dp, vertical = 10.dp),
+                    horizontalArrangement = Arrangement.spacedBy(10.dp),
+                    verticalAlignment = Alignment.CenterVertically
                 ) {
-                    Text("הפק קבלה", color = Color.Black, fontWeight = FontWeight.Bold, fontSize = 18.sp)
+                    Box(
+                        modifier = Modifier
+                            .weight(1f)
+                            .height(54.dp)
+                            .alpha(if (btnEnabled) 1f else 0.45f)
+                            .clip(RoundedCornerShape(14.dp))
+                            .background(issueGrad)
+                            .clickable(enabled = btnEnabled) {
+                                effectiveClient?.let { c ->
+                                    onIssueReceipt(c, parsedAmt, parsedTs ?: payment.timestamp, editedDescription)
+                                }
+                            },
+                        contentAlignment = Alignment.Center
+                    ) {
+                        Text("הפק קבלה", color = Color.Black, fontWeight = FontWeight.Bold, fontSize = 18.sp)
+                    }
+                    Box(
+                        modifier = Modifier
+                            .size(54.dp)
+                            .clip(RoundedCornerShape(14.dp))
+                            .background(Color(0xFF1E1E1E))
+                            .border(1.dp, Color(0xFF333333), RoundedCornerShape(14.dp))
+                            .clickable { onDelete() },
+                        contentAlignment = Alignment.Center
+                    ) {
+                        Text("🗑", fontSize = 22.sp)
+                    }
                 }
-                Box(
-                    modifier = Modifier
-                        .size(54.dp)
-                        .clip(RoundedCornerShape(14.dp))
-                        .background(Color(0xFF1E1E1E))
-                        .border(1.dp, Color(0xFF333333), RoundedCornerShape(14.dp))
-                        .clickable { onDelete() },
-                    contentAlignment = Alignment.Center
-                ) {
-                    Text("🗑", fontSize = 22.sp)
-                }
-            }
 
-            if (BuildConfig.DEBUG) {
-                Box(modifier = Modifier.fillMaxWidth().background(Color(0xFF121212))) {
-                    TextButton(onClick = onFakeIssueReceipt, modifier = Modifier.fillMaxWidth()) {
-                        Text("🔬 הדמיית הפקת קבלה", style = MaterialTheme.typography.labelSmall,
-                            color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.5f))
+                if (BuildConfig.DEBUG) {
+                    Box(modifier = Modifier.fillMaxWidth().background(Color(0xFF121212))) {
+                        TextButton(onClick = onFakeIssueReceipt, modifier = Modifier.fillMaxWidth()) {
+                            Text("🔬 הדמיית הפקת קבלה", style = MaterialTheme.typography.labelSmall,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.5f))
+                        }
                     }
                 }
             }
@@ -2636,6 +2674,43 @@ fun SettingsTab(
             Text("הצג מדריך למשתמש")
         }
 
+        // Bubble overlay toggle
+        Card(modifier = Modifier.fillMaxWidth()) {
+            Row(
+                modifier = Modifier
+                    .padding(16.dp)
+                    .fillMaxWidth(),
+                horizontalArrangement = Arrangement.SpaceBetween,
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                val bubbleCtx = LocalContext.current
+                val bubblePrefs = remember {
+                    bubbleCtx.getSharedPreferences(BubbleService.PREFS_NAME, android.content.Context.MODE_PRIVATE)
+                }
+                var isBubbleEnabled by remember { mutableStateOf(bubblePrefs.getBoolean(BubbleService.KEY_BUBBLE_ENABLED, true)) }
+                Column(modifier = Modifier.weight(1f)) {
+                    Text(
+                        "בועת שיתוף",
+                        style = MaterialTheme.typography.titleMedium,
+                        fontWeight = FontWeight.Bold
+                    )
+                    Text(
+                        "הצג בועה בעת פתיחת ביט / פייבוקס",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                    )
+                }
+                Switch(
+                    checked = isBubbleEnabled,
+                    onCheckedChange = { enabled ->
+                        isBubbleEnabled = enabled
+                        bubblePrefs.edit().putBoolean(BubbleService.KEY_BUBBLE_ENABLED, enabled).apply()
+                        if (!enabled) BubbleService.hide(bubbleCtx)
+                    }
+                )
+            }
+        }
+
         // Bubble overlay permission button
         val context = LocalContext.current
         val hasOverlayPermission = remember { mutableStateOf(android.provider.Settings.canDrawOverlays(context)) }
@@ -2923,6 +2998,7 @@ private fun TestResultsSheet(
 // ─────────────────────────────────────────────────────────────────────────────
 // Developer feedback sharing
 // ─────────────────────────────────────────────────────────────────────────────
+
 
 private fun launchDeveloperFeedbackFromResult(context: android.content.Context, result: ParseTestResult) {
     val text = buildString {

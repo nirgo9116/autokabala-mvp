@@ -7,7 +7,6 @@
     <!-- Bubble overlay -->
     <uses-permission android:name="android.permission.SYSTEM_ALERT_WINDOW" />
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE" />
-    <uses-permission android:name="android.permission.FOREGROUND_SERVICE_MEDIA_PROJECTION" />
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE_SPECIAL_USE" />
     <uses-permission android:name="android.permission.PACKAGE_USAGE_STATS"
         tools:ignore="ProtectedPermissions" />
@@ -34,12 +33,6 @@
                 <action android:name="android.intent.action.MAIN" />
                 <category android:name="android.intent.category.LAUNCHER" />
             </intent-filter>
-            <intent-filter>
-                <action android:name="android.intent.action.SEND" />
-                <category android:name="android.intent.category.DEFAULT" />
-                <data android:mimeType="image/*" />
-                <data android:mimeType="*/*" />
-            </intent-filter>
         </activity>
 
         <!-- Trigger GMS ML Kit OCR model download on app install -->
@@ -58,23 +51,39 @@
                 android:resource="@xml/file_paths" />
         </provider>
 
-        <!-- Transparent activity for MediaProjection consent dialog -->
+<!-- Share handler — transparent activity that receives payment screenshots from Bit/Paybox -->
         <activity
-            android:name=".ScreenCaptureActivity"
-            android:exported="false"
-            android:excludeFromRecents="true"
-            android:taskAffinity=""
-            android:theme="@android:style/Theme.Translucent.NoTitleBar" />
+            android:name=".ShareHandlerActivity"
+            android:exported="true"
+            android:noHistory="true"
+            android:theme="@android:style/Theme.Translucent.NoTitleBar">
+            <intent-filter>
+                <action android:name="android.intent.action.SEND" />
+                <category android:name="android.intent.category.DEFAULT" />
+                <data android:mimeType="image/*" />
+            </intent-filter>
+            <!-- Direct Share: links this activity to the share-target in shortcuts.xml -->
+            <meta-data
+                android:name="android.app.shortcuts"
+                android:resource="@xml/shortcuts" />
+        </activity>
 
         <!-- Bubble overlay foreground service -->
         <service
             android:name=".BubbleService"
             android:exported="false"
-            android:foregroundServiceType="specialUse|mediaProjection">
+            android:foregroundServiceType="specialUse">
             <property
                 android:name="android.app.PROPERTY_SPECIAL_USE_FGS_SUBTYPE"
                 android:value="overlay_bubble_for_payment_receipt" />
         </service>
+
+        <!-- Gallery cleanup (trampoline for MediaStore.createDeleteRequest) -->
+        <activity
+            android:name=".GalleryCleanupActivity"
+            android:exported="false"
+            android:noHistory="true"
+            android:theme="@android:style/Theme.Translucent.NoTitleBar" />
 
         <!-- Notification Listener Service -->
         <service
