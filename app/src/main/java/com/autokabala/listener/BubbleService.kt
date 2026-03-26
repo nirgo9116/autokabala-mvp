@@ -43,7 +43,6 @@ import androidx.compose.ui.draw.alpha
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.draw.shadow
 import androidx.compose.ui.input.pointer.pointerInput
-import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.ComposeView
 import androidx.compose.ui.platform.LocalDensity
@@ -102,7 +101,7 @@ class BubbleService : Service() {
         const val CHANNEL_ID           = "bubble_channel"
         const val PREFS_NAME           = "autokabala_prefs"
         const val KEY_BUBBLE_ENABLED   = "bubble_enabled"
-        const val KEY_SHARED_URIS      = "shared_image_uris"  // Set<String> of gallery URIs to clean
+        const val KEY_SHARED_URIS  = "shared_image_uris"  // Set<String> of gallery URIs to clean
         private const val KEY_RECEIPT_COUNT = "receipt_count"
         private var instance: BubbleService? = null
 
@@ -546,9 +545,8 @@ class BubbleService : Service() {
                 }
                 if (outcome != null) {
                     pendingPaymentId = null  // receipt issued — keep DB record
-                    incrementReceiptCounter()
                     overlayState.value = OverlayState.Done(client.name)
-                    handler.postDelayed({ removeOverlay() }, 3000)
+                    handler.postDelayed({ removeOverlay(); maybeShowGalleryCleanup() }, 3000)
                 } else {
                     overlayState.value = OverlayState.Err("שגיאה בהפקת קבלה — בדוק חיבור לאינטרנט")
                 }
@@ -567,18 +565,19 @@ class BubbleService : Service() {
                 withContext(Dispatchers.IO) { repo.addFakeReceipt(state.payment) }
                 pendingPaymentId = null  // demo receipt — keep DB record
                 overlayState.value = OverlayState.Done(state.payment.senderName)
-                handler.postDelayed({ removeOverlay() }, 3000)
+                handler.postDelayed({ removeOverlay(); maybeShowGalleryCleanup() }, 3000)
             } catch (e: Exception) {
                 overlayState.value = OverlayState.Err("שגיאה: ${e.message}")
             }
         }
     }
 
-    private fun incrementReceiptCounter() {
+    private fun maybeShowGalleryCleanup() {
         val count = prefs.getInt(KEY_RECEIPT_COUNT, 0) + 1
-        if (count >= 8) {
+        val uris  = prefs.getStringSet(KEY_SHARED_URIS, emptySet()) ?: emptySet()
+        if (count >= 8 && uris.isNotEmpty()) {
             prefs.edit().putInt(KEY_RECEIPT_COUNT, 0).apply()
-            handler.post { showGalleryCleanupOverlay() }
+            showGalleryCleanupOverlay()
         } else {
             prefs.edit().putInt(KEY_RECEIPT_COUNT, count).apply()
         }
@@ -655,7 +654,14 @@ class BubbleService : Service() {
                         onDismiss       = ::removeOverlay,
                         onSelectPending = ::selectPendingPayment,
                         onDrag          = ::dragOverlay,
-                        onKeyboardShift = ::shiftOverlayForKeyboard
+                        onKeyboardShift = ::shiftOverlayForKeyboard,
+                        onCreateClient  = {
+                            startActivity(
+                                Intent(this@BubbleService, MainActivity::class.java)
+                                    .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+                            )
+                            removeOverlay()
+                        }
                     )
                 }
             }
@@ -732,6 +738,9 @@ private val Divider      = Color(0xFF3A3A3C)
 private val BitBlue      = Color(0xFF90CAF9)
 private val PayboxPurple = Color(0xFFCE93D8)
 private val ActionBlue   = Color(0xFF2563EB)
+// Actual brand colors (for overlay skin)
+private val BitBrand    = Color(0xFF2DB887)   // Bit green
+private val PayboxBrand = Color(0xFF00AEEF)   // Paybox blue
 
 @Composable
 private fun ReceiptOverlayCard(
@@ -741,10 +750,11 @@ private fun ReceiptOverlayCard(
     onDismiss: () -> Unit,
     onSelectPending: (PaymentEntity) -> Unit,
     onDrag: (Float, Float) -> Unit,
-    onKeyboardShift: (Boolean) -> Unit = {}
+    onKeyboardShift: (Boolean) -> Unit = {},
+    onCreateClient: () -> Unit = {}
 ) {
     if (state is OverlayState.Ready) {
-        ReadyContent(state, onIssue, onDemoReceipt, onDismiss, onDrag, onKeyboardShift)
+        ReadyContent(state, onIssue, onDemoReceipt, onDismiss, onDrag, onKeyboardShift, onCreateClient)
         return
     }
     if (state is OverlayState.PendingList) {
@@ -817,23 +827,28 @@ private fun ReadyContent(
     onDemoReceipt: () -> Unit,
     onDismiss: () -> Unit,
     onDrag: (Float, Float) -> Unit,
-    onKeyboardShift: (Boolean) -> Unit = {}
+    onKeyboardShift: (Boolean) -> Unit = {},
+    onCreateClient: () -> Unit = {}
 ) {
     var selectedClient by remember {
         mutableStateOf((state.matchResult as? MatchResult.SingleMatch)?.client)
     }
-    var showSearch by remember { mutableStateOf(state.matchResult is MatchResult.NoMatch) }
+    var showSearch by remember { mutableStateOf(false) }
     var searchQuery by remember { mutableStateOf("") }
     var anchorWidthPx by remember { mutableStateOf(0) }
 
 
 
+    val isBit = state.payment.source.startsWith("bit", ignoreCase = true)
+    val brand         = if (isBit) BitBrand    else PayboxBrand
+    val actionBg      = if (isBit) Color(0xFF0E1A1F) else Color(0xFFE4F4FC)
+    val dismissBg     = if (isBit) Color(0xFF1A2830) else Color(0xFFCCE8F5)
+    val dismissBorder = if (isBit) Color(0xFF2A3A45) else Color(0xFF88C8E0)
+    val dismissText   = if (isBit) Color.White        else Color(0xFF1A3A5C)
+    val ctaText       = if (isBit) Color(0xFF061510)  else Color.White
+
     val effectiveClient = selectedClient ?: (state.matchResult as? MatchResult.SingleMatch)?.client
     val btnEnabled = effectiveClient != null
-    val issueGrad = if (state.payment.source.startsWith("bit"))
-        Brush.horizontalGradient(listOf(Color(0xFF1A55C4), Color(0xFF90CAF9)))
-    else
-        Brush.horizontalGradient(listOf(Color(0xFF7B61FF), Color(0xFFCE93D8)))
 
     Column(modifier = Modifier.fillMaxWidth()) {
         // ── Card ──────────────────────────────────────────────────────────
@@ -848,7 +863,9 @@ private fun ReadyContent(
             onFakeIssueReceipt = onDemoReceipt,
             showHero = false,
             showActions = false,
+            headerColor = brand,
             onHeaderDrag = if (showSearch) null else onDrag,
+            onCreateClient = onCreateClient,
             onLkbdBoxWidth = { anchorWidthPx = it },
             clientDropdown = if (showSearch) {
                 {
@@ -866,11 +883,11 @@ private fun ReadyContent(
             } else null
         )
 
-        // ── Action buttons below the card ────────────────────────────────
+        // ── Action buttons ────────────────────────────────────────────────
         Row(
             modifier = Modifier
                 .fillMaxWidth()
-                .background(Color(0xFF121212))
+                .background(actionBg)
                 .padding(horizontal = 14.dp, vertical = 10.dp),
             horizontalArrangement = Arrangement.spacedBy(8.dp),
             verticalAlignment = Alignment.CenterVertically
@@ -880,12 +897,12 @@ private fun ReadyContent(
                 modifier = Modifier
                     .size(54.dp)
                     .clip(RoundedCornerShape(14.dp))
-                    .background(Color(0xFF1E1E1E))
-                    .border(1.dp, Color(0xFF333333), RoundedCornerShape(14.dp))
+                    .background(dismissBg)
+                    .border(1.dp, dismissBorder, RoundedCornerShape(14.dp))
                     .clickable { onDismiss() },
                 contentAlignment = Alignment.Center
             ) {
-                Text("✕", fontSize = 20.sp, color = Color.White)
+                Text("✕", fontSize = 20.sp, color = dismissText)
             }
             // הפק קבלה
             Box(
@@ -894,11 +911,11 @@ private fun ReadyContent(
                     .height(54.dp)
                     .alpha(if (btnEnabled) 1f else 0.45f)
                     .clip(RoundedCornerShape(14.dp))
-                    .background(issueGrad)
+                    .background(brand)
                     .clickable(enabled = btnEnabled) { effectiveClient?.let { onIssue(it) } },
                 contentAlignment = Alignment.Center
             ) {
-                Text("הפק קבלה", color = Color.Black, fontWeight = FontWeight.Bold, fontSize = 18.sp)
+                Text("הפק קבלה", color = ctaText, fontWeight = FontWeight.Bold, fontSize = 18.sp)
             }
             // קבלת דמה (DEBUG only)
             if (BuildConfig.DEBUG) {
@@ -906,8 +923,8 @@ private fun ReadyContent(
                     modifier = Modifier
                         .size(54.dp)
                         .clip(RoundedCornerShape(14.dp))
-                        .background(Color(0xFF1E1E1E))
-                        .border(1.dp, Color(0xFF333333), RoundedCornerShape(14.dp))
+                        .background(dismissBg)
+                        .border(1.dp, dismissBorder, RoundedCornerShape(14.dp))
                         .clickable { onDemoReceipt() },
                     contentAlignment = Alignment.Center
                 ) {

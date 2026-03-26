@@ -869,7 +869,9 @@ fun PaymentCard(
     showHero: Boolean = true,
     showActions: Boolean = true,
     onHeaderDrag: ((Float, Float) -> Unit)? = null,
-    onLkbdBoxWidth: ((Int) -> Unit)? = null
+    onLkbdBoxWidth: ((Int) -> Unit)? = null,
+    headerColor: Color? = null,
+    onCreateClient: (() -> Unit)? = null
 ) {
     val payment = state.payment
     val isDark = isSystemInDarkTheme()
@@ -1016,7 +1018,7 @@ fun PaymentCard(
                 Row(
                     modifier = Modifier
                         .fillMaxWidth()
-                        .background(hdrGradient)
+                        .then(if (headerColor != null) Modifier.background(headerColor) else Modifier.background(hdrGradient))
                         .then(if (onHeaderDrag != null) Modifier.pointerInput(Unit) {
                             detectDragGestures { change, dragAmount ->
                                 change.consume()
@@ -1110,6 +1112,34 @@ fun PaymentCard(
                                         Text("✓", color = Color(0xFF2E7D32), style = MaterialTheme.typography.bodyMedium)
                                         Text(effectiveClient.name, color = Color(0xFF2E7D32), style = MaterialTheme.typography.bodyLarge, fontWeight = FontWeight.Bold, modifier = Modifier.weight(1f))
                                         Text("▼", color = Color(0xFFAAAAAA), style = MaterialTheme.typography.bodyMedium)
+                                    }
+                                }
+                            } else if (onCreateClient != null) {
+                                // Overlay two-chip layout: search + create
+                                Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                                    Box(
+                                        modifier = Modifier
+                                            .weight(1f)
+                                            .clip(RoundedCornerShape(20.dp))
+                                            .background(Color.Black.copy(alpha = 0.05f))
+                                            .border(1.5.dp, Color(0xFFCCCCCC), RoundedCornerShape(20.dp))
+                                            .clickable { onOpenSheet() }
+                                            .padding(horizontal = 12.dp, vertical = 8.dp),
+                                        contentAlignment = Alignment.Center
+                                    ) {
+                                        Text("🔍 חפש לקוח", color = Color(0xFFAAAAAA), style = MaterialTheme.typography.bodyMedium)
+                                    }
+                                    Box(
+                                        modifier = Modifier
+                                            .weight(1f)
+                                            .clip(RoundedCornerShape(20.dp))
+                                            .background(Color(0xFF1565C0).copy(alpha = 0.10f))
+                                            .border(1.5.dp, Color(0xFF1565C0).copy(alpha = 0.35f), RoundedCornerShape(20.dp))
+                                            .clickable { onCreateClient() }
+                                            .padding(horizontal = 12.dp, vertical = 8.dp),
+                                        contentAlignment = Alignment.Center
+                                    ) {
+                                        Text("＋ צור לקוח חדש", color = Color(0xFF1565C0), style = MaterialTheme.typography.bodyMedium)
                                     }
                                 }
                             } else {
