@@ -67,6 +67,17 @@ import androidx.savedstate.SavedStateRegistry
 import androidx.savedstate.SavedStateRegistryController
 import androidx.savedstate.SavedStateRegistryOwner
 import androidx.savedstate.setViewTreeSavedStateRegistryOwner
+import androidx.compose.foundation.text.BasicTextField
+import androidx.compose.foundation.text.KeyboardActions
+import androidx.compose.foundation.text.KeyboardOptions
+import androidx.compose.ui.text.input.ImeAction
+import androidx.compose.ui.text.input.KeyboardType
+import androidx.compose.animation.AnimatedVisibility
+import androidx.compose.animation.core.FastOutLinearInEasing
+import androidx.compose.animation.core.FastOutSlowInEasing
+import androidx.compose.animation.core.tween
+import androidx.compose.animation.slideInVertically
+import androidx.compose.animation.slideOutVertically
 import kotlinx.coroutines.*
 
 // ─── Overlay state ────────────────────────────────────────────────────────────
@@ -126,6 +137,7 @@ class BubbleService : Service() {
     // ─── Overlay infrastructure ───────────────────────────────────────────────
     private val scope = CoroutineScope(Dispatchers.Main + SupervisorJob())
     private var overlayView: View? = null
+    private val overlayAnimVisible = mutableStateOf(false)
     private var tooltipView: View? = null
     private var galleryDialogView: View? = null
     private val overlayState = mutableStateOf<OverlayState>(OverlayState.Processing)
@@ -340,20 +352,6 @@ class BubbleService : Service() {
         overlayState.value = OverlayState.Ready(payment, match, state.clients)
     }
 
-    private fun dragOverlay(dx: Float, dy: Float) {
-        val lp = (overlayView?.layoutParams as? WindowManager.LayoutParams) ?: return
-        lp.x += dx.toInt()
-        lp.y += dy.toInt()
-        try { windowManager.updateViewLayout(overlayView, lp) } catch (_: Exception) {}
-    }
-
-    private fun shiftOverlayForKeyboard(up: Boolean) {
-        val vw = overlayView ?: return
-        val lp = (vw.layoutParams as? WindowManager.LayoutParams) ?: return
-        val dm = resources.displayMetrics
-        lp.y = if (up) (dm.heightPixels * 0.06f).toInt() else (dm.heightPixels * 0.40f).toInt()
-        try { windowManager.updateViewLayout(vw, lp) } catch (_: Exception) {}
-    }
 
     private fun showTooltipNearBubble(bParams: WindowManager.LayoutParams) {
         removeTooltip()
@@ -415,6 +413,7 @@ class BubbleService : Service() {
     }
 
     private suspend fun processScreenshot(bitmap: Bitmap) {
+        val startMs = System.currentTimeMillis()
         try {
             val mlKitResult = OcrUtils.runMlKitOcr(bitmap)
 
@@ -477,7 +476,7 @@ class BubbleService : Service() {
             )
             val rowId = withContext(Dispatchers.IO) { db.paymentDao().insertPayment(entity) }
             if (rowId == -1L) {
-                overlayState.value = OverlayState.Err("תשלום זה כבר קיים במערכת")
+                overlayState.value = OverlayState.Err("תשלום זה כבר שותף במערכת")
                 return
             }
 
@@ -490,6 +489,8 @@ class BubbleService : Service() {
 
             val clients = withContext(Dispatchers.IO) { db.clientDao().getAllClientsSnapshot() }
             val matchResult = matchClient(paymentData.senderName, clients)
+            val elapsed = System.currentTimeMillis() - startMs
+            if (elapsed < 900L) delay(900L - elapsed)
             overlayState.value = OverlayState.Ready(saved, matchResult, clients)
 
         } catch (e: Exception) {
@@ -503,10 +504,17 @@ class BubbleService : Service() {
     private fun matchClient(senderName: String, clients: List<ClientEntity>): MatchResult {
         val senderWords = senderName.trim().split(Regex("\\s+")).filter { it.isNotBlank() }
         val senderFirst = senderWords.firstOrNull() ?: return MatchResult.NoMatch
+        Log.d("matchClient", "senderName='$senderName' senderFirst='$senderFirst'(len=${senderFirst.length}) totalClients=${clients.size}")
 
         val firstNameMatches = clients.filter { client ->
             val clientWords = client.name.trim().split(Regex("\\s+")).filter { it.isNotBlank() }
-            clientWords.any { w -> wordsMatch(w, senderFirst) }
+            val hit = clientWords.any { w -> wordsMatch(w, senderFirst) }
+            if (hit) Log.d("matchClient", "  firstMatch: '${client.name}'")
+            hit
+        }.sortedByDescending { client ->
+            // Put first-name matches (e.g. "משה פרסטר") before surname matches (e.g. "טלי משה")
+            val firstClientWord = client.name.trim().split(Regex("\\s+")).firstOrNull { it.isNotBlank() } ?: ""
+            wordsMatch(firstClientWord, senderFirst)
         }
         val fullNameMatches = if (senderWords.size >= 2) {
             firstNameMatches.filter { client ->
@@ -534,17 +542,27 @@ class BubbleService : Service() {
 
     // ─── Receipt issuance ─────────────────────────────────────────────────────
 
-    private fun issueReceipt(client: ClientEntity) {
+    private fun issueReceipt(client: ClientEntity, amount: Double, timestamp: Long, description: String) {
         val state = overlayState.value as? OverlayState.Ready ?: return
+        val payment = state.payment.copy(amount = amount, timestamp = timestamp)
         overlayState.value = OverlayState.Issuing
         scope.launch {
             try {
                 val repo = (application as AutoKabalaApplication).receiptRepository
-                val outcome = withContext(Dispatchers.IO) {
-                    repo.issueReceiptForClient(state.payment, client)
+                val startMs = System.currentTimeMillis()
+                val success = withContext(Dispatchers.IO) {
+                    if (client.id.startsWith("new:")) {
+                        repo.createClientAndIssueReceipt(
+                            payment, client.name, client.phone, client.email, description
+                        ) != null
+                    } else {
+                        repo.issueReceiptForClient(payment, client, description) != null
+                    }
                 }
-                if (outcome != null) {
-                    pendingPaymentId = null  // receipt issued — keep DB record
+                val elapsed = System.currentTimeMillis() - startMs
+                if (elapsed < 1200L) delay(1200L - elapsed)
+                if (success) {
+                    pendingPaymentId = null
                     overlayState.value = OverlayState.Done(client.name)
                     handler.postDelayed({ removeOverlay(); maybeShowGalleryCleanup() }, 3000)
                 } else {
@@ -562,7 +580,10 @@ class BubbleService : Service() {
         scope.launch {
             try {
                 val repo = (application as AutoKabalaApplication).receiptRepository
+                val startMs = System.currentTimeMillis()
                 withContext(Dispatchers.IO) { repo.addFakeReceipt(state.payment) }
+                val elapsed = System.currentTimeMillis() - startMs
+                if (elapsed < 1200L) delay(1200L - elapsed)
                 pendingPaymentId = null  // demo receipt — keep DB record
                 overlayState.value = OverlayState.Done(state.payment.senderName)
                 handler.postDelayed({ removeOverlay(); maybeShowGalleryCleanup() }, 3000)
@@ -626,19 +647,16 @@ class BubbleService : Service() {
 
     private fun showOverlayWindow() {
         if (overlayView != null) return
+        overlayAnimVisible.value = false
 
-        val dm = resources.displayMetrics
-        val cardWidth = (dm.widthPixels * 0.95f).toInt()
         val params = WindowManager.LayoutParams(
-            cardWidth,
+            WindowManager.LayoutParams.MATCH_PARENT,
             WindowManager.LayoutParams.WRAP_CONTENT,
             WindowManager.LayoutParams.TYPE_APPLICATION_OVERLAY,
             WindowManager.LayoutParams.FLAG_NOT_TOUCH_MODAL,
             PixelFormat.TRANSLUCENT
         ).apply {
-            gravity = Gravity.TOP or Gravity.START
-            x = ((dm.widthPixels - cardWidth) / 2)
-            y = (dm.heightPixels * 0.40f).toInt()
+            gravity = Gravity.BOTTOM
             @Suppress("DEPRECATION")
             softInputMode = WindowManager.LayoutParams.SOFT_INPUT_ADJUST_RESIZE
         }
@@ -648,20 +666,12 @@ class BubbleService : Service() {
             setContent {
                 MaterialTheme {
                     ReceiptOverlayCard(
-                        state           = overlayState.value,
-                        onIssue         = ::issueReceipt,
-                        onDemoReceipt   = ::demoReceipt,
-                        onDismiss       = ::removeOverlay,
-                        onSelectPending = ::selectPendingPayment,
-                        onDrag          = ::dragOverlay,
-                        onKeyboardShift = ::shiftOverlayForKeyboard,
-                        onCreateClient  = {
-                            startActivity(
-                                Intent(this@BubbleService, MainActivity::class.java)
-                                    .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
-                            )
-                            removeOverlay()
-                        }
+                        state          = overlayState.value,
+                        animVisible    = overlayAnimVisible.value,
+                        onIssue        = ::issueReceipt,
+                        onDemoReceipt  = ::demoReceipt,
+                        onDismiss      = ::removeOverlay,
+                        onSelectPending = ::selectPendingPayment
                     )
                 }
             }
@@ -680,6 +690,7 @@ class BubbleService : Service() {
         rootFrame.addView(composeView)
         windowManager.addView(rootFrame, params)
         overlayView = rootFrame
+        handler.post { overlayAnimVisible.value = true }   // trigger slide-in
     }
 
     fun removeOverlay() {
@@ -695,8 +706,11 @@ class BubbleService : Service() {
             }
         }
         pendingPaymentId = null
-        overlayView?.let { try { windowManager.removeView(it) } catch (_: Exception) {} }
-        overlayView = null
+        overlayAnimVisible.value = false                   // trigger slide-out
+        handler.postDelayed({
+            overlayView?.let { try { windowManager.removeView(it) } catch (_: Exception) {} }
+            overlayView = null
+        }, 320)
     }
 
     // ─── Notification ─────────────────────────────────────────────────────────
@@ -742,44 +756,56 @@ private val ActionBlue   = Color(0xFF2563EB)
 private val BitBrand    = Color(0xFF2DB887)   // Bit green
 private val PayboxBrand = Color(0xFF00AEEF)   // Paybox blue
 
+private val SheetShape = RoundedCornerShape(topStart = 20.dp, topEnd = 20.dp)
+
 @Composable
 private fun ReceiptOverlayCard(
     state: OverlayState,
-    onIssue: (ClientEntity) -> Unit,
+    animVisible: Boolean,
+    onIssue: (ClientEntity, Double, Long, String) -> Unit,
     onDemoReceipt: () -> Unit,
     onDismiss: () -> Unit,
     onSelectPending: (PaymentEntity) -> Unit,
-    onDrag: (Float, Float) -> Unit,
-    onKeyboardShift: (Boolean) -> Unit = {},
     onCreateClient: () -> Unit = {}
 ) {
-    if (state is OverlayState.Ready) {
-        ReadyContent(state, onIssue, onDemoReceipt, onDismiss, onDrag, onKeyboardShift, onCreateClient)
-        return
-    }
-    if (state is OverlayState.PendingList) {
-        PendingListContent(state, onSelectPending, onDismiss, onDrag)
-        return
-    }
-
-    // Processing / Issuing / Done / Err — dark card with drag handle
-    Column(
-        modifier = Modifier
-            .fillMaxWidth()
-            .background(CardBg, RoundedCornerShape(20.dp))
-            .padding(horizontal = 20.dp, vertical = 16.dp),
-        horizontalAlignment = Alignment.CenterHorizontally
+    AnimatedVisibility(
+        visible = animVisible,
+        enter = slideInVertically(
+            animationSpec = tween(320, easing = FastOutSlowInEasing),
+            initialOffsetY = { it }
+        ),
+        exit = slideOutVertically(
+            animationSpec = tween(260, easing = FastOutLinearInEasing),
+            targetOffsetY = { it }
+        )
     ) {
-        DragHandle(onDrag)
-        Spacer(Modifier.height(12.dp))
+        if (state is OverlayState.Ready) {
+            ReadyContent(state, onIssue, onDemoReceipt, onDismiss, onCreateClient)
+            return@AnimatedVisibility
+        }
+        if (state is OverlayState.PendingList) {
+            PendingListContent(state, onSelectPending, onDismiss)
+            return@AnimatedVisibility
+        }
 
-        when (state) {
-            is OverlayState.Processing -> ProcessingContent()
-            is OverlayState.Issuing    -> IssuingContent()
-            is OverlayState.Done       -> DoneContent(state.clientName, onDismiss)
-            is OverlayState.Err        -> ErrorContent(state.message, onDismiss)
-            is OverlayState.Ready       -> {} // handled above
-            is OverlayState.PendingList -> {} // handled above
+        // Processing / Issuing / Done / Err
+        Column(
+            modifier = Modifier
+                .fillMaxWidth()
+                .background(CardBg, SheetShape)
+                .padding(horizontal = 20.dp, vertical = 16.dp),
+            horizontalAlignment = Alignment.CenterHorizontally
+        ) {
+            DragHandle(onDismiss)
+            Spacer(Modifier.height(12.dp))
+            when (state) {
+                is OverlayState.Processing  -> ProcessingContent()
+                is OverlayState.Issuing     -> IssuingContent()
+                is OverlayState.Done        -> DoneContent(state.clientName, onDismiss)
+                is OverlayState.Err         -> ErrorContent(state.message, onDismiss)
+                is OverlayState.Ready       -> {}
+                is OverlayState.PendingList -> {}
+            }
         }
     }
 }
@@ -788,7 +814,7 @@ private fun ReceiptOverlayCard(
 private fun ProcessingContent() {
     CircularProgressIndicator(color = BitBlue, modifier = Modifier.size(36.dp))
     Spacer(Modifier.height(12.dp))
-    Text("מנתח תמונה...", color = TextPrimary, fontSize = 16.sp)
+    Text("מכין קבלה...", color = TextPrimary, fontSize = 16.sp)
     Spacer(Modifier.height(16.dp))
 }
 
@@ -823,11 +849,9 @@ private fun ErrorContent(message: String, onDismiss: () -> Unit) {
 @Composable
 private fun ReadyContent(
     state: OverlayState.Ready,
-    onIssue: (ClientEntity) -> Unit,
+    onIssue: (ClientEntity, Double, Long, String) -> Unit,
     onDemoReceipt: () -> Unit,
     onDismiss: () -> Unit,
-    onDrag: (Float, Float) -> Unit,
-    onKeyboardShift: (Boolean) -> Unit = {},
     onCreateClient: () -> Unit = {}
 ) {
     var selectedClient by remember {
@@ -836,6 +860,11 @@ private fun ReadyContent(
     var showSearch by remember { mutableStateOf(false) }
     var searchQuery by remember { mutableStateOf("") }
     var anchorWidthPx by remember { mutableStateOf(0) }
+    var showCreateForm by remember { mutableStateOf(false) }
+    var editedAmount by remember { mutableStateOf(state.payment.amount) }
+    var editedTimestamp by remember { mutableStateOf(state.payment.timestamp) }
+    var editedDescription by remember { mutableStateOf("") }
+    var showAmountDialog by remember { mutableStateOf(false) }
 
 
 
@@ -850,40 +879,264 @@ private fun ReadyContent(
     val effectiveClient = selectedClient ?: (state.matchResult as? MatchResult.SingleMatch)?.client
     val btnEnabled = effectiveClient != null
 
-    Column(modifier = Modifier.fillMaxWidth()) {
-        // ── Card ──────────────────────────────────────────────────────────
-        PaymentCard(
-            state = PaymentProcessingState(payment = state.payment, matchResult = state.matchResult),
-            selectedClient = selectedClient,
-            calendarEvents = emptyList(),
-            onIssueReceipt = { client, _, _, _ -> onIssue(client) },
-            onDelete = onDismiss,
-            onOpenSheet = { searchQuery = selectedClient?.name ?: ""; showSearch = true },
-            onSelectClient = { selectedClient = it; showSearch = false },
-            onFakeIssueReceipt = onDemoReceipt,
-            showHero = false,
-            showActions = false,
-            headerColor = brand,
-            onHeaderDrag = if (showSearch) null else onDrag,
-            onCreateClient = onCreateClient,
-            onLkbdBoxWidth = { anchorWidthPx = it },
-            clientDropdown = if (showSearch) {
-                {
-                    OverlayClientSearch(
-                        clients = state.allClients,
-                        query = searchQuery,
-                        initialClientName = selectedClient?.name ?: "",
-                        anchorWidthPx = anchorWidthPx,
-                        onQueryChange = { searchQuery = it },
-                        onSelect = { selectedClient = it; showSearch = false; searchQuery = "" },
-                        onDismiss = { showSearch = false },
-                        onImeVisible = onKeyboardShift
-                    )
-                }
-            } else null
+    if (showCreateForm) {
+        NewClientFormContent(
+            brand = brand,
+            actionBg = actionBg,
+            dismissBg = dismissBg,
+            dismissBorder = dismissBorder,
+            dismissText = dismissText,
+            onBack = { showCreateForm = false },
+            onConfirm = { name, phone ->
+                selectedClient = ClientEntity(
+                    id = "new:${System.currentTimeMillis()}",
+                    name = name,
+                    phone = phone.ifBlank { null },
+                    email = null
+                )
+                showCreateForm = false
+            }
         )
+    } else {
+        Column(modifier = Modifier.fillMaxWidth().clip(SheetShape)) {
+            PaymentCard(
+                state = PaymentProcessingState(payment = state.payment, matchResult = state.matchResult),
+                selectedClient = selectedClient,
+                calendarEvents = emptyList(),
+                onIssueReceipt = { client, amt, ts, desc -> onIssue(client, amt, ts, desc) },
+                onCurrentValues = { amt, ts, desc -> editedAmount = amt; editedTimestamp = ts; editedDescription = desc },
+                onDelete = onDismiss,
+                onOpenSheet = {
+                    if (showSearch) {
+                        val exact = state.allClients.firstOrNull { it.name.equals(searchQuery.trim(), ignoreCase = true) }
+                        if (exact != null) selectedClient = exact
+                        showSearch = false
+                    } else {
+                        searchQuery = selectedClient?.name ?: ""
+                        showSearch = true
+                    }
+                },
+                onSelectClient = { selectedClient = it; showSearch = false },
+                onFakeIssueReceipt = onDemoReceipt,
+                showHero = false,
+                showActions = false,
+                headerColor = brand,
+                onHeaderDrag = null,
+                onCreateClient = { showCreateForm = true },
+                onDismiss = onDismiss,
+                onLkbdBoxWidth = { anchorWidthPx = it },
+                searchQuery = searchQuery,
+                onSearchQueryChange = if (showSearch) { { searchQuery = it } } else null,
+                clientDropdown = if (showSearch) {
+                    {
+                        OverlayClientSearch(
+                            clients = state.allClients,
+                            query = searchQuery,
+                            initialClientName = selectedClient?.name ?: "",
+                            anchorWidthPx = anchorWidthPx,
+                            onSelect = { selectedClient = it; showSearch = false; searchQuery = "" },
+                            onDismiss = {
+                                val exact = state.allClients.firstOrNull {
+                                    it.name.equals(searchQuery.trim(), ignoreCase = true)
+                                }
+                                if (exact != null) selectedClient = exact
+                                showSearch = false
+                            },
+                            onImeVisible = {}
+                        )
+                    }
+                } else null
+            )
 
-        // ── Action buttons ────────────────────────────────────────────────
+            // ── Action buttons ────────────────────────────────────────────────
+            if (showAmountDialog) {
+                // ── Inline amount-change confirmation ─────────────────────────
+                Column(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .background(actionBg)
+                        .padding(horizontal = 14.dp, vertical = 10.dp),
+                    verticalArrangement = Arrangement.spacedBy(8.dp)
+                ) {
+                    val origStr = "₪${"%.2f".format(state.payment.amount)}"
+                    val newStr  = "₪${"%.2f".format(editedAmount)}"
+                    Text(
+                        "הסכום שונה מ-$origStr ל-$newStr. האם להפיק?",
+                        color = dismissText,
+                        fontSize = 13.sp,
+                        textAlign = TextAlign.Center,
+                        modifier = Modifier.fillMaxWidth()
+                    )
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.spacedBy(8.dp)
+                    ) {
+                        Box(
+                            modifier = Modifier
+                                .weight(1f)
+                                .height(48.dp)
+                                .clip(RoundedCornerShape(14.dp))
+                                .background(dismissBg)
+                                .border(1.dp, dismissBorder, RoundedCornerShape(14.dp))
+                                .clickable { showAmountDialog = false },
+                            contentAlignment = Alignment.Center
+                        ) { Text("ביטול", color = dismissText, fontWeight = FontWeight.Medium) }
+                        Box(
+                            modifier = Modifier
+                                .weight(1f)
+                                .height(48.dp)
+                                .clip(RoundedCornerShape(14.dp))
+                                .background(brand)
+                                .clickable {
+                                    showAmountDialog = false
+                                    effectiveClient?.let { onIssue(it, editedAmount, editedTimestamp, editedDescription) }
+                                },
+                            contentAlignment = Alignment.Center
+                        ) { Text("הפק", color = ctaText, fontWeight = FontWeight.Bold) }
+                    }
+                }
+            } else {
+                Row(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .background(actionBg)
+                        .padding(horizontal = 14.dp, vertical = 10.dp),
+                    horizontalArrangement = Arrangement.spacedBy(8.dp),
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    // ✕ dismiss
+                    Box(
+                        modifier = Modifier
+                            .size(54.dp)
+                            .clip(RoundedCornerShape(14.dp))
+                            .background(dismissBg)
+                            .border(1.dp, dismissBorder, RoundedCornerShape(14.dp))
+                            .clickable { onDismiss() },
+                        contentAlignment = Alignment.Center
+                    ) {
+                        Text("✕", fontSize = 20.sp, color = dismissText)
+                    }
+                    // הפק קבלה
+                    Box(
+                        modifier = Modifier
+                            .weight(1f)
+                            .height(54.dp)
+                            .alpha(if (btnEnabled) 1f else 0.45f)
+                            .clip(RoundedCornerShape(14.dp))
+                            .background(brand)
+                            .clickable(enabled = btnEnabled) {
+                                effectiveClient?.let {
+                                    if (editedAmount != state.payment.amount && state.payment.amount != 0.0)
+                                        showAmountDialog = true
+                                    else
+                                        onIssue(it, editedAmount, editedTimestamp, editedDescription)
+                                }
+                            },
+                        contentAlignment = Alignment.Center
+                    ) {
+                        Text("הפק קבלה", color = ctaText, fontWeight = FontWeight.Bold, fontSize = 18.sp)
+                    }
+                    // קבלת דמה (DEBUG only)
+                    if (BuildConfig.DEBUG) {
+                        Box(
+                            modifier = Modifier
+                                .size(54.dp)
+                                .clip(RoundedCornerShape(14.dp))
+                                .background(dismissBg)
+                                .border(1.dp, dismissBorder, RoundedCornerShape(14.dp))
+                                .clickable { onDemoReceipt() },
+                            contentAlignment = Alignment.Center
+                        ) {
+                            Text("🔬", fontSize = 20.sp)
+                        }
+                    }
+                }
+            }
+        }
+    }
+}
+
+@Composable
+private fun NewClientFormContent(
+    brand: Color,
+    actionBg: Color,
+    dismissBg: Color,
+    dismissBorder: Color,
+    dismissText: Color,
+    onBack: () -> Unit,
+    onConfirm: (name: String, phone: String) -> Unit
+) {
+    var name by remember { mutableStateOf("") }
+    var phone by remember { mutableStateOf("") }
+    val ctaEnabled = name.isNotBlank()
+
+    Column(modifier = Modifier.fillMaxWidth().clip(SheetShape)) {
+        // ── Header (brand color, same as card) ────────────────────────────
+        Column(
+            modifier = Modifier.fillMaxWidth().background(brand)
+        ) {
+            DragHandle(onBack)
+            Row(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(horizontal = 16.dp, vertical = 8.dp),
+                horizontalArrangement = Arrangement.SpaceBetween,
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                Text("לקוח חדש", color = Color.White, style = MaterialTheme.typography.bodyLarge, fontWeight = FontWeight.Bold)
+                Text("קבלה", color = Color.White.copy(alpha = 0.75f), style = MaterialTheme.typography.bodyMedium)
+            }
+        }
+        // ── Fields ────────────────────────────────────────────────────────
+        Column(
+            modifier = Modifier
+                .fillMaxWidth()
+                .background(Color(0xFFF4F1EB))
+                .padding(horizontal = 16.dp, vertical = 16.dp),
+            verticalArrangement = Arrangement.spacedBy(12.dp)
+        ) {
+            CompositionLocalProvider(
+                LocalTextSelectionColors provides TextSelectionColors(
+                    handleColor = Color.Transparent,
+                    backgroundColor = brand.copy(alpha = 0.3f)
+                )
+            ) {
+                OutlinedTextField(
+                    value = name,
+                    onValueChange = { name = it },
+                    label = { Text("שם לקוח") },
+                    singleLine = true,
+                    modifier = Modifier.fillMaxWidth(),
+                    keyboardOptions = KeyboardOptions(imeAction = ImeAction.Next),
+                    colors = OutlinedTextFieldDefaults.colors(
+                        focusedBorderColor = brand,
+                        unfocusedBorderColor = Color(0xFFCCCCCC),
+                        focusedTextColor = Color(0xFF222222),
+                        unfocusedTextColor = Color(0xFF222222),
+                        focusedLabelColor = brand,
+                        cursorColor = brand
+                    )
+                )
+                OutlinedTextField(
+                    value = phone,
+                    onValueChange = { phone = it },
+                    label = { Text("טלפון (אופציונלי)") },
+                    singleLine = true,
+                    modifier = Modifier.fillMaxWidth(),
+                    keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Phone, imeAction = ImeAction.Done),
+                    keyboardActions = KeyboardActions(onDone = { if (ctaEnabled) onConfirm(name.trim(), phone.trim()) }),
+                    colors = OutlinedTextFieldDefaults.colors(
+                        focusedBorderColor = brand,
+                        unfocusedBorderColor = Color(0xFFCCCCCC),
+                        focusedTextColor = Color(0xFF222222),
+                        unfocusedTextColor = Color(0xFF222222),
+                        focusedLabelColor = brand,
+                        cursorColor = brand
+                    )
+                )
+            }
+        }
+        // ── Action row ────────────────────────────────────────────────────
         Row(
             modifier = Modifier
                 .fillMaxWidth()
@@ -892,68 +1145,52 @@ private fun ReadyContent(
             horizontalArrangement = Arrangement.spacedBy(8.dp),
             verticalAlignment = Alignment.CenterVertically
         ) {
-            // ✕ dismiss
             Box(
                 modifier = Modifier
                     .size(54.dp)
                     .clip(RoundedCornerShape(14.dp))
                     .background(dismissBg)
                     .border(1.dp, dismissBorder, RoundedCornerShape(14.dp))
-                    .clickable { onDismiss() },
+                    .clickable { onBack() },
                 contentAlignment = Alignment.Center
             ) {
-                Text("✕", fontSize = 20.sp, color = dismissText)
+                Text("←", fontSize = 22.sp, color = dismissText)
             }
-            // הפק קבלה
             Box(
                 modifier = Modifier
                     .weight(1f)
                     .height(54.dp)
-                    .alpha(if (btnEnabled) 1f else 0.45f)
+                    .alpha(if (ctaEnabled) 1f else 0.45f)
                     .clip(RoundedCornerShape(14.dp))
                     .background(brand)
-                    .clickable(enabled = btnEnabled) { effectiveClient?.let { onIssue(it) } },
+                    .clickable(enabled = ctaEnabled) { onConfirm(name.trim(), phone.trim()) },
                 contentAlignment = Alignment.Center
             ) {
-                Text("הפק קבלה", color = ctaText, fontWeight = FontWeight.Bold, fontSize = 18.sp)
-            }
-            // קבלת דמה (DEBUG only)
-            if (BuildConfig.DEBUG) {
-                Box(
-                    modifier = Modifier
-                        .size(54.dp)
-                        .clip(RoundedCornerShape(14.dp))
-                        .background(dismissBg)
-                        .border(1.dp, dismissBorder, RoundedCornerShape(14.dp))
-                        .clickable { onDemoReceipt() },
-                    contentAlignment = Alignment.Center
-                ) {
-                    Text("🔬", fontSize = 20.sp)
-                }
+                Text("אישור", color = Color.White, fontWeight = FontWeight.Bold, fontSize = 18.sp)
             }
         }
     }
 }
 
 @Composable
-private fun DragHandle(onDrag: (Float, Float) -> Unit) {
+private fun DragHandle(onDismiss: () -> Unit) {
     Box(
         modifier = Modifier
             .fillMaxWidth()
-            .height(20.dp)
-            .pointerInput(Unit) {
-                detectDragGestures { change, dragAmount ->
+            .height(28.dp)
+            .pointerInput(onDismiss) {
+                var dragTotal = 0f
+                detectDragGestures(
+                    onDragEnd    = { if (dragTotal > 56.dp.toPx()) onDismiss(); dragTotal = 0f },
+                    onDragCancel = { dragTotal = 0f }
+                ) { change, dragAmount ->
                     change.consume()
-                    onDrag(dragAmount.x, dragAmount.y)
+                    if (dragAmount.y > 0) dragTotal += dragAmount.y
                 }
             },
         contentAlignment = Alignment.Center
     ) {
-        Box(
-            Modifier
-                .size(36.dp, 4.dp)
-                .background(Color.White.copy(alpha = 0.35f), RoundedCornerShape(2.dp))
-        )
+        Box(Modifier.size(40.dp, 4.dp).background(Color.White.copy(alpha = 0.45f), RoundedCornerShape(2.dp)))
     }
 }
 
@@ -961,15 +1198,14 @@ private fun DragHandle(onDrag: (Float, Float) -> Unit) {
 private fun PendingListContent(
     state: OverlayState.PendingList,
     onSelect: (PaymentEntity) -> Unit,
-    onDismiss: () -> Unit,
-    onDrag: (Float, Float) -> Unit
+    onDismiss: () -> Unit
 ) {
     Column(
         modifier = Modifier
             .fillMaxWidth()
-            .background(CardBg, RoundedCornerShape(20.dp))
+            .background(CardBg, SheetShape)
     ) {
-        DragHandle(onDrag)
+        DragHandle(onDismiss)
         // Header
         Row(
             modifier = Modifier
@@ -1071,7 +1307,6 @@ private fun OverlayClientSearch(
     query: String,
     initialClientName: String = "",
     anchorWidthPx: Int = 0,
-    onQueryChange: (String) -> Unit,
     onSelect: (ClientEntity) -> Unit,
     onDismiss: () -> Unit,
     onImeVisible: (Boolean) -> Unit = {}
@@ -1079,7 +1314,7 @@ private fun OverlayClientSearch(
     val sorted = remember(clients) { clients.sortedBy { it.name } }
     val displayed = remember(query, initialClientName, sorted) {
         if (query.isBlank() || query == initialClientName) sorted
-        else sorted.filter { it.name.contains(query, ignoreCase = true) }
+        else sorted.filter { it.name.startsWith(query.trim(), ignoreCase = true) }
     }
     val initialIndex = remember(initialClientName, sorted) {
         sorted.indexOfFirst { it.name.equals(initialClientName, ignoreCase = true) }.coerceAtLeast(0)
@@ -1105,7 +1340,7 @@ private fun OverlayClientSearch(
     Popup(
         popupPositionProvider = positionProvider,
         onDismissRequest = onDismiss,
-        properties = PopupProperties(focusable = true, dismissOnClickOutside = false, clippingEnabled = false)
+        properties = PopupProperties(focusable = false, dismissOnClickOutside = false, clippingEnabled = false)
     ) {
         val imeBottom = WindowInsets.ime.getBottom(density)
         LaunchedEffect(imeBottom > 0) { onImeVisible(imeBottom > 0) }
@@ -1116,30 +1351,9 @@ private fun OverlayClientSearch(
                 .shadow(6.dp, RoundedCornerShape(12.dp))
                 .background(Color(0xFFF4F1EB), RoundedCornerShape(12.dp))
         ) {
-            CompositionLocalProvider(
-                LocalTextSelectionColors provides TextSelectionColors(
-                    handleColor = Color.Transparent,
-                    backgroundColor = Color(0xFF1565C0).copy(alpha = 0.4f)
-                )
-            ) {
-                OutlinedTextField(
-                    value = query,
-                    onValueChange = onQueryChange,
-                    placeholder = { Text("חפש לקוח...", color = Color(0xFF999999)) },
-                    singleLine = true,
-                    modifier = Modifier.fillMaxWidth().padding(horizontal = 8.dp, vertical = 4.dp),
-                    colors = OutlinedTextFieldDefaults.colors(
-                        focusedBorderColor   = Color(0xFF1565C0),
-                        unfocusedBorderColor = Color(0xFFCCCCCC),
-                        focusedTextColor     = Color(0xFF222222),
-                        unfocusedTextColor   = Color(0xFF222222),
-                        cursorColor          = Color(0xFF1565C0)
-                    )
-                )
-            }
             LazyColumn(
                 state = listState,
-                modifier = Modifier.fillMaxWidth().heightIn(max = 160.dp)
+                modifier = Modifier.fillMaxWidth().heightIn(max = 200.dp)
             ) {
                 items(displayed) { client ->
                     Text(

@@ -39,6 +39,7 @@ data class CreateDocumentWithClientIdRequest(
     @SerialName("doctype") val docType: String,
     @SerialName("client_id") val clientId: Int,
     @SerialName("currency_code") val currencyCode: String? = "ILS",
+    @SerialName("doc_date") val docDate: String? = null,
     @SerialName("items") val items: List<DocumentItem>,
     @SerialName("cash") val cash: CashPayment
 )

@@ -54,7 +54,8 @@ class ReceiptRepository(private val paymentDao: PaymentDao, private val clientDa
             clientName   = client.name,
             docNum       = doc.docNum.ifBlank { null },
             docUrl       = doc.docUrl.ifBlank { null },
-            issuedAmount = payment.amount
+            issuedAmount = payment.amount,
+            timestamp    = payment.timestamp
         )
         val emailSent = if (client.autoSend && doc.docNum.isNotBlank()) {
             ReceiptApiClient.sendDocumentByEmail(doc.docNum)
@@ -119,7 +120,8 @@ class ReceiptRepository(private val paymentDao: PaymentDao, private val clientDa
             clientName   = payment.senderName,
             docNum       = fakeDocNum,
             docUrl       = null,
-            issuedAmount = payment.amount
+            issuedAmount = payment.amount,
+            timestamp    = payment.timestamp
         )
         Log.d("Repository", "addFakeReceipt: payment.id=${payment.id} docNum=$fakeDocNum")
         return IssuedReceiptInfo(docUrl = null, clientPhone = null, docNum = fakeDocNum, clientName = payment.senderName, amount = payment.amount, timestamp = payment.timestamp)

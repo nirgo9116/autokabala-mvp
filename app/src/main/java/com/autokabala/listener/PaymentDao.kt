@@ -42,8 +42,8 @@ interface PaymentDao {
     @Query("UPDATE pending_payments SET status = :newStatus WHERE id = :paymentId")
     suspend fun updatePaymentStatus(paymentId: Int, newStatus: String)
 
-    @Query("UPDATE pending_payments SET clientId=:clientId, clientName=:clientName, docNum=:docNum, docUrl=:docUrl, issuedAmount=:issuedAmount WHERE id=:id")
-    suspend fun updatePaymentReceipt(id: Int, clientId: String, clientName: String, docNum: String?, docUrl: String?, issuedAmount: Double?)
+    @Query("UPDATE pending_payments SET clientId=:clientId, clientName=:clientName, docNum=:docNum, docUrl=:docUrl, issuedAmount=:issuedAmount, timestamp=:timestamp WHERE id=:id")
+    suspend fun updatePaymentReceipt(id: Int, clientId: String, clientName: String, docNum: String?, docUrl: String?, issuedAmount: Double?, timestamp: Long)
 
     @Query("SELECT * FROM pending_payments WHERE status != 'ignored' AND timestamp >= :since ORDER BY timestamp DESC")
     fun getRecentPayments(since: Long): Flow<List<PaymentEntity>>

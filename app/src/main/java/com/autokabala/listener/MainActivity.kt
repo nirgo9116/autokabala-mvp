@@ -74,6 +74,7 @@ import androidx.compose.foundation.layout.FlowRow
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.ui.text.font.FontStyle
 import androidx.compose.ui.unit.sp
+import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.Card
@@ -112,6 +113,8 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.platform.LocalLayoutDirection
 import androidx.compose.ui.unit.LayoutDirection
+import androidx.compose.ui.focus.FocusRequester
+import androidx.compose.ui.focus.focusRequester
 import androidx.compose.ui.focus.onFocusChanged
 import kotlinx.coroutines.delay
 import androidx.compose.ui.Alignment
@@ -126,6 +129,7 @@ import androidx.compose.ui.graphics.asImageBitmap
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.layout.onSizeChanged
 import androidx.compose.runtime.produceState
+import androidx.compose.runtime.SideEffect
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.platform.LocalLifecycleOwner
@@ -871,10 +875,18 @@ fun PaymentCard(
     onHeaderDrag: ((Float, Float) -> Unit)? = null,
     onLkbdBoxWidth: ((Int) -> Unit)? = null,
     headerColor: Color? = null,
-    onCreateClient: (() -> Unit)? = null
+    onCreateClient: (() -> Unit)? = null,
+    onDismiss: (() -> Unit)? = null,
+    onCurrentValues: ((amount: Double, timestamp: Long, description: String) -> Unit)? = null,
+    /** When non-null, the chip becomes an editable field synced with this value. */
+    searchQuery: String = "",
+    onSearchQueryChange: ((String) -> Unit)? = null
 ) {
     val payment = state.payment
     val isDark = isSystemInDarkTheme()
+    var showAltChips by remember { mutableStateOf(false) }
+    var showAmountDialog by remember { mutableStateOf(false) }
+    var pendingIssueArgs by remember { mutableStateOf<Triple<ClientEntity, Double, Long>?>(null) }
 
     val initialAmountStr = remember(payment.amount) {
         if (payment.amount % 1.0 == 0.0) payment.amount.toInt().toString()
@@ -903,6 +915,27 @@ fun PaymentCard(
         Brush.verticalGradient(listOf(Color(0xFFEDE7FF), Color(0xFFF5F0FF)))
     val onHeroColor    = if (isDark) Color.White else Color(0xFF1A1A1A)
     val onHeroSubColor = onHeroColor.copy(alpha = 0.6f)
+
+    if (showAmountDialog) {
+        val args = pendingIssueArgs
+        val origStr = "₪${"%.2f".format(payment.amount)}"
+        val newStr  = "₪${"%.2f".format(args?.second ?: 0.0)}"
+        AlertDialog(
+            onDismissRequest = { showAmountDialog = false; pendingIssueArgs = null },
+            title = { Text("שינוי סכום") },
+            text  = { Text("הסכום המקורי מהשיתוף הוא $origStr.\nהאם להפיק קבלה על $newStr?") },
+            confirmButton = {
+                TextButton(onClick = {
+                    showAmountDialog = false
+                    args?.let { (c, amt, ts) -> onIssueReceipt(c, amt, ts, editedDescription) }
+                    pendingIssueArgs = null
+                }) { Text("הפק") }
+            },
+            dismissButton = {
+                TextButton(onClick = { showAmountDialog = false; pendingIssueArgs = null }) { Text("ביטול") }
+            }
+        )
+    }
 
     Card(
         modifier = Modifier.fillMaxWidth(),
@@ -1012,37 +1045,64 @@ fun PaymentCard(
             val parsedAmt = editedAmountStr.replace(",", "").toDoubleOrNull() ?: payment.amount
             val parsedTs  = runCatching { dateFmt.parse(editedDateStr)?.time }.getOrNull()
             val totalStr  = "₪${"%.2f".format(parsedAmt)}"
+            SideEffect { onCurrentValues?.invoke(parsedAmt, parsedTs ?: payment.timestamp, editedDescription) }
 
             Column(modifier = Modifier.background(paperBg)) {
                 // ── Header stripe ─────────────────────────────────────────────
-                Row(
+                Column(
                     modifier = Modifier
                         .fillMaxWidth()
                         .then(if (headerColor != null) Modifier.background(headerColor) else Modifier.background(hdrGradient))
-                        .then(if (onHeaderDrag != null) Modifier.pointerInput(Unit) {
-                            detectDragGestures { change, dragAmount ->
-                                change.consume()
-                                onHeaderDrag(dragAmount.x, dragAmount.y)
-                            }
-                        } else Modifier)
-                        .padding(horizontal = 16.dp, vertical = 10.dp),
-                    horizontalArrangement = Arrangement.SpaceBetween,
-                    verticalAlignment = Alignment.CenterVertically
                 ) {
-                    Text("העסק שלי", color = Color.White, style = MaterialTheme.typography.bodyLarge, fontWeight = FontWeight.Bold)
-                    Text("קבלה", color = Color.White.copy(alpha = 0.75f), style = MaterialTheme.typography.bodyMedium)
+                    // Drag-to-dismiss handle (overlay/bottom-sheet only)
+                    if (onDismiss != null) {
+                        Box(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .height(24.dp)
+                                .pointerInput(onDismiss) {
+                                    var dragTotal = 0f
+                                    detectDragGestures(
+                                        onDragEnd    = { if (dragTotal > 56.dp.toPx()) onDismiss(); dragTotal = 0f },
+                                        onDragCancel = { dragTotal = 0f }
+                                    ) { change, dragAmount ->
+                                        change.consume()
+                                        if (dragAmount.y > 0) dragTotal += dragAmount.y
+                                    }
+                                },
+                            contentAlignment = Alignment.Center
+                        ) {
+                            Box(Modifier.size(40.dp, 4.dp).background(Color.White.copy(alpha = 0.45f), RoundedCornerShape(2.dp)))
+                        }
+                    }
+                    Row(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .then(if (onHeaderDrag != null) Modifier.pointerInput(Unit) {
+                                detectDragGestures { change, dragAmount ->
+                                    change.consume()
+                                    onHeaderDrag(dragAmount.x, dragAmount.y)
+                                }
+                            } else Modifier)
+                            .padding(horizontal = 16.dp, vertical = if (onDismiss != null) 8.dp else 10.dp),
+                        horizontalArrangement = Arrangement.SpaceBetween,
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Text("העסק שלי", color = Color.White, style = MaterialTheme.typography.bodyLarge, fontWeight = FontWeight.Bold)
+                        Text("קבלה", color = Color.White.copy(alpha = 0.75f), style = MaterialTheme.typography.bodyMedium)
+                    }
                 }
 
                 // ── Client row ("לכבוד") ──────────────────────────────────────
                 val mr = state.matchResult
                 val showBubbles = selectedClient == null
                     && mr is MatchResult.MultipleMatches
-                    && mr.clients.size in 2..3
                     && clientDropdown == null  // suppress chips while popup is open
+                    && !showAltChips
                 val bubbleC = if (isBit) Color(0xFF1565C0) else Color(0xFF6A1B9A)
 
                 if (showBubbles) {
-                    val bubbleClients = (mr as MatchResult.MultipleMatches).clients
+                    val bubbleClients = (mr as MatchResult.MultipleMatches).clients.take(3)
                     Column(
                         modifier = Modifier
                             .fillMaxWidth()
@@ -1065,6 +1125,16 @@ fun PaymentCard(
                                 ) {
                                     Text(client.name, color = bubbleC, style = MaterialTheme.typography.bodyMedium, fontWeight = FontWeight.SemiBold)
                                 }
+                            }
+                            // "אחר" chip — switches to search/create layout
+                            Box(
+                                modifier = Modifier
+                                    .clip(RoundedCornerShape(20.dp))
+                                    .border(1.dp, bubbleC.copy(alpha = 0.25f), RoundedCornerShape(20.dp))
+                                    .clickable { showAltChips = true }
+                                    .padding(horizontal = 10.dp, vertical = 5.dp)
+                            ) {
+                                Text("אחר", color = bubbleC.copy(alpha = 0.5f), style = MaterialTheme.typography.bodyMedium)
                             }
                         }
                     }
@@ -1107,7 +1177,24 @@ fun PaymentCard(
                                 ) {
                                     if (searchOpen) {
                                         Text("✏", color = Color(0xFF1565C0), style = MaterialTheme.typography.bodyMedium)
-                                        Text("חפש לקוח...", color = Color(0xFF999999), style = MaterialTheme.typography.bodyLarge, fontStyle = FontStyle.Italic, modifier = Modifier.weight(1f))
+                                        if (onSearchQueryChange != null) {
+                                            val focusRequester = remember { FocusRequester() }
+                                            LaunchedEffect(Unit) { focusRequester.requestFocus() }
+                                            BasicTextField(
+                                                value = searchQuery,
+                                                onValueChange = onSearchQueryChange,
+                                                singleLine = true,
+                                                textStyle = MaterialTheme.typography.bodyLarge.copy(color = Color(0xFF222222)),
+                                                modifier = Modifier.weight(1f).focusRequester(focusRequester),
+                                                decorationBox = { inner ->
+                                                    if (searchQuery.isEmpty())
+                                                        Text("חפש לקוח...", color = Color(0xFF999999), style = MaterialTheme.typography.bodyLarge, fontStyle = FontStyle.Italic)
+                                                    inner()
+                                                }
+                                            )
+                                        } else {
+                                            Text("חפש לקוח...", color = Color(0xFF999999), style = MaterialTheme.typography.bodyLarge, fontStyle = FontStyle.Italic, modifier = Modifier.weight(1f))
+                                        }
                                     } else {
                                         Text("✓", color = Color(0xFF2E7D32), style = MaterialTheme.typography.bodyMedium)
                                         Text(effectiveClient.name, color = Color(0xFF2E7D32), style = MaterialTheme.typography.bodyLarge, fontWeight = FontWeight.Bold, modifier = Modifier.weight(1f))
@@ -1116,18 +1203,50 @@ fun PaymentCard(
                                 }
                             } else if (onCreateClient != null) {
                                 // Overlay two-chip layout: search + create
-                                Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                                val searchChipOpen = clientDropdown != null
+                                Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
                                     Box(
                                         modifier = Modifier
                                             .weight(1f)
                                             .clip(RoundedCornerShape(20.dp))
-                                            .background(Color.Black.copy(alpha = 0.05f))
-                                            .border(1.5.dp, Color(0xFFCCCCCC), RoundedCornerShape(20.dp))
+                                            .background(
+                                                if (searchChipOpen) Color.Black.copy(alpha = 0.05f)
+                                                else Color.Black.copy(alpha = 0.05f)
+                                            )
+                                            .border(
+                                                1.5.dp,
+                                                if (searchChipOpen) Color(0xFF1565C0).copy(alpha = 0.5f)
+                                                else Color(0xFFCCCCCC),
+                                                RoundedCornerShape(20.dp)
+                                            )
                                             .clickable { onOpenSheet() }
-                                            .padding(horizontal = 12.dp, vertical = 8.dp),
+                                            .padding(horizontal = 8.dp, vertical = 7.dp),
                                         contentAlignment = Alignment.Center
                                     ) {
-                                        Text("🔍 חפש לקוח", color = Color(0xFFAAAAAA), style = MaterialTheme.typography.bodyMedium)
+                                        if (searchChipOpen && onSearchQueryChange != null) {
+                                            val fr2 = remember { FocusRequester() }
+                                            LaunchedEffect(Unit) { fr2.requestFocus() }
+                                            Row(
+                                                verticalAlignment = Alignment.CenterVertically,
+                                                horizontalArrangement = Arrangement.spacedBy(4.dp)
+                                            ) {
+                                                Text("✏", color = Color(0xFF1565C0), style = MaterialTheme.typography.bodySmall)
+                                                BasicTextField(
+                                                    value = searchQuery,
+                                                    onValueChange = onSearchQueryChange,
+                                                    singleLine = true,
+                                                    textStyle = MaterialTheme.typography.bodySmall.copy(color = Color(0xFF222222)),
+                                                    modifier = Modifier.weight(1f).focusRequester(fr2),
+                                                    decorationBox = { inner ->
+                                                        if (searchQuery.isEmpty())
+                                                            Text("חפש לקוח...", color = Color(0xFF999999), style = MaterialTheme.typography.bodySmall)
+                                                        inner()
+                                                    }
+                                                )
+                                            }
+                                        } else {
+                                            Text("חפש לקוח", color = Color(0xFFAAAAAA), style = MaterialTheme.typography.bodySmall, maxLines = 1)
+                                        }
                                     }
                                     Box(
                                         modifier = Modifier
@@ -1136,10 +1255,10 @@ fun PaymentCard(
                                             .background(Color(0xFF1565C0).copy(alpha = 0.10f))
                                             .border(1.5.dp, Color(0xFF1565C0).copy(alpha = 0.35f), RoundedCornerShape(20.dp))
                                             .clickable { onCreateClient() }
-                                            .padding(horizontal = 12.dp, vertical = 8.dp),
+                                            .padding(horizontal = 8.dp, vertical = 7.dp),
                                         contentAlignment = Alignment.Center
                                     ) {
-                                        Text("＋ צור לקוח חדש", color = Color(0xFF1565C0), style = MaterialTheme.typography.bodyMedium)
+                                        Text("+ צור לקוח חדש", color = Color(0xFF1565C0), style = MaterialTheme.typography.bodySmall, maxLines = 1)
                                     }
                                 }
                             } else {
@@ -1385,7 +1504,13 @@ fun PaymentCard(
                             .background(issueGrad)
                             .clickable(enabled = btnEnabled) {
                                 effectiveClient?.let { c ->
-                                    onIssueReceipt(c, parsedAmt, parsedTs ?: payment.timestamp, editedDescription)
+                                    val ts = parsedTs ?: payment.timestamp
+                                    if (parsedAmt != payment.amount && payment.amount != 0.0) {
+                                        pendingIssueArgs = Triple(c, parsedAmt, ts)
+                                        showAmountDialog = true
+                                    } else {
+                                        onIssueReceipt(c, parsedAmt, ts, editedDescription)
+                                    }
                                 }
                             },
                         contentAlignment = Alignment.Center
