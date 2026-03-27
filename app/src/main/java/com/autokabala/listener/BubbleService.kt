@@ -111,8 +111,9 @@ class BubbleService : Service() {
         private const val NOTIF_ID     = 9001
         const val CHANNEL_ID           = "bubble_channel"
         const val PREFS_NAME           = "autokabala_prefs"
-        const val KEY_BUBBLE_ENABLED   = "bubble_enabled"
-        const val KEY_SHARED_URIS  = "shared_image_uris"  // Set<String> of gallery URIs to clean
+        const val KEY_BUBBLE_ENABLED        = "bubble_enabled"
+        const val KEY_FILTER_ACTIVE_CLIENTS = "filter_active_clients"
+        const val KEY_SHARED_URIS           = "shared_image_uris"  // Set<String> of gallery URIs to clean
         private const val KEY_RECEIPT_COUNT = "receipt_count"
         private var instance: BubbleService? = null
 
@@ -347,7 +348,8 @@ class BubbleService : Service() {
 
     private fun selectPendingPayment(payment: PaymentEntity) {
         val state = overlayState.value as? OverlayState.PendingList ?: return
-        val match = matchClient(payment.senderName, state.clients)
+        val clientsForMatch = activeFilteredClients(state.clients)
+        val match = matchClient(payment.senderName, clientsForMatch)
         pendingPaymentId = payment.id
         overlayState.value = OverlayState.Ready(payment, match, state.clients)
     }
@@ -488,7 +490,7 @@ class BubbleService : Service() {
             pendingPaymentId = saved.id  // track so we can delete if user cancels
 
             val clients = withContext(Dispatchers.IO) { db.clientDao().getAllClientsSnapshot() }
-            val matchResult = matchClient(paymentData.senderName, clients)
+            val matchResult = matchClient(paymentData.senderName, activeFilteredClients(clients))
             val elapsed = System.currentTimeMillis() - startMs
             if (elapsed < 900L) delay(900L - elapsed)
             overlayState.value = OverlayState.Ready(saved, matchResult, clients)
@@ -500,6 +502,11 @@ class BubbleService : Service() {
     }
 
     // ─── Client matching ──────────────────────────────────────────────────────
+
+    private fun activeFilteredClients(clients: List<ClientEntity>): List<ClientEntity> {
+        val filterEnabled = prefs.getBoolean(KEY_FILTER_ACTIVE_CLIENTS, true)
+        return if (filterEnabled) clients.filter { it.isActive } else clients
+    }
 
     private fun matchClient(senderName: String, clients: List<ClientEntity>): MatchResult {
         val senderWords = senderName.trim().split(Regex("\\s+")).filter { it.isNotBlank() }

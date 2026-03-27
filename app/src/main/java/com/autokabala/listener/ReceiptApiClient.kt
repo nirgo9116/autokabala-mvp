@@ -126,6 +126,35 @@ data class GetClientsResponse(
     @SerialName("error") val error: String? = null
 )
 
+// --- Data classes for Document List ---
+
+@Serializable
+data class DocSearchRequest(
+    @SerialName("cid") val cid: String,
+    @SerialName("user") val user: String,
+    @SerialName("pass") val pass: String,
+    @SerialName("sid") val sid: String = "",
+    @SerialName("doctype") val docType: String = "receipt",
+    @SerialName("start_date") val startDate: String,
+    @SerialName("detail_level") val detailLevel: Int = 1,
+    @SerialName("limit") val limit: Int = 100,
+    @SerialName("offset") val offset: Int = 0
+)
+
+@Serializable
+data class DocSearchItem(
+    @SerialName("client_id") val clientId: Int? = null
+)
+
+@Serializable
+data class DocSearchResponse(
+    @SerialName("status") val status: Boolean,
+    @SerialName("docs") val docs: Map<String, DocSearchItem>? = null,
+    @SerialName("reason") val reason: String? = null,
+    @SerialName("error_description") val errorDescription: String? = null,
+    @SerialName("results_count") val resultsCount: Int? = null
+)
+
 // --- Data classes for Client Info ---
 
 @Serializable
@@ -292,6 +321,46 @@ object ReceiptApiClient {
             val errorMsg = e.message ?: "Exception during client creation"
             Log.e("AutoKabalaAPI", "EXCEPTION during client creation: $errorMsg", e)
             ApiResult.Failure(errorMsg)
+        }
+    }
+
+    suspend fun getActiveClientIds(fromDate: String): Set<String>? {
+        Log.i("AutoKabalaAPI", "--- Fetching active client IDs since $fromDate ---")
+        return try {
+            val json = Json { ignoreUnknownKeys = true; isLenient = true }
+            val allIds = mutableSetOf<String>()
+            var offset = 0
+            val pageSize = 1000
+            while (true) {
+                val requestBody = DocSearchRequest(
+                    cid = BuildConfig.ICOUNT_CID,
+                    user = BuildConfig.ICOUNT_USER,
+                    pass = BuildConfig.ICOUNT_PASS,
+                    startDate = fromDate,
+                    limit = pageSize,
+                    offset = offset
+                )
+                val response = client.post("$BASE_URL/doc/search") {
+                    contentType(ContentType.Application.Json)
+                    setBody(requestBody)
+                }
+                val rawBody = response.body<String>()
+                val parsed = json.decodeFromString<DocSearchResponse>(rawBody)
+                if (!parsed.status || parsed.docs == null) {
+                    Log.w("AutoKabalaAPI", "getActiveClientIds page $offset: reason=${parsed.reason} resultsCount=${parsed.resultsCount}")
+                    break
+                }
+                val pageIds = parsed.docs.values.mapNotNull { it.clientId?.toString() }
+                allIds.addAll(pageIds)
+                Log.d("AutoKabalaAPI", "getActiveClientIds page $offset: ${pageIds.size} docs, ${allIds.size} unique clients so far")
+                if (parsed.docs.size < pageSize) break
+                offset += pageSize
+            }
+            Log.i("AutoKabalaAPI", "Active client IDs total: ${allIds.size} unique clients")
+            allIds.ifEmpty { null }
+        } catch (e: Exception) {
+            Log.w("AutoKabalaAPI", "getActiveClientIds failed", e)
+            null
         }
     }
 

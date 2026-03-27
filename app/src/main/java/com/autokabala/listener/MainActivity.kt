@@ -2866,6 +2866,42 @@ fun SettingsTab(
             }
         }
 
+        // Filter active clients toggle
+        Card(modifier = Modifier.fillMaxWidth()) {
+            Row(
+                modifier = Modifier
+                    .padding(16.dp)
+                    .fillMaxWidth(),
+                horizontalArrangement = Arrangement.SpaceBetween,
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                val filterCtx = LocalContext.current
+                val filterPrefs = remember {
+                    filterCtx.getSharedPreferences(BubbleService.PREFS_NAME, android.content.Context.MODE_PRIVATE)
+                }
+                var isFilterEnabled by remember { mutableStateOf(filterPrefs.getBoolean(BubbleService.KEY_FILTER_ACTIVE_CLIENTS, true)) }
+                Column(modifier = Modifier.weight(1f)) {
+                    Text(
+                        "סנן לקוחות לא פעילים",
+                        style = MaterialTheme.typography.titleMedium,
+                        fontWeight = FontWeight.Bold
+                    )
+                    Text(
+                        "הצג רק לקוחות שקיבלו קבלה ב-12 החודשים האחרונים (מתעדכן בסנכרון)",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                    )
+                }
+                Switch(
+                    checked = isFilterEnabled,
+                    onCheckedChange = { enabled ->
+                        isFilterEnabled = enabled
+                        filterPrefs.edit().putBoolean(BubbleService.KEY_FILTER_ACTIVE_CLIENTS, enabled).apply()
+                    }
+                )
+            }
+        }
+
         // Bubble overlay permission button
         val context = LocalContext.current
         val hasOverlayPermission = remember { mutableStateOf(android.provider.Settings.canDrawOverlays(context)) }
