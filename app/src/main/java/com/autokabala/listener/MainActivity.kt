@@ -1208,25 +1208,21 @@ fun PaymentCard(
                                     }
                                 }
                             } else if (onCreateClient != null) {
-                                // Overlay two-chip layout: search + create
+                                // Overlay two-chip layout: search (flexible) + small create button
                                 val searchChipOpen = clientDropdown != null
                                 Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
                                     Box(
                                         modifier = Modifier
                                             .weight(1f)
                                             .clip(RoundedCornerShape(20.dp))
-                                            .background(
-                                                if (searchChipOpen) Color.Black.copy(alpha = 0.05f)
-                                                else Color.Black.copy(alpha = 0.05f)
-                                            )
+                                            .background(Color.Black.copy(alpha = 0.05f))
                                             .border(
                                                 1.5.dp,
-                                                if (searchChipOpen) Color(0xFF1565C0).copy(alpha = 0.5f)
-                                                else Color(0xFFCCCCCC),
+                                                if (searchChipOpen) Color(0xFF1565C0).copy(alpha = 0.5f) else Color(0xFFCCCCCC),
                                                 RoundedCornerShape(20.dp)
                                             )
                                             .clickable { onOpenSheet() }
-                                            .padding(horizontal = 8.dp, vertical = 7.dp),
+                                            .padding(horizontal = 8.dp, vertical = 10.dp),
                                         contentAlignment = Alignment.Center
                                     ) {
                                         if (searchChipOpen && onSearchQueryChange != null) {
@@ -1236,39 +1232,38 @@ fun PaymentCard(
                                                 verticalAlignment = Alignment.CenterVertically,
                                                 horizontalArrangement = Arrangement.spacedBy(4.dp)
                                             ) {
-                                                Text("✏", color = Color(0xFF1565C0), style = MaterialTheme.typography.bodySmall)
+                                                Text("✏", color = Color(0xFF1565C0), style = MaterialTheme.typography.bodyLarge)
                                                 Box(
                                                     modifier = Modifier.weight(1f),
                                                     contentAlignment = Alignment.CenterStart
                                                 ) {
                                                     if (searchQuery.isEmpty()) {
-                                                        Text("חפש לקוח...", color = Color(0xFF666666), style = MaterialTheme.typography.bodySmall)
+                                                        Text("חפש לקוח...", color = Color(0xFF666666), style = MaterialTheme.typography.bodyLarge)
                                                     }
                                                     BasicTextField(
                                                         value = searchQuery,
                                                         onValueChange = onSearchQueryChange,
                                                         singleLine = true,
-                                                        textStyle = MaterialTheme.typography.bodySmall.copy(color = Color(0xFF222222)),
+                                                        textStyle = MaterialTheme.typography.bodyLarge.copy(color = Color(0xFF222222)),
                                                         modifier = Modifier.wrapContentWidth().focusRequester(fr2),
                                                         decorationBox = { inner -> inner() }
                                                     )
                                                 }
                                             }
                                         } else {
-                                            Text("חפש לקוח", color = Color(0xFF666666), style = MaterialTheme.typography.bodySmall, maxLines = 1)
+                                            Text("חפש לקוח", color = Color(0xFF666666), style = MaterialTheme.typography.bodyLarge, maxLines = 1)
                                         }
                                     }
                                     Box(
                                         modifier = Modifier
-                                            .weight(1f)
                                             .clip(RoundedCornerShape(20.dp))
                                             .background(Color(0xFF1565C0).copy(alpha = 0.10f))
                                             .border(1.5.dp, Color(0xFF1565C0).copy(alpha = 0.35f), RoundedCornerShape(20.dp))
                                             .clickable { onCreateClient() }
-                                            .padding(horizontal = 8.dp, vertical = 7.dp),
+                                            .padding(horizontal = 10.dp, vertical = 10.dp),
                                         contentAlignment = Alignment.Center
                                     ) {
-                                        Text("+ צור לקוח חדש", color = Color(0xFF1565C0), style = MaterialTheme.typography.bodySmall, maxLines = 1)
+                                        Text("+ לקוח חדש", color = Color(0xFF1565C0), style = MaterialTheme.typography.bodyLarge, maxLines = 1)
                                     }
                                 }
                             } else {
