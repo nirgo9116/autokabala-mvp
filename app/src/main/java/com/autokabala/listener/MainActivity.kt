@@ -1126,15 +1126,17 @@ fun PaymentCard(
                                     Text(client.name, color = bubbleC, style = MaterialTheme.typography.bodyMedium, fontWeight = FontWeight.SemiBold)
                                 }
                             }
-                            // "אחר" chip — switches to search/create layout
+                            // "לקוח אחר" chip — switches to search/create layout
                             Box(
                                 modifier = Modifier
+                                    .widthIn(min = 72.dp)
                                     .clip(RoundedCornerShape(20.dp))
                                     .border(1.dp, bubbleC.copy(alpha = 0.25f), RoundedCornerShape(20.dp))
                                     .clickable { showAltChips = true }
-                                    .padding(horizontal = 10.dp, vertical = 5.dp)
+                                    .padding(horizontal = 10.dp, vertical = 5.dp),
+                                contentAlignment = Alignment.Center
                             ) {
-                                Text("אחר", color = bubbleC.copy(alpha = 0.5f), style = MaterialTheme.typography.bodyMedium)
+                                Text("לקוח אחר", color = bubbleC.copy(alpha = 0.5f), style = MaterialTheme.typography.bodyMedium)
                             }
                         }
                     }
@@ -1180,20 +1182,24 @@ fun PaymentCard(
                                         if (onSearchQueryChange != null) {
                                             val focusRequester = remember { FocusRequester() }
                                             LaunchedEffect(Unit) { focusRequester.requestFocus() }
-                                            BasicTextField(
-                                                value = searchQuery,
-                                                onValueChange = onSearchQueryChange,
-                                                singleLine = true,
-                                                textStyle = MaterialTheme.typography.bodyLarge.copy(color = Color(0xFF222222)),
-                                                modifier = Modifier.weight(1f).focusRequester(focusRequester),
-                                                decorationBox = { inner ->
-                                                    if (searchQuery.isEmpty())
-                                                        Text("חפש לקוח...", color = Color(0xFF999999), style = MaterialTheme.typography.bodyLarge, fontStyle = FontStyle.Italic)
-                                                    inner()
+                                            Box(
+                                                modifier = Modifier.weight(1f),
+                                                contentAlignment = Alignment.CenterStart
+                                            ) {
+                                                if (searchQuery.isEmpty()) {
+                                                    Text("חפש לקוח...", color = Color(0xFF666666), style = MaterialTheme.typography.bodyLarge, fontStyle = FontStyle.Italic)
                                                 }
-                                            )
+                                                BasicTextField(
+                                                    value = searchQuery,
+                                                    onValueChange = onSearchQueryChange,
+                                                    singleLine = true,
+                                                    textStyle = MaterialTheme.typography.bodyLarge.copy(color = Color(0xFF222222)),
+                                                    modifier = Modifier.wrapContentWidth().focusRequester(focusRequester),
+                                                    decorationBox = { inner -> inner() }
+                                                )
+                                            }
                                         } else {
-                                            Text("חפש לקוח...", color = Color(0xFF999999), style = MaterialTheme.typography.bodyLarge, fontStyle = FontStyle.Italic, modifier = Modifier.weight(1f))
+                                            Text("חפש לקוח...", color = Color(0xFF666666), style = MaterialTheme.typography.bodyLarge, fontStyle = FontStyle.Italic, modifier = Modifier.weight(1f))
                                         }
                                     } else {
                                         Text("✓", color = Color(0xFF2E7D32), style = MaterialTheme.typography.bodyMedium)
@@ -1231,21 +1237,25 @@ fun PaymentCard(
                                                 horizontalArrangement = Arrangement.spacedBy(4.dp)
                                             ) {
                                                 Text("✏", color = Color(0xFF1565C0), style = MaterialTheme.typography.bodySmall)
-                                                BasicTextField(
-                                                    value = searchQuery,
-                                                    onValueChange = onSearchQueryChange,
-                                                    singleLine = true,
-                                                    textStyle = MaterialTheme.typography.bodySmall.copy(color = Color(0xFF222222)),
-                                                    modifier = Modifier.weight(1f).focusRequester(fr2),
-                                                    decorationBox = { inner ->
-                                                        if (searchQuery.isEmpty())
-                                                            Text("חפש לקוח...", color = Color(0xFF999999), style = MaterialTheme.typography.bodySmall)
-                                                        inner()
+                                                Box(
+                                                    modifier = Modifier.weight(1f),
+                                                    contentAlignment = Alignment.CenterStart
+                                                ) {
+                                                    if (searchQuery.isEmpty()) {
+                                                        Text("חפש לקוח...", color = Color(0xFF666666), style = MaterialTheme.typography.bodySmall)
                                                     }
-                                                )
+                                                    BasicTextField(
+                                                        value = searchQuery,
+                                                        onValueChange = onSearchQueryChange,
+                                                        singleLine = true,
+                                                        textStyle = MaterialTheme.typography.bodySmall.copy(color = Color(0xFF222222)),
+                                                        modifier = Modifier.wrapContentWidth().focusRequester(fr2),
+                                                        decorationBox = { inner -> inner() }
+                                                    )
+                                                }
                                             }
                                         } else {
-                                            Text("חפש לקוח", color = Color(0xFFAAAAAA), style = MaterialTheme.typography.bodySmall, maxLines = 1)
+                                            Text("חפש לקוח", color = Color(0xFF666666), style = MaterialTheme.typography.bodySmall, maxLines = 1)
                                         }
                                     }
                                     Box(
