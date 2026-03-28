@@ -2245,6 +2245,7 @@ private fun OcrCheckScreen(
     val nameOk   = !info.parsedName.isNullOrBlank()
     val amountOk = (info.parsedAmount ?: 0.0) > 0.0
     var markedFailed by remember { mutableStateOf(false) }
+    var markedOk    by remember { mutableStateOf(false) }
 
     val context = LocalContext.current
     val bitmap by produceState<android.graphics.Bitmap?>(null, info.imageUri) {
@@ -2286,7 +2287,7 @@ private fun OcrCheckScreen(
             // Parsed data card
             Card(modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp)) {
                 Column(
-                    modifier 2= Modifier.padding(horizontal = 16.dp, vertical = 10.dp),
+                    modifier = Modifier.padding(horizontal = 16.dp, vertical = 10.dp),
                     verticalArrangement = Arrangement.spacedBy(6.dp)
                 ) {
                     Text("נתוני הפענוח", style = MaterialTheme.typography.titleSmall, fontWeight = FontWeight.Bold)
@@ -2334,10 +2335,36 @@ private fun OcrCheckScreen(
                         border = BorderStroke(1.dp, MaterialTheme.colorScheme.error)
                     ) { Text("✗  לא תקין") }
                     Button(
-                        onClick = { onResult(true) },
+                        onClick = { markedOk = true },
                         modifier = Modifier.weight(1f),
                         colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF4CAF50))
                     ) { Text("✓  תקין") }
+                }
+                if (markedOk) {
+                    Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(12.dp)) {
+                        OutlinedButton(
+                            onClick = {
+                                onResult(true)
+                                try {
+                                    context.startActivity(
+                                        android.content.Intent().apply {
+                                            setClassName("com.bnhp.payments.paymentsapp", "com.payments.bitapp.base.activity.MainActivity")
+                                            addFlags(android.content.Intent.FLAG_ACTIVITY_NEW_TASK)
+                                        }
+                                    )
+                                } catch (_: Exception) {}
+                            },
+                            modifier = Modifier.weight(1f)
+                        ) { Text("חזור לביט") }
+                        OutlinedButton(
+                            onClick = {
+                                onResult(true)
+                                context.packageManager.getLaunchIntentForPackage("com.payboxapp")
+                                    ?.let { context.startActivity(it) }
+                            },
+                            modifier = Modifier.weight(1f)
+                        ) { Text("חזור לפייבוקס") }
+                    }
                 }
                 if (markedFailed) {
                     Button(
