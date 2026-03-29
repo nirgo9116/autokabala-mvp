@@ -213,6 +213,7 @@ fun ScheduledPaymentCard(
 ) {
     val isPast = payment.scheduledDate < System.currentTimeMillis()
     var showDeleteDialog by remember { mutableStateOf(false) }
+    var showReceiptConfirmDialog by remember { mutableStateOf(false) }
 
     if (showDeleteDialog) {
         AlertDialog(
@@ -231,6 +232,31 @@ fun ScheduledPaymentCard(
             }
         )
     }
+    if (showReceiptConfirmDialog) {
+        AlertDialog(
+            onDismissRequest = { showReceiptConfirmDialog = false },
+            title = { Text("הפקת קבלה") },
+            text = {
+                Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
+                    Text("לקוח: ${payment.clientName}")
+                    Text("סכום: ${payment.amount.toFormattedAmount()}")
+                    if (payment.description.isNotBlank())
+                        Text("תיאור: ${payment.description}")
+                    Spacer(Modifier.height(4.dp))
+                    Text("האם להפיק קבלה?", style = MaterialTheme.typography.bodyMedium)
+                }
+            },
+            confirmButton = {
+                Button(onClick = { onIssueReceipt(); showReceiptConfirmDialog = false }) {
+                    Text("הפק")
+                }
+            },
+            dismissButton = {
+                TextButton(onClick = { showReceiptConfirmDialog = false }) { Text("ביטול") }
+            }
+        )
+    }
+
     Card(modifier = Modifier.fillMaxWidth(), elevation = CardDefaults.cardElevation(defaultElevation = 2.dp)) {
         Column(modifier = Modifier.padding(12.dp)) {
             Row(
@@ -305,7 +331,7 @@ fun ScheduledPaymentCard(
                             Text("קבלה הופקה ✓", style = MaterialTheme.typography.labelMedium, color = MaterialTheme.colorScheme.primary)
                         } else {
                             FilledTonalButton(
-                                onClick = onIssueReceipt,
+                                onClick = { showReceiptConfirmDialog = true },
                                 contentPadding = PaddingValues(horizontal = 12.dp, vertical = 4.dp)
                             ) { Text("הפק קבלה", fontSize = 12.sp) }
                         }
