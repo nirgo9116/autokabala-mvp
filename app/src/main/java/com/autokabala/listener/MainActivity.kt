@@ -621,23 +621,23 @@ private fun MainTabsScreen(
                     allClients = allClients,
                     calendarEvents = calendarEvents,
                     onInsert = { viewModel.insertScheduledPayment(it) },
+                    onUpdate = { viewModel.updateScheduledPayment(it) },
                     onDelete = { viewModel.deleteScheduledPayment(it) },
                     onDeleteSeries = { viewModel.deleteScheduledPaymentSeries(it) },
                     onMarkTookPlace = { payment, tookPlace: Boolean?, client ->
                         viewModel.markSessionTookPlace(payment, tookPlace)
-                        // Only send WhatsApp on first answer — not on reset (null) or correction
-                        if (tookPlace != null && payment.tookPlace == null) {
-                            val msg = if (tookPlace) {
-                                "שלום ${payment.clientName},\n" +
-                                "תודה על הפגישה! 😊\n" +
-                                "מחכה לתשלום של ${payment.amount.toFormattedAmount()} עבור ${payment.description.ifBlank { "הפגישה" }}.\n" +
-                                "תודה רבה! 🙏"
-                            } else {
-                                "שלום ${payment.clientName},\n" +
-                                "לא הצלחנו להיפגש הפעם. בואו נקבע תאריך חדש? 😊"
-                            }
-                            launchWhatsApp(context, clientPhone = client?.phone, text = msg)
+                    },
+                    onSendWhatsApp = { payment, client, tookPlace ->
+                        val msg = if (tookPlace) {
+                            "שלום ${payment.clientName},\n" +
+                            "תודה על הפגישה! 😊\n" +
+                            "מחכה לתשלום של ${payment.amount.toFormattedAmount()} עבור ${payment.description.ifBlank { "הפגישה" }}.\n" +
+                            "תודה רבה! 🙏"
+                        } else {
+                            "שלום ${payment.clientName},\n" +
+                            "לא הצלחנו להיפגש הפעם. בואו נקבע תאריך חדש? 😊"
                         }
+                        launchWhatsApp(context, clientPhone = client?.phone, text = msg)
                     },
                     onIssueReceiptForSession = { session, client ->
                         viewModel.issueReceiptForSession(session, client)

@@ -1,0 +1,29 @@
+{
+  "project_info": {
+    "project_number": "856548687988",
+    "project_id": "autokabala-96a0f",
+    "storage_bucket": "autokabala-96a0f.firebasestorage.app"
+  },
+  "client": [
+    {
+      "client_info": {
+        "mobilesdk_app_id": "1:856548687988:android:d0a966bb0cb24ee0705121",
+        "android_client_info": {
+          "package_name": "com.autokabala.listener"
+        }
+      },
+      "oauth_client": [],
+      "api_key": [
+        {
+          "current_key": "AIzaSyBjEFH8MOweTjYcLuqucFjaS9dn6CZhkEA"
+        }
+      ],
+      "services": {
+        "appinvite_service": {
+          "other_platform_oauth_client": []
+        }
+      }
+    }
+  ],
+  "configuration_version": "1"
+}

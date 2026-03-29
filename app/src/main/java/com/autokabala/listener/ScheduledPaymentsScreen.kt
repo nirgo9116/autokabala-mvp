@@ -1,6 +1,7 @@
 package com.autokabala.listener
 
 import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -19,6 +20,7 @@ import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Add
 import androidx.compose.material.icons.filled.Delete
+import androidx.compose.material.icons.filled.Edit
 import androidx.compose.material.icons.outlined.CalendarMonth
 import androidx.compose.material.icons.outlined.Schedule
 import androidx.compose.material3.AlertDialog
@@ -93,14 +95,17 @@ fun ScheduledPaymentsScreen(
     allClients: List<ClientEntity>,
     calendarEvents: List<CalendarEventEntity> = emptyList(),
     onInsert: (ScheduledPaymentEntity) -> Unit,
+    onUpdate: (ScheduledPaymentEntity) -> Unit,
     onDelete: (ScheduledPaymentEntity) -> Unit,
     onDeleteSeries: (ScheduledPaymentEntity) -> Unit,
     onSendReminder: (ScheduledPaymentEntity, ClientEntity?) -> Unit,
     onMarkTookPlace: (ScheduledPaymentEntity, Boolean?, ClientEntity?) -> Unit,
+    onSendWhatsApp: (ScheduledPaymentEntity, ClientEntity?, Boolean) -> Unit,
     onIssueReceiptForSession: (ScheduledPaymentEntity, ClientEntity?) -> Unit
 ) {
     var showCreateDialog by remember { mutableStateOf(false) }
     var rescheduleFor by remember { mutableStateOf<Pair<ScheduledPaymentEntity, ClientEntity?>?>(null) }
+    var editFor by remember { mutableStateOf<Pair<ScheduledPaymentEntity, ClientEntity?>?>(null) }
 
     Column(modifier = modifier.fillMaxSize()) {
         Row(
@@ -141,8 +146,10 @@ fun ScheduledPaymentsScreen(
                         onDeleteSeries = if (payment.seriesId != null) { { onDeleteSeries(payment) } } else null,
                         onSendReminder = { onSendReminder(payment, client) },
                         onMarkTookPlace = { tookPlace -> onMarkTookPlace(payment, tookPlace, client) },
+                        onSendWhatsApp = { tookPlace -> onSendWhatsApp(payment, client, tookPlace) },
                         onIssueReceipt = { onIssueReceiptForSession(payment, client) },
-                        onReschedule = { rescheduleFor = payment to client }
+                        onReschedule = { rescheduleFor = payment to client },
+                        onEdit = { editFor = payment to client }
                     )
                 }
             }
@@ -168,6 +175,28 @@ fun ScheduledPaymentsScreen(
             onCreate = { entity -> onInsert(entity); rescheduleFor = null }
         )
     }
+
+    editFor?.let { (session, client) ->
+        CreateScheduledPaymentDialog(
+            allClients = allClients,
+            calendarEvents = calendarEvents,
+            initialClient = client,
+            initialData = session,
+            onDismiss = { editFor = null },
+            onCreate = { entity ->
+                onUpdate(session.copy(
+                    clientId = entity.clientId,
+                    clientName = entity.clientName,
+                    amount = entity.amount,
+                    scheduledDate = entity.scheduledDate,
+                    description = entity.description,
+                    reminderHoursAfter = entity.reminderHoursAfter,
+                    durationMinutes = entity.durationMinutes
+                ))
+                editFor = null
+            }
+        )
+    }
 }
 
 @Composable
@@ -177,8 +206,10 @@ fun ScheduledPaymentCard(
     onDeleteSeries: (() -> Unit)? = null,
     onSendReminder: () -> Unit,
     onMarkTookPlace: (Boolean?) -> Unit,
+    onSendWhatsApp: (Boolean) -> Unit,
     onIssueReceipt: () -> Unit,
-    onReschedule: () -> Unit
+    onReschedule: () -> Unit,
+    onEdit: () -> Unit
 ) {
     val isPast = payment.scheduledDate < System.currentTimeMillis()
     var showDeleteDialog by remember { mutableStateOf(false) }
@@ -222,7 +253,12 @@ fun ScheduledPaymentCard(
                         Text("🔁 $label", style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.secondary)
                     }
                 }
-                Text(payment.amount.toFormattedAmount(), style = MaterialTheme.typography.headlineSmall, fontWeight = FontWeight.Bold, color = MaterialTheme.colorScheme.primary)
+                Column(horizontalAlignment = Alignment.End) {
+                    IconButton(onClick = onEdit, modifier = Modifier.size(28.dp)) {
+                        Icon(Icons.Default.Edit, contentDescription = "ערוך", modifier = Modifier.size(18.dp), tint = MaterialTheme.colorScheme.onSurfaceVariant)
+                    }
+                    Text(payment.amount.toFormattedAmount(), style = MaterialTheme.typography.headlineSmall, fontWeight = FontWeight.Bold, color = MaterialTheme.colorScheme.primary)
+                }
             }
             Spacer(Modifier.height(8.dp))
             HorizontalDivider()
@@ -274,6 +310,11 @@ fun ScheduledPaymentCard(
                             ) { Text("הפק קבלה", fontSize = 12.sp) }
                         }
                         Spacer(Modifier.height(4.dp))
+                        OutlinedButton(
+                            onClick = { onSendWhatsApp(true) },
+                            contentPadding = PaddingValues(horizontal = 12.dp, vertical = 4.dp)
+                        ) { Text("💬 שלח תודה", fontSize = 12.sp) }
+                        Spacer(Modifier.height(4.dp))
                         HorizontalDivider()
                         Spacer(Modifier.height(4.dp))
                     }
@@ -295,6 +336,11 @@ fun ScheduledPaymentCard(
                             contentPadding = PaddingValues(horizontal = 12.dp, vertical = 4.dp)
                         ) { Text("קבע פגישה חדשה", fontSize = 12.sp) }
                         Spacer(Modifier.height(4.dp))
+                        OutlinedButton(
+                            onClick = { onSendWhatsApp(false) },
+                            contentPadding = PaddingValues(horizontal = 12.dp, vertical = 4.dp)
+                        ) { Text("💬 שלח הודעה", fontSize = 12.sp) }
+                        Spacer(Modifier.height(4.dp))
                         HorizontalDivider()
                         Spacer(Modifier.height(4.dp))
                     }
@@ -306,8 +352,12 @@ fun ScheduledPaymentCard(
                 horizontalArrangement = Arrangement.SpaceBetween,
                 verticalAlignment = Alignment.CenterVertically
             ) {
-                OutlinedButton(onClick = onSendReminder, contentPadding = PaddingValues(horizontal = 10.dp, vertical = 4.dp)) {
-                    Text("תזכורת", fontSize = 12.sp)
+                if (isPast) {
+                    OutlinedButton(onClick = onSendReminder, contentPadding = PaddingValues(horizontal = 10.dp, vertical = 4.dp)) {
+                        Text("תזכורת", fontSize = 12.sp)
+                    }
+                } else {
+                    Spacer(Modifier.size(0.dp))
                 }
                 IconButton(
                     onClick = { if (onDeleteSeries != null) showDeleteDialog = true else onDelete() },
@@ -327,17 +377,21 @@ fun CreateScheduledPaymentDialog(
     calendarEvents: List<CalendarEventEntity> = emptyList(),
     initialClient: ClientEntity? = null,
     initialAmount: Double? = null,
+    initialData: ScheduledPaymentEntity? = null,
     onDismiss: () -> Unit,
     onCreate: (ScheduledPaymentEntity) -> Unit
 ) {
+    val initCal = remember(initialData) {
+        Calendar.getInstance().apply { timeInMillis = initialData?.scheduledDate ?: System.currentTimeMillis() }
+    }
     var selectedClient by remember { mutableStateOf(initialClient) }
     var clientSearch by remember { mutableStateOf(initialClient?.name ?: "") }
-    var amountText by remember { mutableStateOf(initialAmount?.toInt()?.toString() ?: "") }
-    var description by remember { mutableStateOf("") }
+    var amountText by remember { mutableStateOf(initialData?.amount?.toInt()?.toString() ?: initialAmount?.toInt()?.toString() ?: "") }
+    var description by remember { mutableStateOf(initialData?.description ?: "") }
     var showDatePicker by remember { mutableStateOf(false) }
     var showTimePicker by remember { mutableStateOf(false) }
-    var selectedHour   by remember { mutableStateOf(9) }
-    var selectedMinute by remember { mutableStateOf(0) }
+    var selectedHour   by remember { mutableStateOf(initCal.get(Calendar.HOUR_OF_DAY)) }
+    var selectedMinute by remember { mutableStateOf(initCal.get(Calendar.MINUTE)) }
     var clientDropdownExpanded by remember { mutableStateOf(false) }
 
     val filteredClients = remember(clientSearch, allClients) {
@@ -357,14 +411,14 @@ fun CreateScheduledPaymentDialog(
             selectedClient = filteredClients.first()
         }
     }
-    var reminderHours by remember { mutableStateOf(24) }
+    var reminderHours by remember { mutableStateOf(initialData?.reminderHoursAfter ?: 24) }
     var reminderHoursExpanded by remember { mutableStateOf(false) }
     var recurrenceDays by remember { mutableStateOf(0) }
     var recurrenceExpanded by remember { mutableStateOf(false) }
-    var durationMinutes by remember { mutableStateOf(60) }
+    var durationMinutes by remember { mutableStateOf(initialData?.durationMinutes ?: 60) }
     var durationExpanded by remember { mutableStateOf(false) }
 
-    val datePickerState = rememberDatePickerState(initialSelectedDateMillis = System.currentTimeMillis())
+    val datePickerState = rememberDatePickerState(initialSelectedDateMillis = initialData?.scheduledDate ?: System.currentTimeMillis())
     val selectedDateMs = datePickerState.selectedDateMillis ?: System.currentTimeMillis()
 
     val nearbyEvents = remember(selectedDateMs, calendarEvents) {
@@ -403,7 +457,7 @@ fun CreateScheduledPaymentDialog(
 
     AlertDialog(
         onDismissRequest = onDismiss,
-        title = { Text("פגישה מתוכננת חדשה", fontWeight = FontWeight.Bold) },
+        title = { Text(if (initialData != null) "ערוך פגישה" else "פגישה מתוכננת חדשה", fontWeight = FontWeight.Bold) },
         text = {
             Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
                 // Client
@@ -433,19 +487,25 @@ fun CreateScheduledPaymentDialog(
                 )
                 // Date + Time row
                 Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                    OutlinedTextField(
-                        value = dateOnlyFormat.format(Date(selectedDateMs)), onValueChange = {}, readOnly = true,
-                        label = { Text("תאריך") },
-                        trailingIcon = { IconButton(onClick = { showDatePicker = true }) { Icon(Icons.Outlined.CalendarMonth, null) } },
-                        modifier = Modifier.weight(1.5f)
-                    )
+                    Box(modifier = Modifier.weight(1.5f).clickable { showDatePicker = true }) {
+                        OutlinedTextField(
+                            value = dateOnlyFormat.format(Date(selectedDateMs)), onValueChange = {}, readOnly = true,
+                            label = { Text("תאריך") },
+                            trailingIcon = { Icon(Icons.Outlined.CalendarMonth, null) },
+                            modifier = Modifier.fillMaxWidth(),
+                            enabled = false
+                        )
+                    }
                     val timeLabel = "%02d:%02d".format(selectedHour, selectedMinute)
-                    OutlinedTextField(
-                        value = timeLabel, onValueChange = {}, readOnly = true,
-                        label = { Text("שעה") },
-                        trailingIcon = { IconButton(onClick = { showTimePicker = true }) { Icon(Icons.Outlined.Schedule, null) } },
-                        modifier = Modifier.weight(1f)
-                    )
+                    Box(modifier = Modifier.weight(1f).clickable { showTimePicker = true }) {
+                        OutlinedTextField(
+                            value = timeLabel, onValueChange = {}, readOnly = true,
+                            label = { Text("שעה") },
+                            trailingIcon = { Icon(Icons.Outlined.Schedule, null) },
+                            modifier = Modifier.fillMaxWidth(),
+                            enabled = false
+                        )
+                    }
                 }
                 // Duration
                 ExposedDropdownMenuBox(expanded = durationExpanded, onExpandedChange = { durationExpanded = it }) {
@@ -489,8 +549,8 @@ fun CreateScheduledPaymentDialog(
                         }
                     }
                 }
-                // Recurrence
-                ExposedDropdownMenuBox(expanded = recurrenceExpanded, onExpandedChange = { recurrenceExpanded = it }) {
+                // Recurrence (only for new meetings, not edits)
+                if (initialData == null) ExposedDropdownMenuBox(expanded = recurrenceExpanded, onExpandedChange = { recurrenceExpanded = it }) {
                     OutlinedTextField(
                         value = recurrenceOptions.find { it.first == recurrenceDays }?.second ?: "כל $recurrenceDays ימים",
                         onValueChange = {}, readOnly = true, label = { Text("תדירות הפגישה") },
@@ -506,11 +566,10 @@ fun CreateScheduledPaymentDialog(
             }
         },
         confirmButton = {
-            val amount = amountText.toDoubleOrNull()
+            val amount = amountText.toDoubleOrNull() ?: 0.0
             Button(
                 onClick = {
                     val client = selectedClient ?: return@Button
-                    val amt = amount ?: return@Button
                     val finalTimestamp = Calendar.getInstance().apply {
                         timeInMillis = selectedDateMs
                         set(Calendar.HOUR_OF_DAY, selectedHour)
@@ -519,13 +578,13 @@ fun CreateScheduledPaymentDialog(
                         set(Calendar.MILLISECOND, 0)
                     }.timeInMillis
                     onCreate(ScheduledPaymentEntity(
-                        clientId = client.id, clientName = client.name, amount = amt,
+                        clientId = client.id, clientName = client.name, amount = amount,
                         scheduledDate = finalTimestamp, description = description.trim(),
                         reminderHoursAfter = reminderHours, reminderRecurrenceDays = recurrenceDays,
                         durationMinutes = durationMinutes
                     ))
                 },
-                enabled = selectedClient != null && (amount ?: 0.0) > 0
+                enabled = selectedClient != null
             ) { Text("צור") }
         },
         dismissButton = { TextButton(onClick = onDismiss) { Text("ביטול") } }

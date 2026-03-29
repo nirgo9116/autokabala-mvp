@@ -633,6 +633,16 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         }
     }
 
+    fun updateScheduledPayment(payment: ScheduledPaymentEntity) {
+        viewModelScope.launch {
+            payment.calendarEventId?.let { calendarRepository.deleteCalendarEvent(it) }
+            val newEventId = calendarRepository.insertCalendarEvent(payment)
+            scheduledPaymentDao.updateScheduledPayment(
+                if (newEventId != null) payment.copy(calendarEventId = newEventId) else payment.copy(calendarEventId = null)
+            )
+        }
+    }
+
     private fun generateOccurrences(template: ScheduledPaymentEntity, seriesId: String?): List<ScheduledPaymentEntity> {
         if (template.reminderRecurrenceDays == 0) return listOf(template.copy(seriesId = seriesId))
         val occurrences = mutableListOf<ScheduledPaymentEntity>()
