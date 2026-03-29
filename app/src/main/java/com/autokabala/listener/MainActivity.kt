@@ -2611,12 +2611,18 @@ private fun OverdueClientRow(
             )
             Text(daysText, style = MaterialTheme.typography.labelSmall, color = urgencyColor)
         }
+        val rowContext = LocalContext.current
         TextButton(
-            onClick = onSendReminder,
-            enabled = overdueClient.client.phone != null,
+            onClick = {
+                if (overdueClient.client.phone != null) {
+                    onSendReminder()
+                } else {
+                    android.widget.Toast.makeText(rowContext, "אין מספר טלפון ללקוח זה", android.widget.Toast.LENGTH_SHORT).show()
+                }
+            },
             colors = androidx.compose.material3.ButtonDefaults.textButtonColors(
-                contentColor = Color(0xFF25D366),
-                disabledContentColor = MaterialTheme.colorScheme.onSurfaceVariant
+                contentColor = if (overdueClient.client.phone != null) Color(0xFF25D366)
+                               else MaterialTheme.colorScheme.onSurfaceVariant
             )
         ) {
             Text("שלח", style = MaterialTheme.typography.labelMedium, fontWeight = FontWeight.Bold)
@@ -3281,7 +3287,9 @@ private fun launchWhatsApp(
     val messageText = text ?: "קבלה עבורך 🧾\n${docUrl ?: ""}"
     val intent = if (clientPhone != null) {
         val normalized = normalizeIsraeliPhone(clientPhone)
-        Intent(Intent.ACTION_VIEW, Uri.parse("whatsapp://send?phone=$normalized&text=${Uri.encode(messageText)}"))
+        Intent(Intent.ACTION_VIEW, Uri.parse("whatsapp://send?phone=$normalized&text=${Uri.encode(messageText)}")).apply {
+            setPackage("com.whatsapp")
+        }
     } else {
         Intent(Intent.ACTION_SEND).apply {
             type = "text/plain"
