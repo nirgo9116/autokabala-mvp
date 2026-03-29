@@ -2611,18 +2611,10 @@ private fun OverdueClientRow(
             )
             Text(daysText, style = MaterialTheme.typography.labelSmall, color = urgencyColor)
         }
-        val rowContext = LocalContext.current
         TextButton(
-            onClick = {
-                if (overdueClient.client.phone != null) {
-                    onSendReminder()
-                } else {
-                    android.widget.Toast.makeText(rowContext, "אין מספר טלפון ללקוח זה", android.widget.Toast.LENGTH_SHORT).show()
-                }
-            },
+            onClick = onSendReminder,
             colors = androidx.compose.material3.ButtonDefaults.textButtonColors(
-                contentColor = if (overdueClient.client.phone != null) Color(0xFF25D366)
-                               else MaterialTheme.colorScheme.onSurfaceVariant
+                contentColor = Color(0xFF25D366)
             )
         ) {
             Text("שלח", style = MaterialTheme.typography.labelMedium, fontWeight = FontWeight.Bold)
