@@ -2771,6 +2771,7 @@ fun SettingsTab(
     onClearResults: () -> Unit = {}
 ) {
     var showTestResults by remember { mutableStateOf(false) }
+    var showFaq by remember { mutableStateOf(false) }
 
     if (showTestResults) {
         ModalBottomSheet(onDismissRequest = { showTestResults = false }) {
@@ -2779,6 +2780,12 @@ fun SettingsTab(
                 onSendFailure = onSendFailure,
                 onClear = { onClearResults(); showTestResults = false }
             )
+        }
+    }
+
+    if (showFaq) {
+        ModalBottomSheet(onDismissRequest = { showFaq = false }) {
+            FaqScreen()
         }
     }
     Column(
@@ -2830,6 +2837,12 @@ fun SettingsTab(
             Icon(Icons.Default.HelpOutline, contentDescription = null, modifier = Modifier.size(18.dp))
             Spacer(Modifier.width(8.dp))
             Text("הצג מדריך למשתמש")
+        }
+
+        OutlinedButton(onClick = { showFaq = true }, modifier = Modifier.fillMaxWidth()) {
+            Icon(Icons.Default.HelpOutline, contentDescription = null, modifier = Modifier.size(18.dp))
+            Spacer(Modifier.width(8.dp))
+            Text("שאלות נפוצות")
         }
 
         // Bubble overlay toggle
