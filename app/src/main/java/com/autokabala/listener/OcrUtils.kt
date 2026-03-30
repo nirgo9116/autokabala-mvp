@@ -6,6 +6,7 @@ import android.graphics.Canvas
 import android.graphics.ColorMatrix
 import android.graphics.ColorMatrixColorFilter
 import android.graphics.Paint
+import android.util.Base64
 import android.util.Log
 import com.google.mlkit.vision.common.InputImage
 import com.google.mlkit.vision.text.TextRecognition
@@ -14,13 +15,25 @@ import com.googlecode.tesseract.android.TessBaseAPI
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.suspendCancellableCoroutine
 import kotlinx.coroutines.withContext
+import okhttp3.MediaType.Companion.toMediaType
+import okhttp3.OkHttpClient
+import okhttp3.Request
+import okhttp3.RequestBody.Companion.toRequestBody
+import org.json.JSONObject
+import java.io.ByteArrayOutputStream
 import java.io.File
 import java.io.FileOutputStream
+import java.util.concurrent.TimeUnit
 import kotlin.coroutines.resume
 
 object OcrUtils {
 
     data class MlKitResult(val text: String, val amount: Double?, val nameAboveAmount: String?)
+
+    sealed class GeminiResult {
+        object Rejected : GeminiResult()
+        data class Success(val data: PaymentData) : GeminiResult()
+    }
 
     suspend fun runMlKitOcr(bitmap: Bitmap): MlKitResult? =
         suspendCancellableCoroutine { cont ->
@@ -285,6 +298,325 @@ object OcrUtils {
         result.setPixels(out, 0, w, 0, 0, w, h)
         src.recycle()
         return result
+    }
+
+    // ── Tesseract availability (lazy — checked once, cached) ──────────────────
+
+    private val tesseractAvailable: Boolean by lazy {
+        try { TessBaseAPI(); true }
+        catch (e: Throwable) {
+            Log.w("OcrUtils", "Tesseract unavailable (likely 16KB device): ${e.message}")
+            false
+        }
+    }
+
+    fun isTesseractAvailable(): Boolean = tesseractAvailable
+
+    // Parses date/time strings from Gemini into epoch ms.
+    // Supports: "DD.MM.YY HH:MM" (Bit) and "DD/MM/YYYY HH:MM" (Paybox)
+    private fun parseDateTimeToMs(s: String): Long? {
+        Regex("""(\d{1,2})[./](\d{1,2})[./](\d{2,4})\s+(\d{1,2}):(\d{2})""").find(s)?.let {
+            val (d, m, y, h, min) = it.destructured
+            val year = if (y.length == 2) 2000 + y.toInt() else y.toInt()
+            return java.util.Calendar.getInstance().apply {
+                set(year, m.toInt() - 1, d.toInt(), h.toInt(), min.toInt(), 0)
+                set(java.util.Calendar.MILLISECOND, 0)
+            }.timeInMillis
+        }
+        return null
+    }
+
+    // ── Gemini Vision fallback ────────────────────────────────────────────────
+
+    private val geminiClient: OkHttpClient by lazy {
+        OkHttpClient.Builder()
+            .connectTimeout(15, TimeUnit.SECONDS)
+            .readTimeout(30, TimeUnit.SECONDS)
+            .build()
+    }
+
+    suspend fun runGeminiOcr(bitmap: Bitmap): GeminiResult? = withContext(Dispatchers.IO) {
+        try {
+            val apiKey = BuildConfig.GEMINI_API_KEY
+            if (apiKey.isBlank()) {
+                Log.w("OcrUtils", "Gemini API key not configured")
+                return@withContext null
+            }
+
+            // Scale down to max 720px on the longest side to reduce upload size
+            val maxDim = 720
+            val scale = maxDim.toFloat() / maxOf(bitmap.width, bitmap.height)
+            val small = if (scale < 1f)
+                Bitmap.createScaledBitmap(bitmap, (bitmap.width * scale).toInt(), (bitmap.height * scale).toInt(), true)
+            else bitmap
+            val baos = ByteArrayOutputStream()
+            small.compress(Bitmap.CompressFormat.JPEG, 70, baos)
+            if (small !== bitmap) small.recycle()
+            val base64Image = Base64.encodeToString(baos.toByteArray(), Base64.NO_WRAP)
+
+            val nowMs = System.currentTimeMillis()
+            val prompt = """
+                You are a precise OCR data extractor for an Israeli payment automation app.
+                You are analyzing a screenshot of an Israeli payment confirmation screen (Bit or PayBox).
+                The interface is in Hebrew (RTL - right-to-left). Text is Hebrew, numbers are LTR.
+
+                Return ONLY valid JSON in this exact schema:
+                {
+                  "source": "bit" | "paybox" | "",
+                  "senderLine": "",
+                  "amount": 0,
+                  "dateTime": ""
+                }
+
+                Rules:
+                1. source: "bit" if you see "נשלחו לך", "paybox" if you see "העברה מ", otherwise "".
+                2. senderLine: Copy the FULL line containing "נשלחו לך" or "העברה מ" EXACTLY as it appears.
+                   - Do NOT translate Hebrew. Do NOT fix or correct Hebrew spelling. Do NOT reorder words.
+                   - Pay special attention to Hebrew names — they are critical. Do NOT omit any characters.
+                   - If the name and phrase appear on separate lines, combine them with a space.
+                   - If not found → "".
+                3. amount: Number next to ₪. Ignore "+" signs. Most prominent (large font) if multiple. 0 if not found.
+                4. dateTime: Date and time exactly as shown. Combine with space if separate. "" if not found.
+                5. If unsure about any field → return "" or 0. Do NOT guess.
+
+                Return JSON only. No explanations. No markdown. No backticks.
+            """.trimIndent()
+
+            val body = JSONObject().apply {
+                put("contents", org.json.JSONArray().apply {
+                    put(JSONObject().apply {
+                        put("parts", org.json.JSONArray().apply {
+                            put(JSONObject().apply {
+                                put("inline_data", JSONObject().apply {
+                                    put("mime_type", "image/jpeg")
+                                    put("data", base64Image)
+                                })
+                            })
+                            put(JSONObject().apply { put("text", prompt) })
+                        })
+                    })
+                })
+                put("generationConfig", JSONObject().apply {
+                    put("temperature", 0.2)
+                    put("thinkingConfig", JSONObject().apply {
+                        put("thinkingBudget", 5000)
+                    })
+                })
+            }.toString()
+
+            val request = Request.Builder()
+                .url("https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent?key=$apiKey")
+                .post(body.toRequestBody("application/json".toMediaType()))
+                .build()
+
+            val response = geminiClient.newCall(request).execute()
+            val rawBody = response.body?.string() ?: ""
+            Log.d("OcrUtils", "Gemini HTTP ${response.code} body: $rawBody")
+            if (!response.isSuccessful) {
+                return@withContext null
+            }
+
+            val responseText = try {
+                val parts = JSONObject(rawBody)
+                    .getJSONArray("candidates")
+                    .getJSONObject(0)
+                    .getJSONObject("content")
+                    .getJSONArray("parts")
+                // With thinkingBudget=0 there is only one part; if thinking is present skip it
+                (0 until parts.length())
+                    .map { parts.getJSONObject(it) }
+                    .firstOrNull { !it.optBoolean("thought", false) }
+                    ?.getString("text")
+                    ?: return@withContext null
+            } catch (e: Exception) {
+                Log.e("OcrUtils", "Gemini response parse failed", e)
+                return@withContext null
+            }.trim().let { raw ->
+                // Extract the first {...} block — handles both pure-JSON and prose+markdown responses
+                val start = raw.indexOf('{')
+                val end = raw.lastIndexOf('}')
+                if (start >= 0 && end > start) raw.substring(start, end + 1) else raw
+            }
+
+            Log.d("OcrUtils", "Gemini text: $responseText")
+            val result = try { JSONObject(responseText) } catch (e: Exception) {
+                Log.e("OcrUtils", "Gemini JSON parse failed: $responseText", e)
+                return@withContext null
+            }
+
+            val source      = result.optString("source", "")
+            val senderLine  = result.optString("senderLine", "").trim()
+            val amount      = result.optDouble("amount", 0.0)
+            val dateTimeStr = result.optString("dateTime", "")
+            Log.d("OcrUtils", "Gemini parsed: source='$source' senderLine='$senderLine' amount=$amount dateTime='$dateTimeStr'")
+            val senderName = when (source) {
+                "bit"    -> Regex("נשלחו לך מ(.+)").find(senderLine)?.groupValues?.get(1)?.trim() ?: ""
+                "paybox" -> Regex("העברה מ(.+)").find(senderLine)?.groupValues?.get(1)?.trim() ?: ""
+                else     -> ""
+            }
+            Log.d("OcrUtils", "Gemini senderName='$senderName'")
+            if (senderName.isBlank()) {
+                Log.d("OcrUtils", "Gemini: name empty — Tesseract fallback")
+                return@withContext null
+            }
+            if (amount <= 0) {
+                Log.d("OcrUtils", "Gemini: amount=$amount — Tesseract fallback")
+                return@withContext null
+            }
+
+            val timestamp   = parseDateTimeToMs(dateTimeStr) ?: nowMs
+            Log.d("OcrUtils", "Gemini timestamp: $timestamp from '$dateTimeStr'")
+
+            GeminiResult.Success(PaymentData(
+                source      = source,
+                senderName  = senderName,
+                amount      = amount,
+                isConfirmed = true,
+                timestamp   = timestamp
+            ))
+        } catch (e: Exception) {
+            Log.e("OcrUtils", "Gemini OCR failed", e)
+            null
+        }
+    }
+
+    // ── OpenAI Vision ─────────────────────────────────────────────────────────
+
+    suspend fun runOpenAiOcr(bitmap: Bitmap): GeminiResult? = withContext(Dispatchers.IO) {
+        try {
+            val apiKey = BuildConfig.OPENAI_API_KEY
+            if (apiKey.isBlank()) {
+                Log.w("OcrUtils", "OpenAI API key not configured")
+                return@withContext null
+            }
+
+            val maxDim = 720
+            val scale = maxDim.toFloat() / maxOf(bitmap.width, bitmap.height)
+            val small = if (scale < 1f)
+                Bitmap.createScaledBitmap(bitmap, (bitmap.width * scale).toInt(), (bitmap.height * scale).toInt(), true)
+            else bitmap
+            val baos = ByteArrayOutputStream()
+            small.compress(Bitmap.CompressFormat.JPEG, 70, baos)
+            if (small !== bitmap) small.recycle()
+            val base64Image = Base64.encodeToString(baos.toByteArray(), Base64.NO_WRAP)
+
+            val nowMs = System.currentTimeMillis()
+            val prompt = """
+                You are a precise OCR data extractor for an Israeli payment automation app.
+                You are analyzing a screenshot of an Israeli payment confirmation screen (Bit or PayBox).
+                The interface is in Hebrew (RTL - right-to-left). Text is Hebrew, numbers are LTR.
+
+                Return ONLY valid JSON in this exact schema:
+                {
+                  "source": "bit" | "paybox" | "",
+                  "senderLine": "",
+                  "amount": 0,
+                  "dateTime": ""
+                }
+
+                Rules:
+                1. source: "bit" if you see "נשלחו לך", "paybox" if you see "העברה מ", otherwise "".
+                2. senderLine: Copy the FULL line containing "נשלחו לך" or "העברה מ" EXACTLY as it appears.
+                   - Do NOT translate Hebrew. Do NOT fix or correct Hebrew spelling. Do NOT reorder words.
+                   - Pay special attention to Hebrew names — they are critical. Do NOT omit any characters.
+                   - If the name and phrase appear on separate lines, combine them with a space.
+                   - If not found → "".
+                3. amount: Number next to ₪. Ignore "+" signs. Most prominent (large font) if multiple. 0 if not found.
+                4. dateTime: Date and time exactly as shown. Combine with space if separate. "" if not found.
+                5. If unsure about any field → return "" or 0. Do NOT guess.
+
+                Return JSON only. No explanations. No markdown. No backticks.
+            """.trimIndent()
+
+            val body = JSONObject().apply {
+                put("model", "gpt-4o")
+                put("max_tokens", 200)
+                put("temperature", 0.2)
+                put("messages", org.json.JSONArray().apply {
+                    put(JSONObject().apply {
+                        put("role", "user")
+                        put("content", org.json.JSONArray().apply {
+                            put(JSONObject().apply {
+                                put("type", "image_url")
+                                put("image_url", JSONObject().apply {
+                                    put("url", "data:image/jpeg;base64,$base64Image")
+                                })
+                            })
+                            put(JSONObject().apply {
+                                put("type", "text")
+                                put("text", prompt)
+                            })
+                        })
+                    })
+                })
+            }.toString()
+
+            val request = Request.Builder()
+                .url("https://api.openai.com/v1/chat/completions")
+                .header("Authorization", "Bearer $apiKey")
+                .post(body.toRequestBody("application/json".toMediaType()))
+                .build()
+
+            val response = geminiClient.newCall(request).execute()
+            val rawBody = response.body?.string() ?: ""
+            Log.d("OcrUtils", "OpenAI HTTP ${response.code} body: $rawBody")
+            if (!response.isSuccessful) return@withContext null
+
+            val responseText = try {
+                JSONObject(rawBody)
+                    .getJSONArray("choices")
+                    .getJSONObject(0)
+                    .getJSONObject("message")
+                    .getString("content")
+            } catch (e: Exception) {
+                Log.e("OcrUtils", "OpenAI response parse failed", e)
+                return@withContext null
+            }.let { raw ->
+                val start = raw.indexOf('{')
+                val end = raw.lastIndexOf('}')
+                if (start >= 0 && end > start) raw.substring(start, end + 1) else raw
+            }
+
+            Log.d("OcrUtils", "OpenAI text: $responseText")
+            val result = try { JSONObject(responseText) } catch (e: Exception) {
+                Log.e("OcrUtils", "OpenAI JSON parse failed: $responseText", e)
+                return@withContext null
+            }
+
+            val source      = result.optString("source", "")
+            val senderLine  = result.optString("senderLine", "").trim()
+            val amount      = result.optDouble("amount", 0.0)
+            val dateTimeStr = result.optString("dateTime", "")
+            Log.d("OcrUtils", "OpenAI parsed: source='$source' senderLine='$senderLine' amount=$amount dateTime='$dateTimeStr'")
+            val senderName = when (source) {
+                "bit"    -> Regex("נשלחו לך מ(.+)").find(senderLine)?.groupValues?.get(1)?.trim() ?: ""
+                "paybox" -> Regex("העברה מ(.+)").find(senderLine)?.groupValues?.get(1)?.trim() ?: ""
+                else     -> ""
+            }
+            Log.d("OcrUtils", "OpenAI senderName='$senderName'")
+            if (senderName.isBlank()) {
+                Log.d("OcrUtils", "OpenAI: name empty — Tesseract fallback")
+                return@withContext null
+            }
+            if (amount <= 0) {
+                Log.d("OcrUtils", "OpenAI: amount=$amount — Tesseract fallback")
+                return@withContext null
+            }
+
+            val timestamp = parseDateTimeToMs(dateTimeStr) ?: nowMs
+            Log.d("OcrUtils", "OpenAI timestamp: $timestamp from '$dateTimeStr'")
+
+            GeminiResult.Success(PaymentData(
+                source      = source,
+                senderName  = senderName,
+                amount      = amount,
+                isConfirmed = true,
+                timestamp   = timestamp
+            ))
+        } catch (e: Exception) {
+            Log.e("OcrUtils", "OpenAI OCR failed", e)
+            null
+        }
     }
 
     fun ensureTessData(context: Context): String {

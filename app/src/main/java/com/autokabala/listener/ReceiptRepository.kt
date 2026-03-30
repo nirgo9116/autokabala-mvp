@@ -171,6 +171,8 @@ class ReceiptRepository(private val paymentDao: PaymentDao, private val clientDa
         Log.d("Repository", "Added fake overdue payment: ${client.name}, $daysAgo days ago")
     }
 
+    suspend fun deleteAllPayments() = paymentDao.deleteAllPayments()
+
     // --- Payment History ---
     fun getRecentPayments(since: Long): Flow<List<PaymentEntity>> = paymentDao.getRecentPayments(since)
     fun getPaymentsByClientId(clientId: String): Flow<List<PaymentEntity>> = paymentDao.getPaymentsByClientId(clientId)

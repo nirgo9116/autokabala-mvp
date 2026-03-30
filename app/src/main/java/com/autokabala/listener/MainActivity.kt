@@ -607,7 +607,8 @@ private fun MainTabsScreen(
                     onShowTutorial = onShowTutorial,
                     testResults = testResults,
                     onSendFailure = { result -> launchDeveloperFeedbackFromResult(context, result) },
-                    onClearResults = { viewModel.clearTestResults() }
+                    onClearResults = { viewModel.clearTestResults() },
+                    onDeleteAllPayments = { viewModel.onDeleteAllPaymentsClicked() }
                 )
                 2 -> HistoryScreen(
                     modifier = Modifier.padding(innerPadding),
@@ -2768,10 +2769,29 @@ fun SettingsTab(
     onShowTutorial: () -> Unit = {},
     testResults: List<ParseTestResult> = emptyList(),
     onSendFailure: (ParseTestResult) -> Unit = {},
-    onClearResults: () -> Unit = {}
+    onClearResults: () -> Unit = {},
+    onDeleteAllPayments: () -> Unit = {}
 ) {
     var showTestResults by remember { mutableStateOf(false) }
     var showFaq by remember { mutableStateOf(false) }
+    var showDeleteConfirm by remember { mutableStateOf(false) }
+
+    if (showDeleteConfirm) {
+        androidx.compose.material3.AlertDialog(
+            onDismissRequest = { showDeleteConfirm = false },
+            title = { Text("מחיקת כל הקבלות") },
+            text = { Text("האם למחוק את כל הרשומות ממסד הנתונים? פעולה זו אינה הפיכה.") },
+            confirmButton = {
+                Button(
+                    onClick = { onDeleteAllPayments(); showDeleteConfirm = false },
+                    colors = ButtonDefaults.buttonColors(containerColor = MaterialTheme.colorScheme.error)
+                ) { Text("מחק הכל") }
+            },
+            dismissButton = {
+                OutlinedButton(onClick = { showDeleteConfirm = false }) { Text("ביטול") }
+            }
+        )
+    }
 
     if (showTestResults) {
         ModalBottomSheet(onDismissRequest = { showTestResults = false }) {
@@ -3004,6 +3024,14 @@ fun SettingsTab(
         }
         OutlinedButton(onClick = onAddFakeOverduePayment, modifier = Modifier.fillMaxWidth()) {
             Text("הוסף תשלום ישן (בדיקת תזכורות)")
+        }
+        OutlinedButton(
+            onClick = { showDeleteConfirm = true },
+            modifier = Modifier.fillMaxWidth(),
+            colors = ButtonDefaults.outlinedButtonColors(contentColor = MaterialTheme.colorScheme.error),
+            border = androidx.compose.foundation.BorderStroke(1.dp, MaterialTheme.colorScheme.error)
+        ) {
+            Text("נקה את כל הקבלות ממסד הנתונים")
         }
     }
 }

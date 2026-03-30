@@ -416,6 +416,12 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         }
     }
 
+    fun onDeleteAllPaymentsClicked() {
+        viewModelScope.launch {
+            receiptRepository.deleteAllPayments()
+        }
+    }
+
     fun onOpenClientDetail(client: ClientEntity) {
         _selectedClient.value = client
         _currentScreen.value = Screen.CLIENT_DETAIL

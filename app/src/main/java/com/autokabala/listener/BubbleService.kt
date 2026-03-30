@@ -417,8 +417,33 @@ class BubbleService : Service() {
     private suspend fun processScreenshot(bitmap: Bitmap) {
         val startMs = System.currentTimeMillis()
         try {
-            val mlKitResult = OcrUtils.runMlKitOcr(bitmap)
+            // ── Primary: OpenAI Vision ───────────────────────────────────────
+            Log.d("BubbleService", "Trying OpenAI OCR (primary)")
+            when (val visionResult = OcrUtils.runOpenAiOcr(bitmap)) {
+                is OcrUtils.GeminiResult.Rejected -> {
+                    Log.d("BubbleService", "OpenAI: outgoing payment — showing error")
+                    bitmap.recycle()
+                    overlayState.value = OverlayState.Err("זה לא אישור תשלום שהתקבל — שתף רק תשלומים נכנסים")
+                    return
+                }
+                is OcrUtils.GeminiResult.Success -> {
+                    Log.d("BubbleService", "OpenAI succeeded: ${visionResult.data.senderName} / ${visionResult.data.amount}")
+                    bitmap.recycle()
+                    finishPaymentFlow(visionResult.data, startMs)
+                    return
+                }
+                null -> Unit // fall through to Tesseract
+            }
 
+            // ── Fallback: ML Kit + Tesseract ──────────────────────────────────
+            Log.d("BubbleService", "OpenAI returned null — falling back to Tesseract")
+            if (!OcrUtils.isTesseractAvailable()) {
+                bitmap.recycle()
+                overlayState.value = OverlayState.Err("לא ניתן לקרוא את התשלום — נסה שוב או שתף תמונה")
+                return
+            }
+
+            val mlKitResult = OcrUtils.runMlKitOcr(bitmap)
             val mlKitText   = mlKitResult?.text
             val mlKitAmount = mlKitResult?.amount
             Log.d("BubbleService", "ML Kit output:\n${mlKitText ?: "(empty)"}")
@@ -441,64 +466,67 @@ class BubbleService : Service() {
                 OcrUtils.retesseractPayboxAmount(this@BubbleService, bitmap)
             } else null
 
-            bitmap.recycle()
-
             val paymentData = if (isPaybox) {
-                val payboxText = tesseractText ?: mlKitText ?: run {
-                    overlayState.value = OverlayState.Err("לא ניתן לקרוא טקסט מהתמונה")
-                    return
-                }
-                PayboxShareParser.parse(payboxText, mlKitText ?: payboxText, resolvedAmount, mlKitResult?.nameAboveAmount) ?: run {
-                    overlayState.value = OverlayState.Err("לא נמצאו פרטי תשלום. ודא שמדובר באישור פייבוקס.")
-                    return
+                val payboxText = tesseractText ?: mlKitText
+                payboxText?.let {
+                    PayboxShareParser.parse(it, mlKitText ?: it, resolvedAmount, mlKitResult?.nameAboveAmount)
                 }
             } else {
                 val combinedText = "${tesseractText ?: ""}\n${mlKitText ?: ""}"
                 if (BitShareParser.isExpired(combinedText)) {
+                    bitmap.recycle()
                     overlayState.value = OverlayState.Err("תשלום זה פג תוקף")
                     return
                 }
-                val bitText = tesseractText ?: mlKitText ?: run {
-                    overlayState.value = OverlayState.Err("לא ניתן לקרוא טקסט מהתמונה")
-                    return
-                }
-                BitShareParser.parse(hebrewText = bitText, latinText = mlKitText ?: bitText, mlKitAmount = mlKitAmount) ?: run {
-                    overlayState.value = OverlayState.Err("לא נמצאו פרטי תשלום. ודא שמדובר באישור ביט.")
-                    return
+                val bitText = tesseractText ?: mlKitText
+                bitText?.let {
+                    BitShareParser.parse(hebrewText = it, latinText = mlKitText ?: it, mlKitAmount = mlKitAmount)
                 }
             }
 
-            val db = (application as AutoKabalaApplication).database
-            val entity = PaymentEntity(
-                source      = paymentData.source,
-                senderName  = paymentData.senderName,
-                amount      = paymentData.amount,
-                isConfirmed = paymentData.isConfirmed,
-                timestamp   = paymentData.timestamp
-            )
-            val rowId = withContext(Dispatchers.IO) { db.paymentDao().insertPayment(entity) }
-            if (rowId == -1L) {
-                overlayState.value = OverlayState.Err("תשלום זה כבר שותף במערכת")
+            bitmap.recycle()
+
+            if (paymentData == null) {
+                val hint = if (isPaybox) "ודא שמדובר באישור פייבוקס" else "ודא שמדובר באישור ביט"
+                overlayState.value = OverlayState.Err("לא נמצאו פרטי תשלום — $hint")
                 return
             }
 
-            val saved = withContext(Dispatchers.IO) {
-                db.paymentDao().getPendingPaymentsSnapshot().firstOrNull {
-                    it.senderName == paymentData.senderName && it.amount == paymentData.amount
-                } ?: entity.copy(id = rowId.toInt())
-            }
-            pendingPaymentId = saved.id  // track so we can delete if user cancels
-
-            val clients = withContext(Dispatchers.IO) { db.clientDao().getAllClientsSnapshot() }
-            val matchResult = matchClient(paymentData.senderName, activeFilteredClients(clients))
-            val elapsed = System.currentTimeMillis() - startMs
-            if (elapsed < 900L) delay(900L - elapsed)
-            overlayState.value = OverlayState.Ready(saved, matchResult, clients)
+            finishPaymentFlow(paymentData, startMs)
 
         } catch (e: Exception) {
             Log.e("BubbleService", "Error processing screenshot", e)
             overlayState.value = OverlayState.Err("שגיאה בעיבוד: ${e.message}")
         }
+    }
+
+    private suspend fun finishPaymentFlow(paymentData: PaymentData, startMs: Long) {
+        val db = (application as AutoKabalaApplication).database
+        val entity = PaymentEntity(
+            source      = paymentData.source,
+            senderName  = paymentData.senderName,
+            amount      = paymentData.amount,
+            isConfirmed = paymentData.isConfirmed,
+            timestamp   = paymentData.timestamp
+        )
+        val rowId = withContext(Dispatchers.IO) { db.paymentDao().insertPayment(entity) }
+        if (rowId == -1L) {
+            overlayState.value = OverlayState.Err("תשלום זה כבר שותף במערכת")
+            return
+        }
+
+        val saved = withContext(Dispatchers.IO) {
+            db.paymentDao().getPendingPaymentsSnapshot().firstOrNull {
+                it.senderName == paymentData.senderName && it.amount == paymentData.amount
+            } ?: entity.copy(id = rowId.toInt())
+        }
+        pendingPaymentId = saved.id
+
+        val clients = withContext(Dispatchers.IO) { db.clientDao().getAllClientsSnapshot() }
+        val matchResult = matchClient(paymentData.senderName, activeFilteredClients(clients))
+        val elapsed = System.currentTimeMillis() - startMs
+        if (elapsed < 900L) delay(900L - elapsed)
+        overlayState.value = OverlayState.Ready(saved, matchResult, clients)
     }
 
     // ─── Client matching ──────────────────────────────────────────────────────
@@ -544,7 +572,21 @@ class BubbleService : Service() {
         if (a.length < 2 || b.length < 2) return false
         val long  = if (a.length >= b.length) a else b
         val short = if (a.length <  b.length) a else b
-        return long.startsWith(short, ignoreCase = true)
+        if (long.startsWith(short, ignoreCase = true)) return true
+        // Fuzzy: Levenshtein ≤ 2 for words with ≥ 4 chars (catches OCR off-by-one errors)
+        if (short.length >= 4 && levenshtein(a.lowercase(), b.lowercase()) <= 2) return true
+        return false
+    }
+
+    private fun levenshtein(a: String, b: String): Int {
+        val dp = Array(a.length + 1) { IntArray(b.length + 1) }
+        for (i in 0..a.length) dp[i][0] = i
+        for (j in 0..b.length) dp[0][j] = j
+        for (i in 1..a.length) for (j in 1..b.length) {
+            dp[i][j] = if (a[i - 1] == b[j - 1]) dp[i - 1][j - 1]
+                       else 1 + minOf(dp[i - 1][j], dp[i][j - 1], dp[i - 1][j - 1])
+        }
+        return dp[a.length][b.length]
     }
 
     // ─── Receipt issuance ─────────────────────────────────────────────────────

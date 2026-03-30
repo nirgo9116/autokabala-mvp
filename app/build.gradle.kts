@@ -35,12 +35,16 @@ android {
         val icountPass = localProperties.getProperty("icount.pass") ?: ""
         val backendUrl = localProperties.getProperty("backend.url") ?: "http://192.168.1.198:3000"
         val claudeApiKey = localProperties.getProperty("claude.api.key") ?: ""
+        val geminiApiKey = localProperties.getProperty("gemini.api.key") ?: ""
+        val openaiApiKey = localProperties.getProperty("openai.api.key") ?: ""
 
         buildConfigField("String", "ICOUNT_CID", "\"$icountCid\"")
         buildConfigField("String", "ICOUNT_USER", "\"$icountUser\"")
         buildConfigField("String", "ICOUNT_PASS", "\"$icountPass\"")
         buildConfigField("String", "BACKEND_URL", "\"$backendUrl\"")
         buildConfigField("String", "CLAUDE_API_KEY", "\"$claudeApiKey\"")
+        buildConfigField("String", "GEMINI_API_KEY", "\"$geminiApiKey\"")
+        buildConfigField("String", "OPENAI_API_KEY", "\"$openaiApiKey\"")
     }
 
     buildTypes {

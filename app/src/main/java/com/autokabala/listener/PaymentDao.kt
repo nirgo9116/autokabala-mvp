@@ -69,4 +69,7 @@ interface PaymentDao {
 
     @Query("SELECT * FROM pending_payments WHERE status != 'ignored' AND timestamp >= :since ORDER BY timestamp DESC")
     suspend fun getRecentPaymentsSnapshot(since: Long): List<PaymentEntity>
+
+    @Query("DELETE FROM pending_payments")
+    suspend fun deleteAllPayments()
 }
