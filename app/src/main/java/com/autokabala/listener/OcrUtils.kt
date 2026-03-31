@@ -35,6 +35,64 @@ object OcrUtils {
         data class Success(val data: PaymentData) : GeminiResult()
     }
 
+    /**
+     * Detect payment app source by sampling background color — no OCR needed.
+     * Bit uses a dark background (purple/dark-blue), Paybox uses a light/white background.
+     * Samples a grid of pixels in the center-top area (y 5%–20%) to get the dominant brightness.
+     */
+    fun detectSourceByColor(bitmap: Bitmap): String {
+        val sampleCount = 12
+        var totalBrightness = 0L
+        val yRange = (bitmap.height * 0.05).toInt()..(bitmap.height * 0.20).toInt()
+        val xStep = bitmap.width / (sampleCount + 1)
+        val yStep = (yRange.last - yRange.first) / 3
+        var samples = 0
+        for (xi in 1..sampleCount) {
+            for (yi in 0..2) {
+                val x = xi * xStep
+                val y = yRange.first + yi * yStep
+                if (x < bitmap.width && y < bitmap.height) {
+                    val pixel = bitmap.getPixel(x, y)
+                    totalBrightness += (android.graphics.Color.red(pixel) +
+                        android.graphics.Color.green(pixel) +
+                        android.graphics.Color.blue(pixel)) / 3
+                    samples++
+                }
+            }
+        }
+        val avgBrightness = if (samples > 0) totalBrightness / samples else 128
+        val source = if (avgBrightness < 100) "bit" else "paybox"
+        Log.d("OcrUtils", "detectSourceByColor: avgBrightness=$avgBrightness → $source")
+        return source
+    }
+
+    /**
+     * Crop the bitmap to the relevant payment area before sending to OpenAI.
+     * Uses background-color detection (fast, no OCR) to distinguish Bit from Paybox,
+     * then applies per-source crop window to exclude irrelevant UI chrome.
+     *
+     * Bit (dark bg):    y 15%–80% — sender line + amount are in the middle section
+     * Paybox (light bg): y 10%–75% — content starts slightly higher
+     */
+    fun cropForOpenAi(bitmap: Bitmap): Bitmap {
+        val source = detectSourceByColor(bitmap)
+        // Paybox: no crop — full image gives the model enough context to distinguish
+        // sender ("העברה מ X") from recipient ("הועבר אל Y"). Cropping was proven to
+        // cause hallucinations by showing "יריב" without the "הועבר אל" label context.
+        if (source != "bit") {
+            Log.d("OcrUtils", "cropForOpenAi: source=paybox — no crop (full image ${bitmap.width}×${bitmap.height})")
+            return bitmap
+        }
+        // Bit: skip top empty dark area (0-25%) and capture through date/time (88%)
+        val topFrac    = 0.25f
+        val bottomFrac = 0.92f   // captures date row (~74-83%) and time row (~83-90%)
+        val cropTop = (bitmap.height * topFrac).toInt().coerceAtLeast(0)
+        val cropBottom = (bitmap.height * bottomFrac).toInt().coerceAtMost(bitmap.height)
+        val cropH = (cropBottom - cropTop).coerceAtLeast(1)
+        Log.d("OcrUtils", "cropForOpenAi: source=bit crop y=$cropTop...$cropBottom (${cropH}px / ${bitmap.height}px total)")
+        return Bitmap.createBitmap(bitmap, 0, cropTop, bitmap.width, cropH)
+    }
+
     suspend fun runMlKitOcr(bitmap: Bitmap): MlKitResult? =
         suspendCancellableCoroutine { cont ->
             try {
@@ -315,11 +373,22 @@ object OcrUtils {
     // Parses date/time strings from Gemini into epoch ms.
     // Supports: "DD.MM.YY HH:MM" (Bit) and "DD/MM/YYYY HH:MM" (Paybox)
     private fun parseDateTimeToMs(s: String): Long? {
+        // Full date + time: "DD.MM.YY HH:MM" or "DD/MM/YYYY HH:MM"
         Regex("""(\d{1,2})[./](\d{1,2})[./](\d{2,4})\s+(\d{1,2}):(\d{2})""").find(s)?.let {
             val (d, m, y, h, min) = it.destructured
             val year = if (y.length == 2) 2000 + y.toInt() else y.toInt()
             return java.util.Calendar.getInstance().apply {
                 set(year, m.toInt() - 1, d.toInt(), h.toInt(), min.toInt(), 0)
+                set(java.util.Calendar.MILLISECOND, 0)
+            }.timeInMillis
+        }
+        // Date only: "DD.MM.YY" or "DD/MM/YYYY" — default to noon so the date is correct
+        Regex("""(\d{1,2})[./](\d{1,2})[./](\d{2,4})""").find(s)?.let {
+            val (d, m, y) = it.destructured
+            val year = if (y.length == 2) 2000 + y.toInt() else y.toInt()
+            Log.d("OcrUtils", "parseDateTimeToMs: date-only '$s' → $d/$m/$year 12:00")
+            return java.util.Calendar.getInstance().apply {
+                set(year, m.toInt() - 1, d.toInt(), 12, 0, 0)
                 set(java.util.Calendar.MILLISECOND, 0)
             }.timeInMillis
         }
@@ -378,6 +447,10 @@ object OcrUtils {
                 3. amount: Number next to ₪. Ignore "+" signs. Most prominent (large font) if multiple. 0 if not found.
                 4. dateTime: Date and time exactly as shown. Combine with space if separate. "" if not found.
                 5. If unsure about any field → return "" or 0. Do NOT guess.
+                6. CRITICAL — sender vs recipient: This screen shows money RECEIVED by the phone owner.
+                   - The SENDER is the person who sent the money. Their name follows "העברה מ" or "נשלחו לך מ".
+                   - The phone owner's name (recipient/account holder) may appear elsewhere in the UI — do NOT use it.
+                   - Copy the name that immediately follows the payment phrase, letter by letter.
 
                 Return JSON only. No explanations. No markdown. No backticks.
             """.trimIndent()
@@ -449,7 +522,13 @@ object OcrUtils {
             val amount      = result.optDouble("amount", 0.0)
             val dateTimeStr = result.optString("dateTime", "")
             Log.d("OcrUtils", "Gemini parsed: source='$source' senderLine='$senderLine' amount=$amount dateTime='$dateTimeStr'")
-            val senderName = when (source) {
+            val effectiveSource = when {
+                source == "paybox" || senderLine.contains("העברה מ") -> "paybox"
+                source == "bit"    || senderLine.contains("נשלחו לך") -> "bit"
+                else -> ""
+            }
+            if (effectiveSource != source) Log.d("OcrUtils", "Gemini: source derived from senderLine → '$effectiveSource'")
+            val senderName = when (effectiveSource) {
                 "bit"    -> Regex("נשלחו לך מ(.+)").find(senderLine)?.groupValues?.get(1)?.trim() ?: ""
                 "paybox" -> Regex("העברה מ(.+)").find(senderLine)?.groupValues?.get(1)?.trim() ?: ""
                 else     -> ""
@@ -468,7 +547,7 @@ object OcrUtils {
             Log.d("OcrUtils", "Gemini timestamp: $timestamp from '$dateTimeStr'")
 
             GeminiResult.Success(PaymentData(
-                source      = source,
+                source      = effectiveSource,
                 senderName  = senderName,
                 amount      = amount,
                 isConfirmed = true,
@@ -524,6 +603,10 @@ object OcrUtils {
                 3. amount: Number next to ₪. Ignore "+" signs. Most prominent (large font) if multiple. 0 if not found.
                 4. dateTime: Date and time exactly as shown. Combine with space if separate. "" if not found.
                 5. If unsure about any field → return "" or 0. Do NOT guess.
+                6. CRITICAL — sender vs recipient: This screen shows money RECEIVED by the phone owner.
+                   - The SENDER is the person who sent the money. Their name follows "העברה מ" or "נשלחו לך מ".
+                   - The phone owner's name (recipient/account holder) may appear elsewhere in the UI — do NOT use it.
+                   - Copy the name that immediately follows the payment phrase, letter by letter.
 
                 Return JSON only. No explanations. No markdown. No backticks.
             """.trimIndent()
@@ -588,7 +671,13 @@ object OcrUtils {
             val amount      = result.optDouble("amount", 0.0)
             val dateTimeStr = result.optString("dateTime", "")
             Log.d("OcrUtils", "OpenAI parsed: source='$source' senderLine='$senderLine' amount=$amount dateTime='$dateTimeStr'")
-            val senderName = when (source) {
+            val effectiveSource = when {
+                source == "paybox" || senderLine.contains("העברה מ") -> "paybox"
+                source == "bit"    || senderLine.contains("נשלחו לך") -> "bit"
+                else -> ""
+            }
+            if (effectiveSource != source) Log.d("OcrUtils", "OpenAI: source derived from senderLine → '$effectiveSource'")
+            val senderName = when (effectiveSource) {
                 "bit"    -> Regex("נשלחו לך מ(.+)").find(senderLine)?.groupValues?.get(1)?.trim() ?: ""
                 "paybox" -> Regex("העברה מ(.+)").find(senderLine)?.groupValues?.get(1)?.trim() ?: ""
                 else     -> ""
@@ -607,7 +696,7 @@ object OcrUtils {
             Log.d("OcrUtils", "OpenAI timestamp: $timestamp from '$dateTimeStr'")
 
             GeminiResult.Success(PaymentData(
-                source      = source,
+                source      = effectiveSource,
                 senderName  = senderName,
                 amount      = amount,
                 isConfirmed = true,

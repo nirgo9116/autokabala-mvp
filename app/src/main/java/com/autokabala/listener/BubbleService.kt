@@ -417,9 +417,18 @@ class BubbleService : Service() {
     private suspend fun processScreenshot(bitmap: Bitmap) {
         val startMs = System.currentTimeMillis()
         try {
-            // ── Primary: OpenAI Vision ───────────────────────────────────────
-            Log.d("BubbleService", "Trying OpenAI OCR (primary)")
-            when (val visionResult = OcrUtils.runOpenAiOcr(bitmap)) {
+            // ── Primary: OpenAI Vision (on cropped area, up to 2 attempts) ──────
+            Log.d("BubbleService", "Trying OpenAI OCR (attempt 1)")
+            val croppedBitmap = OcrUtils.cropForOpenAi(bitmap)
+            var openAiResult  = OcrUtils.runOpenAiOcr(croppedBitmap)
+            if (croppedBitmap !== bitmap) croppedBitmap.recycle()
+            if (openAiResult == null) {
+                Log.d("BubbleService", "OpenAI attempt 1 null — retrying (attempt 2)")
+                val retryBitmap = OcrUtils.cropForOpenAi(bitmap)
+                openAiResult = OcrUtils.runOpenAiOcr(retryBitmap)
+                if (retryBitmap !== bitmap) retryBitmap.recycle()
+            }
+            when (openAiResult) {
                 is OcrUtils.GeminiResult.Rejected -> {
                     Log.d("BubbleService", "OpenAI: outgoing payment — showing error")
                     bitmap.recycle()
@@ -427,9 +436,9 @@ class BubbleService : Service() {
                     return
                 }
                 is OcrUtils.GeminiResult.Success -> {
-                    Log.d("BubbleService", "OpenAI succeeded: ${visionResult.data.senderName} / ${visionResult.data.amount}")
+                    Log.d("BubbleService", "OpenAI succeeded: ${openAiResult.data.senderName} / ${openAiResult.data.amount}")
                     bitmap.recycle()
-                    finishPaymentFlow(visionResult.data, startMs)
+                    finishPaymentFlow(openAiResult.data, startMs)
                     return
                 }
                 null -> Unit // fall through to Tesseract
