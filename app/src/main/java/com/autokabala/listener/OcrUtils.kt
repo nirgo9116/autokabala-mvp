@@ -723,6 +723,100 @@ object OcrUtils {
         }
     }
 
+    // ── Google Cloud Vision (primary OCR) ────────────────────────────────────
+
+    private val visionClient: OkHttpClient by lazy {
+        OkHttpClient.Builder()
+            .connectTimeout(15, TimeUnit.SECONDS)
+            .readTimeout(30, TimeUnit.SECONDS)
+            .build()
+    }
+
+    suspend fun runGoogleVisionOcr(bitmap: Bitmap): String? = withContext(Dispatchers.IO) {
+        try {
+            val apiKey = BuildConfig.GOOGLE_VISION_API_KEY
+            if (apiKey.isBlank()) {
+                Log.w("OcrUtils", "Google Vision API key not configured")
+                return@withContext null
+            }
+
+            // Scale to max 1024px — Vision API handles full-res but this reduces cost and latency
+            val maxDim = 1024
+            val scale = maxDim.toFloat() / maxOf(bitmap.width, bitmap.height)
+            val small = if (scale < 1f)
+                Bitmap.createScaledBitmap(bitmap, (bitmap.width * scale).toInt(), (bitmap.height * scale).toInt(), true)
+            else bitmap
+            val baos = ByteArrayOutputStream()
+            small.compress(Bitmap.CompressFormat.JPEG, 85, baos)
+            if (small !== bitmap) small.recycle()
+            val base64Image = Base64.encodeToString(baos.toByteArray(), Base64.NO_WRAP)
+
+            val body = JSONObject().apply {
+                put("requests", org.json.JSONArray().apply {
+                    put(JSONObject().apply {
+                        put("image", JSONObject().apply {
+                            put("content", base64Image)
+                        })
+                        put("features", org.json.JSONArray().apply {
+                            put(JSONObject().apply {
+                                put("type", "TEXT_DETECTION")
+                            })
+                        })
+                        put("imageContext", JSONObject().apply {
+                            // Hint both Hebrew and Latin so numbers + mixed names are read correctly
+                            put("languageHints", org.json.JSONArray().apply {
+                                put("he")
+                                put("en")
+                            })
+                        })
+                    })
+                })
+            }.toString()
+
+            val request = Request.Builder()
+                .url("https://vision.googleapis.com/v1/images:annotate?key=$apiKey")
+                .post(body.toRequestBody("application/json".toMediaType()))
+                .build()
+
+            val response = visionClient.newCall(request).execute()
+            val rawBody = response.body?.string() ?: ""
+            Log.d("OcrUtils", "Google Vision HTTP ${response.code}")
+            if (!response.isSuccessful) {
+                Log.w("OcrUtils", "Google Vision error: $rawBody")
+                return@withContext null
+            }
+
+            val text = try {
+                val responseObj = JSONObject(rawBody)
+                    .getJSONArray("responses")
+                    .getJSONObject(0)
+                // fullTextAnnotation preserves newlines; fall back to textAnnotations[0].description
+                responseObj.optJSONObject("fullTextAnnotation")?.optString("text")
+                    ?: responseObj.optJSONArray("textAnnotations")?.optJSONObject(0)?.optString("description")
+            } catch (e: Exception) {
+                Log.e("OcrUtils", "Google Vision response parse failed", e)
+                return@withContext null
+            }
+
+            Log.d("OcrUtils", "Google Vision text: $text")
+            text?.takeIf { it.isNotBlank() }
+        } catch (e: Exception) {
+            Log.e("OcrUtils", "Google Vision OCR failed", e)
+            null
+        }
+    }
+
+    /** Extract payment amount (₪) from raw OCR text. */
+    fun extractAmountFromText(text: String): Double? {
+        val pattern = Regex("""₪\s*([\d,]+(?:\.\d{1,2})?)|([\d,]+(?:\.\d{1,2})?)\s*₪""")
+        return pattern.find(text)?.let { match ->
+            (match.groupValues[1].ifBlank { match.groupValues[2] })
+                .replace(",", "")
+                .toDoubleOrNull()
+                ?.takeIf { it in 1.0..99_999.0 }
+        }
+    }
+
     fun ensureTessData(context: Context): String {
         val tessDir = File(context.filesDir, "tessdata")
         tessDir.mkdirs()

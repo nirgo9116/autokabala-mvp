@@ -37,6 +37,7 @@ android {
         val claudeApiKey = localProperties.getProperty("claude.api.key") ?: ""
         val geminiApiKey = localProperties.getProperty("gemini.api.key") ?: ""
         val openaiApiKey = localProperties.getProperty("openai.api.key") ?: ""
+        val googleVisionApiKey = localProperties.getProperty("google.vision.api.key") ?: ""
 
         buildConfigField("String", "ICOUNT_CID", "\"$icountCid\"")
         buildConfigField("String", "ICOUNT_USER", "\"$icountUser\"")
@@ -45,6 +46,7 @@ android {
         buildConfigField("String", "CLAUDE_API_KEY", "\"$claudeApiKey\"")
         buildConfigField("String", "GEMINI_API_KEY", "\"$geminiApiKey\"")
         buildConfigField("String", "OPENAI_API_KEY", "\"$openaiApiKey\"")
+        buildConfigField("String", "GOOGLE_VISION_API_KEY", "\"$googleVisionApiKey\"")
     }
 
     buildTypes {

@@ -417,35 +417,43 @@ class BubbleService : Service() {
     private suspend fun processScreenshot(bitmap: Bitmap) {
         val startMs = System.currentTimeMillis()
         try {
-            // ── Primary: OpenAI Vision (on cropped area, up to 2 attempts) ──────
-            Log.d("BubbleService", "Trying OpenAI OCR (attempt 1)")
-            val croppedBitmap = OcrUtils.cropForOpenAi(bitmap)
-            var openAiResult  = OcrUtils.runOpenAiOcr(croppedBitmap)
-            if (croppedBitmap !== bitmap) croppedBitmap.recycle()
-            if (openAiResult == null) {
-                Log.d("BubbleService", "OpenAI attempt 1 null — retrying (attempt 2)")
-                val retryBitmap = OcrUtils.cropForOpenAi(bitmap)
-                openAiResult = OcrUtils.runOpenAiOcr(retryBitmap)
-                if (retryBitmap !== bitmap) retryBitmap.recycle()
+            // ── Primary: Google Cloud Vision (up to 2 attempts) ──────────────
+            Log.d("BubbleService", "Trying Google Vision OCR (attempt 1)")
+            var visionText = OcrUtils.runGoogleVisionOcr(bitmap)
+            if (visionText == null) {
+                Log.d("BubbleService", "Google Vision attempt 1 null — retrying (attempt 2)")
+                visionText = OcrUtils.runGoogleVisionOcr(bitmap)
             }
-            when (openAiResult) {
-                is OcrUtils.GeminiResult.Rejected -> {
-                    Log.d("BubbleService", "OpenAI: outgoing payment — showing error")
+
+            if (visionText != null) {
+                Log.d("BubbleService", "Google Vision text:\n$visionText")
+                val isPayboxVision = PayboxShareParser.isPaybox(visionText)
+                Log.d("BubbleService", "Google Vision source: ${if (isPayboxVision) "Paybox" else "Bit"}")
+                val visionAmount = OcrUtils.extractAmountFromText(visionText)
+                Log.d("BubbleService", "Google Vision amount: $visionAmount")
+
+                val visionPaymentData = if (isPayboxVision) {
+                    PayboxShareParser.parse(visionText, visionText, visionAmount, null)
+                } else {
+                    if (BitShareParser.isExpired(visionText)) {
+                        bitmap.recycle()
+                        overlayState.value = OverlayState.Err("תשלום זה פג תוקף")
+                        return
+                    }
+                    BitShareParser.parse(hebrewText = visionText, latinText = visionText, mlKitAmount = visionAmount)
+                }
+
+                if (visionPaymentData != null) {
+                    Log.d("BubbleService", "Google Vision parsed: ${visionPaymentData.senderName} / ${visionPaymentData.amount}")
                     bitmap.recycle()
-                    overlayState.value = OverlayState.Err("זה לא אישור תשלום שהתקבל — שתף רק תשלומים נכנסים")
+                    finishPaymentFlow(visionPaymentData, startMs)
                     return
                 }
-                is OcrUtils.GeminiResult.Success -> {
-                    Log.d("BubbleService", "OpenAI succeeded: ${openAiResult.data.senderName} / ${openAiResult.data.amount}")
-                    bitmap.recycle()
-                    finishPaymentFlow(openAiResult.data, startMs)
-                    return
-                }
-                null -> Unit // fall through to Tesseract
+                Log.d("BubbleService", "Google Vision text unparseable — falling back to ML Kit")
             }
 
             // ── Fallback: ML Kit + Tesseract ──────────────────────────────────
-            Log.d("BubbleService", "OpenAI returned null — falling back to Tesseract")
+            Log.d("BubbleService", "Falling back to ML Kit + Tesseract")
             if (!OcrUtils.isTesseractAvailable()) {
                 bitmap.recycle()
                 overlayState.value = OverlayState.Err("לא ניתן לקרוא את התשלום — נסה שוב או שתף תמונה")
