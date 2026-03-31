@@ -440,8 +440,9 @@ object OcrUtils {
                 Rules:
                 1. source: "bit" if you see "נשלחו לך", "paybox" if you see "העברה מ", otherwise "".
                 2. senderLine: Copy the FULL line containing "נשלחו לך" or "העברה מ" EXACTLY as it appears.
+                   - STRICT CHARACTER MODE: copy each Hebrew character one by one, exactly as it appears in the image.
+                   - Do NOT autocomplete names. Do NOT infer or add missing letters. Do NOT shorten names.
                    - Do NOT translate Hebrew. Do NOT fix or correct Hebrew spelling. Do NOT reorder words.
-                   - Pay special attention to Hebrew names — they are critical. Do NOT omit any characters.
                    - If the name and phrase appear on separate lines, combine them with a space.
                    - If not found → "".
                 3. amount: Number next to ₪. Ignore "+" signs. Most prominent (large font) if multiple. 0 if not found.
@@ -450,7 +451,8 @@ object OcrUtils {
                 6. CRITICAL — sender vs recipient: This screen shows money RECEIVED by the phone owner.
                    - The SENDER is the person who sent the money. Their name follows "העברה מ" or "נשלחו לך מ".
                    - The phone owner's name (recipient/account holder) may appear elsewhere in the UI — do NOT use it.
-                   - Copy the name that immediately follows the payment phrase, letter by letter.
+                   - Copy the name that immediately follows the payment phrase, character by character.
+                7. VERIFICATION: Before returning, re-read the senderLine in the image character by character and confirm every letter matches what you wrote.
 
                 Return JSON only. No explanations. No markdown. No backticks.
             """.trimIndent()
@@ -538,6 +540,12 @@ object OcrUtils {
                 Log.d("OcrUtils", "Gemini: name empty — Tesseract fallback")
                 return@withContext null
             }
+            // Hallucination guard: the name we extracted must literally appear in the line the model returned.
+            // If it doesn't, the model fabricated a name that wasn't in the image.
+            if (!senderLine.contains(senderName)) {
+                Log.w("OcrUtils", "Gemini: senderName '$senderName' not found in senderLine '$senderLine' — hallucination guard, falling back")
+                return@withContext null
+            }
             if (amount <= 0) {
                 Log.d("OcrUtils", "Gemini: amount=$amount — Tesseract fallback")
                 return@withContext null
@@ -596,8 +604,9 @@ object OcrUtils {
                 Rules:
                 1. source: "bit" if you see "נשלחו לך", "paybox" if you see "העברה מ", otherwise "".
                 2. senderLine: Copy the FULL line containing "נשלחו לך" or "העברה מ" EXACTLY as it appears.
+                   - STRICT CHARACTER MODE: copy each Hebrew character one by one, exactly as it appears in the image.
+                   - Do NOT autocomplete names. Do NOT infer or add missing letters. Do NOT shorten names.
                    - Do NOT translate Hebrew. Do NOT fix or correct Hebrew spelling. Do NOT reorder words.
-                   - Pay special attention to Hebrew names — they are critical. Do NOT omit any characters.
                    - If the name and phrase appear on separate lines, combine them with a space.
                    - If not found → "".
                 3. amount: Number next to ₪. Ignore "+" signs. Most prominent (large font) if multiple. 0 if not found.
@@ -606,7 +615,8 @@ object OcrUtils {
                 6. CRITICAL — sender vs recipient: This screen shows money RECEIVED by the phone owner.
                    - The SENDER is the person who sent the money. Their name follows "העברה מ" or "נשלחו לך מ".
                    - The phone owner's name (recipient/account holder) may appear elsewhere in the UI — do NOT use it.
-                   - Copy the name that immediately follows the payment phrase, letter by letter.
+                   - Copy the name that immediately follows the payment phrase, character by character.
+                7. VERIFICATION: Before returning, re-read the senderLine in the image character by character and confirm every letter matches what you wrote.
 
                 Return JSON only. No explanations. No markdown. No backticks.
             """.trimIndent()
@@ -685,6 +695,11 @@ object OcrUtils {
             Log.d("OcrUtils", "OpenAI senderName='$senderName'")
             if (senderName.isBlank()) {
                 Log.d("OcrUtils", "OpenAI: name empty — Tesseract fallback")
+                return@withContext null
+            }
+            // Hallucination guard: the name we extracted must literally appear in the line the model returned.
+            if (!senderLine.contains(senderName)) {
+                Log.w("OcrUtils", "OpenAI: senderName '$senderName' not found in senderLine '$senderLine' — hallucination guard, falling back")
                 return@withContext null
             }
             if (amount <= 0) {

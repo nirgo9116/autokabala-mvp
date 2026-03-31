@@ -30,6 +30,10 @@
 -keep class com.google.mlkit.** { *; }
 -dontwarn com.google.mlkit.**
 
+# ── SLF4J (used transitively by Ktor/OkHttp) ─────────────────────────────────
+-dontwarn org.slf4j.impl.StaticLoggerBinder
+-dontwarn org.slf4j.impl.StaticMDCBinder
+
 # ── Stack traces (keep line numbers for crash reports) ────────────────────────
 -keepattributes SourceFile,LineNumberTable
 -renamesourcefileattribute SourceFile

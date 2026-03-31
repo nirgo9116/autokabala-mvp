@@ -246,7 +246,7 @@ class BubbleService : Service() {
         ).apply {
             gravity = Gravity.TOP or Gravity.START
             x = resources.displayMetrics.widthPixels - size - (16 * dp).toInt()
-            y = (200 * dp).toInt()
+            y = (80 * dp).toInt()
         }
 
         val container = FrameLayout(this)
@@ -1075,14 +1075,15 @@ private fun ReadyContent(
                         Text("✕", fontSize = 20.sp, color = dismissText)
                     }
                     // הפק קבלה
+                    val issueEnabled = btnEnabled
                     Box(
                         modifier = Modifier
                             .weight(1f)
                             .height(54.dp)
-                            .alpha(if (btnEnabled) 1f else 0.45f)
+                            .alpha(if (issueEnabled) 1f else 0.45f)
                             .clip(RoundedCornerShape(14.dp))
                             .background(brand)
-                            .clickable(enabled = btnEnabled) {
+                            .clickable(enabled = issueEnabled) {
                                 effectiveClient?.let {
                                     if (editedAmount != state.payment.amount && state.payment.amount != 0.0)
                                         showAmountDialog = true
@@ -1094,19 +1095,17 @@ private fun ReadyContent(
                     ) {
                         Text("הפק קבלה", color = ctaText, fontWeight = FontWeight.Bold, fontSize = 18.sp)
                     }
-                    // קבלת דמה (DEBUG only)
-                    if (BuildConfig.DEBUG) {
-                        Box(
-                            modifier = Modifier
-                                .size(54.dp)
-                                .clip(RoundedCornerShape(14.dp))
-                                .background(dismissBg)
-                                .border(1.dp, dismissBorder, RoundedCornerShape(14.dp))
-                                .clickable { onDemoReceipt() },
-                            contentAlignment = Alignment.Center
-                        ) {
-                            Text("🔬", fontSize = 20.sp)
-                        }
+                    // קבלת דמה — always visible so testers can exercise the flow
+                    Box(
+                        modifier = Modifier
+                            .size(54.dp)
+                            .clip(RoundedCornerShape(14.dp))
+                            .background(dismissBg)
+                            .border(1.dp, dismissBorder, RoundedCornerShape(14.dp))
+                            .clickable { onDemoReceipt() },
+                        contentAlignment = Alignment.Center
+                    ) {
+                        Text("🔬", fontSize = 20.sp)
                     }
                 }
             }

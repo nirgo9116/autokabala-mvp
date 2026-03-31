@@ -1089,8 +1089,7 @@ fun PaymentCard(
                         horizontalArrangement = Arrangement.SpaceBetween,
                         verticalAlignment = Alignment.CenterVertically
                     ) {
-                        Text("העסק שלי", color = Color.White, style = MaterialTheme.typography.bodyLarge, fontWeight = FontWeight.Bold)
-                        Text("קבלה", color = Color.White.copy(alpha = 0.75f), style = MaterialTheme.typography.bodyMedium)
+                        Text(payment.senderName.ifBlank { "העסק שלי" }, color = Color.White, style = MaterialTheme.typography.bodyLarge, fontWeight = FontWeight.Bold)
                     }
                 }
 
