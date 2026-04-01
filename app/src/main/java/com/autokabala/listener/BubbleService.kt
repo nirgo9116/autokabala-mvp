@@ -581,9 +581,11 @@ class BubbleService : Service() {
         if (a.length < 2 || b.length < 2) return false
         val long  = if (a.length >= b.length) a else b
         val short = if (a.length <  b.length) a else b
-        if (long.startsWith(short, ignoreCase = true)) return true
-        // Fuzzy: Levenshtein ≤ 2 for words with ≥ 4 chars (catches OCR off-by-one errors)
-        if (short.length >= 4 && levenshtein(a.lowercase(), b.lowercase()) <= 2) return true
+        // Prefix: "מאיר" matches "מאירה" — require ≥ 3 chars to avoid "לי" matching "ליאור"
+        if (short.length >= 3 && long.startsWith(short, ignoreCase = true)) return true
+        // Fuzzy: Levenshtein ≤ 2 only for long words (≥ 6 chars) — 4-char Hebrew names are too
+        // similar to each other (e.g. "שרון"↔"הרמן", "רועי"↔"אורי" both score distance 2)
+        if (short.length >= 6 && levenshtein(a.lowercase(), b.lowercase()) <= 2) return true
         return false
     }
 
