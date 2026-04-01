@@ -419,14 +419,16 @@ class BubbleService : Service() {
         try {
             // ── Primary: Google Cloud Vision (up to 2 attempts) ──────────────
             Log.d("BubbleService", "Trying Google Vision OCR (attempt 1)")
-            var visionText = OcrUtils.runGoogleVisionOcr(bitmap)
-            if (visionText == null) {
+            var visionResult = OcrUtils.runGoogleVisionOcr(bitmap)
+            if (visionResult == null) {
                 Log.d("BubbleService", "Google Vision attempt 1 null — retrying (attempt 2)")
-                visionText = OcrUtils.runGoogleVisionOcr(bitmap)
+                visionResult = OcrUtils.runGoogleVisionOcr(bitmap)
             }
 
-            if (visionText != null) {
+            if (visionResult != null) {
+                val visionText = visionResult.text
                 Log.d("BubbleService", "Google Vision text:\n$visionText")
+                Log.d("BubbleService", "Google Vision structured name: ${visionResult.senderName}")
                 val isPayboxVision = PayboxShareParser.isPaybox(visionText)
                 Log.d("BubbleService", "Google Vision source: ${if (isPayboxVision) "Paybox" else "Bit"}")
                 val visionAmount = OcrUtils.extractAmountFromText(visionText)
@@ -440,7 +442,12 @@ class BubbleService : Service() {
                         overlayState.value = OverlayState.Err("תשלום זה פג תוקף")
                         return
                     }
-                    BitShareParser.parse(hebrewText = visionText, latinText = visionText, mlKitAmount = visionAmount)
+                    BitShareParser.parse(
+                        hebrewText     = visionText,
+                        latinText      = visionText,
+                        mlKitAmount    = visionAmount,
+                        structuredName = visionResult.senderName
+                    )
                 }
 
                 if (visionPaymentData != null) {

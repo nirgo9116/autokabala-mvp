@@ -62,7 +62,7 @@ object BitShareParser {
      *
      * When only one engine is available, pass the same text for both parameters.
      */
-    fun parse(hebrewText: String, latinText: String = hebrewText, mlKitAmount: Double? = null): PaymentData? {
+    fun parse(hebrewText: String, latinText: String = hebrewText, mlKitAmount: Double? = null, structuredName: String? = null): PaymentData? {
         Log.d(TAG, "=== BitShareParser START ===")
         Log.d(TAG, "Tesseract (Hebrew):\n$hebrewText")
         if (latinText !== hebrewText) Log.d(TAG, "ML Kit (Latin):\n$latinText")
@@ -72,8 +72,16 @@ object BitShareParser {
 
         Log.d(TAG, "Hebrew lines: ${hebrewLines.joinToString(" | ")}")
 
-        val senderName = extractSenderName(hebrewLines, latinLines) ?: run {
-            Log.w(TAG, "Cannot extract sender name"); return null
+        // Structured name (from Vision bounding-box extraction) takes priority over regex parsing.
+        // Still validated — guards against Vision hallucinating a plausible-looking but wrong name.
+        val senderName = if (structuredName != null && isValidName(structuredName)) {
+            Log.d(TAG, "Using Vision structured name: '$structuredName'")
+            structuredName
+        } else {
+            if (structuredName != null) Log.w(TAG, "Structured name '$structuredName' failed validation — falling back to regex")
+            extractSenderName(hebrewLines, latinLines) ?: run {
+                Log.w(TAG, "Cannot extract sender name"); return null
+            }
         }
 
         // Amount: prefer ML Kit bounding-box result (most reliable — picks the largest
