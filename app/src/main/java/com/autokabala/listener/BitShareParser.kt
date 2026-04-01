@@ -110,38 +110,72 @@ object BitShareParser {
 
     // ── Name ──────────────────────────────────────────────────────────────────
 
+    // Returns true for clearly invalid OCR output — garbled Hebrew, too short, or repeated chars.
+    private fun isGarbageText(name: String): Boolean {
+        val trimmed = name.trim()
+        if (trimmed.length <= 2) return true
+        // Repeated-character noise (e.g. "וחח", "זזז") — dominant char > 70% of non-space chars
+        val clean = trimmed.replace(" ", "")
+        val dominantCount = clean.groupBy { it }.maxByOrNull { it.value.size }?.value?.size ?: 0
+        if (clean.isNotEmpty() && dominantCount.toDouble() / clean.length > 0.70) return true
+        // All Hebrew in a context where we expect a Latin name
+        val allHebrew = trimmed.all { it in '\u05D0'..'\u05EA' || it in '\u05F0'..'\u05F4' || it == ' ' }
+        if (allHebrew) return true
+        return false
+    }
+
+    // Returns false for names that are clearly invalid (too short, dominant-char noise, etc.)
+    private fun isValidName(name: String): Boolean {
+        val trimmed = name.trim()
+        if (trimmed.length < 2) return false
+        // At least one word of 3+ chars
+        if (trimmed.split(" ").none { it.length >= 3 }) return false
+        // Dominant character must not exceed 70% of non-space characters
+        val clean = trimmed.replace(" ", "")
+        val dominantCount = clean.groupBy { it }.maxByOrNull { it.value.size }?.value?.size ?: 0
+        if (clean.isNotEmpty() && dominantCount.toDouble() / clean.length > 0.70) return false
+        return true
+    }
+
+    // True when any line contains a Bit payment trigger phrase (broad match — handles garbled lines).
+    private fun hasBitContext(lines: List<String>): Boolean =
+        lines.any {
+            it.contains("נשלחו לך") || it.contains("ביקשת") ||
+            it.contains("שלח לך")   || it.contains("שלחה לך")
+        }
+
     // Try Tesseract lines first; fall back to ML Kit lines for Latin names.
     private fun extractSenderName(lines: List<String>, fallbackLines: List<String> = emptyList()): String? {
         val tessName = tryExtractNameFromLines(lines)
 
         if (tessName != null) {
-            // If the Tesseract name is composed entirely of Hebrew characters, Tesseract may have
-            // garbled a Latin name (e.g. "Maya Wayn" → "חעץהולץ העבוא").
-            // When Bit context is confirmed and ML Kit has a valid Latin name, prefer it.
-            val isAllHebrew = tessName.all {
-                it in '\u05D0'..'\u05EA' || it in '\u05F0'..'\u05F4' || it == ' '
-            }
-            val hasBitContext = lines.any { it.startsWith("נשלחו לך מ") || it.startsWith("ביקשת מ") }
-            if (isAllHebrew && hasBitContext && fallbackLines !== lines) {
+            // If Tesseract returned garbage (all-Hebrew garbling of a Latin name, repeated chars, etc.)
+            // and ML Kit has a valid Latin name, prefer it.
+            if (isGarbageText(tessName) && hasBitContext(lines) && fallbackLines !== lines) {
                 tryExtractLatinName(fallbackLines)?.let { latinName ->
                     // Require at least 2 words (first + last name).
                     // Single-word matches like "bit" (the app logo) are OCR noise, not names.
                     if (latinName.contains(' ')) {
-                        Log.d(TAG, "Preferring ML Kit Latin '$latinName' over garbled Tesseract Hebrew '$tessName'")
+                        Log.d(TAG, "Preferring ML Kit Latin '$latinName' over garbled Tesseract '$tessName'")
                         return latinName
                     }
                 }
             }
-            return tessName
+            if (!isValidName(tessName)) {
+                Log.w(TAG, "Tesseract name '$tessName' failed validation — discarding")
+            } else {
+                return tessName
+            }
         }
 
-        // Tesseract found nothing — try ML Kit patterns
-        if (fallbackLines !== lines) tryExtractNameFromLines(fallbackLines)?.let { return it }
+        // Tesseract found nothing (or invalid) — try ML Kit patterns
+        if (fallbackLines !== lines) tryExtractNameFromLines(fallbackLines)?.let { name ->
+            if (isValidName(name)) return name
+        }
 
-        // Last resort: Tesseract found Bit context but garbled the Latin name →
+        // Last resort: Bit context confirmed but Latin name was garbled →
         // extract leading Latin words from ML Kit's first line.
-        val hasBitContext = lines.any { it.startsWith("נשלחו לך מ") || it.startsWith("ביקשת מ") }
-        if (hasBitContext) tryExtractLatinName(fallbackLines)?.let { return it }
+        if (hasBitContext(lines)) tryExtractLatinName(fallbackLines)?.let { return it }
         return null
     }
 
