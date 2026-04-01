@@ -806,9 +806,11 @@ object OcrUtils {
         return true
     }
 
-    /** True when a word ends a name run (Hebrew, pure digit, ₪). */
+    /** True when a word ends a name run (majority Hebrew, pure digit, ₪).
+     *  Words like "מMeital" (Hebrew prefix + Latin name) are NOT breakers — they pass
+     *  isVisionNameWord and their Hebrew prefix gets stripped in extractVisionNameFromLine. */
     private fun isVisionNameBreaker(word: String): Boolean =
-        word.any    { it in '\u05D0'..'\u05EA' } ||
+        word.count { it in '\u05D0'..'\u05EA' }.toFloat() / word.length > 0.5f ||
         word.all    { it.isDigit() || it == ',' } ||
         word.contains('₪')
 
@@ -836,7 +838,9 @@ object OcrUtils {
         val words = best.toMutableList()
         while (words.size > 1 && words.last().length <= 4 && words.last().all { it.isLowerCase() })
             words.removeLast()
-        return words.joinToString(" ") { w -> w.replace(Regex("([A-Za-z])\\1\$"), "$1") }.trim()
+        return words.joinToString(" ") { w -> w.replace(Regex("([A-Za-z])\\1\$"), "$1") }
+            .trim()
+            .replace(Regex("^[^A-Za-z]+"), "")  // strip Hebrew prefix chars (e.g. "מMeital" → "Meital")
     }
 
     /**
