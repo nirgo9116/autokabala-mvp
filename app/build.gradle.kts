@@ -74,6 +74,9 @@ android {
         compose = true
         buildConfig = true
     }
+    testOptions {
+        unitTests.isReturnDefaultValues = true
+    }
     androidResources {
         noCompress += "traineddata"
     }
