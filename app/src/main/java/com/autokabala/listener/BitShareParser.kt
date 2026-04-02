@@ -79,17 +79,16 @@ object BitShareParser {
 
         Log.d(TAG, "Hebrew lines: ${hebrewLines.joinToString(" | ")}")
 
-        // Structured name (from Vision bounding-box extraction) takes priority over regex parsing.
-        // Still validated — guards against Vision hallucinating a plausible-looking but wrong name.
-        val senderName = if (structuredName != null && isValidName(structuredName)) {
-            Log.d(TAG, "Using Vision structured name: '$structuredName'")
-            structuredName
-        } else {
-            if (structuredName != null) Log.w(TAG, "Structured name '$structuredName' failed validation — falling back to regex")
-            extractSenderName(hebrewLines, latinLines) ?: run {
-                Log.w(TAG, "Cannot extract sender name"); return null
-            }
+        // Collect all candidates and pick the highest-scoring one.
+        val nameCandidates = buildList {
+            structuredName?.let { add(NameCandidate(it, "vision_structured")) }
+            extractSenderName(hebrewLines, latinLines)?.let { add(NameCandidate(it, "regex")) }
         }
+        val senderName = pickBestName(nameCandidates) ?: run {
+            Log.w(TAG, "Cannot extract sender name"); return null
+        }
+        Log.d(TAG, "Name candidates: ${nameCandidates.map { "${it.source}='${it.name}'(${scoreNameCandidate(it.name)})" }}")
+        Log.d(TAG, "Best name: '$senderName'")
 
         // Amount: prefer ML Kit bounding-box result (most reliable — picks the largest
         // numeric text block in the image, which is always the payment amount in Bit).

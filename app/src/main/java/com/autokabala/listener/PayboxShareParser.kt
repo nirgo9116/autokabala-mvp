@@ -53,10 +53,16 @@ object PayboxShareParser {
         Log.d(TAG, "  mlKitAmount (bbox spatial): $mlKitAmount")
         if (mlKitNameHint != null) Log.d(TAG, "  mlKitNameHint (bbox above amount): '$mlKitNameHint'")
 
-        val senderName = extractSenderName(hebrewLines, latinLines, mlKitNameHint) ?: run {
+        val nameCandidates = buildList {
+            extractSenderName(hebrewLines, latinLines, mlKitNameHint)?.let { add(NameCandidate(it, "regex")) }
+            mlKitNameHint?.let { add(NameCandidate(it, "mlkit_hint")) }
+        }
+        val senderName = pickBestName(nameCandidates) ?: run {
             Log.w(TAG, "Cannot extract sender name")
             return null
         }
+        Log.d(TAG, "Name candidates: ${nameCandidates.map { "${it.source}='${it.name}'(${scoreNameCandidate(it.name)})" }}")
+        Log.d(TAG, "Best name: '$senderName'")
 
         val amount = if (mlKitAmount != null) {
             Log.d(TAG, "Amount → ML Kit bbox won: $mlKitAmount")
