@@ -26,11 +26,16 @@ object PayboxShareParser {
 
     // ─────────────────────────────────────────────────────────────────────────
 
-    fun isPaybox(text: String): Boolean =
-        text.contains("הועבר אל") ||
-        text.contains("מספר אישור") ||
-        text.contains("PayBox", ignoreCase = true) ||
-        text.contains("paybox", ignoreCase = true)
+    fun isPaybox(text: String): Boolean {
+        // Bit-specific triggers take absolute priority — both apps use "מספר אישור"
+        // so we cannot rely on it alone. These phrases only appear in Bit.
+        if (text.contains("נשלחו לך מ") || text.contains("ביקשת מ") ||
+            text.contains("שלח לך")     || text.contains("שלחה לך")) return false
+        return text.contains("הועבר אל") ||
+               text.contains("מספר אישור") ||
+               text.contains("PayBox", ignoreCase = true) ||
+               text.contains("paybox", ignoreCase = true)
+    }
 
     fun parse(hebrewText: String, latinText: String = hebrewText, mlKitAmount: Double? = null, mlKitNameHint: String? = null): PaymentData? {
         val hebrewLines = hebrewText.split("\n").map { it.trim() }.filter { it.isNotBlank() }

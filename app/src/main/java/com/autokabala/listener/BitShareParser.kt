@@ -170,7 +170,7 @@ object BitShareParser {
                     }
                 }
             }
-            if (!isValidName(tessName)) {
+            if (!isValidName(tessName) || isGarbageText(tessName)) {
                 Log.w(TAG, "Tesseract name '$tessName' failed validation — discarding")
             } else {
                 return tessName
@@ -222,6 +222,19 @@ object BitShareParser {
                 return name
             }
         }
+        // The start-of-line match failed — ML Kit line has leading garbage (e.g. "N)VNp Meital Tannip NUa").
+        // Scan all lines for the first ProperCase sequence of 2+ words anywhere in the line.
+        val properCasePattern = Pattern.compile("""([A-Z][a-z]{2,}(?:\s+[A-Z][a-z]{1,})+)""")
+        for (line in lines) {
+            val m2 = properCasePattern.matcher(line)
+            if (m2.find()) {
+                val name = m2.group(1)?.trim()
+                if (!name.isNullOrBlank()) {
+                    Log.d(TAG, "Name [latin-anywhere]: '$name'")
+                    return name
+                }
+            }
+        }
         return null
     }
 
@@ -243,7 +256,8 @@ object BitShareParser {
                     nextLine.isNotBlank() &&
                     !nextLine.any { it.isDigit() } &&
                     !nextLine.contains("₪") &&
-                    !datePattern.matcher(nextLine).find()
+                    !datePattern.matcher(nextLine).find() &&
+                    skipAmountWords.none { nextLine.contains(it) }
                 ) {
                     mixedWordPattern.matcher(nextLine).let { hw ->
                         while (hw.find()) words.add(hw.group())
