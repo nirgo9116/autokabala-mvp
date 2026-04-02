@@ -14,7 +14,7 @@ object BitShareParser {
     // (followed by whitespace), e.g. "נשלחו לך מm מיכאל" → skips "m ".
     // Does NOT consume chars when the name follows מ directly (e.g. "מMeital Tanni").
     private val nameReceivedPattern = Pattern.compile(
-        """נשלחו לך מ\s*(?:[A-Za-z]\s+)?([\u05D0-\u05EAA-Za-z]{2,}(?:\s+[\u05D0-\u05EAA-Za-z']{2,}){0,2})"""
+        """נשלחו לך מ\s*(?:[A-Za-z]\s+)?([\u05D0-\u05EAA-Za-z]{1,}(?:\s+[\u05D0-\u05EAA-Za-z']{1,}){0,5})"""
     )
 
     // "ביקשת מ [name]" — payment request you sent; captured when they pay you back.
