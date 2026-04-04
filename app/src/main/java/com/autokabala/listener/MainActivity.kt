@@ -268,15 +268,32 @@ class MainActivity : ComponentActivity() {
             val uri = intent.getParcelableExtra<Uri>(Intent.EXTRA_STREAM)
                 ?: intent.clipData?.getItemAt(0)?.uri
             if (uri != null) {
+                // Copy bytes to cache NOW, while this Activity holds the URI permission grant.
+                // Paybox (and other apps using FileProvider URIs) may revoke access once we
+                // drop the intent reference or the coroutine runs later on a background thread.
+                val stableUri = copyShareToCache(uri) ?: uri
                 val viewModel = ViewModelProvider(
                     this, MainViewModelFactory(application)
                 )[MainViewModel::class.java]
-                viewModel.onShareIntentReceived(uri)
-                // Drop all references to the image immediately — no trace left in the Activity.
+                viewModel.onShareIntentReceived(stableUri)
+                // Drop all references to the original URI immediately.
                 intent.removeExtra(Intent.EXTRA_STREAM)
                 intent.clipData = null
                 setIntent(Intent(this, MainActivity::class.java))
             }
+        }
+    }
+
+    private fun copyShareToCache(src: Uri): Uri? {
+        return try {
+            val dest = java.io.File(cacheDir, "pending_share_main.jpg")
+            contentResolver.openInputStream(src)?.use { input ->
+                dest.outputStream().use { output -> input.copyTo(output) }
+            }
+            android.net.Uri.fromFile(dest)
+        } catch (e: Exception) {
+            android.util.Log.w("MainActivity", "Cache copy failed, falling back to original URI", e)
+            null
         }
     }
 }

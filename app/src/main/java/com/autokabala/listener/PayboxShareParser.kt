@@ -64,28 +64,38 @@ object PayboxShareParser {
         Log.d(TAG, "Name candidates: ${nameCandidates.map { "${it.source}='${it.name}'(${scoreNameCandidate(it.name)})" }}")
         Log.d(TAG, "Best name: '$senderName'")
 
-        val amount = if (mlKitAmount != null) {
-            Log.d(TAG, "Amount → ML Kit bbox won: $mlKitAmount")
-            mlKitAmount
-        } else {
-            Log.d(TAG, "--- Amount extraction (no bbox result) ---")
-            extractAmount(hebrewLines, "Tesseract")
-                ?: if (latinLines !== hebrewLines && latinText != hebrewText
-                        && latinLines.any { it.contains("₪") }) {
-                       // Only scan ML Kit text lines if any of them actually contain ₪.
-                       // For Paybox, ML Kit returns only bottom-section Latin text (hex, date,
-                       // PayBox logo) which never contains ₪ — skip to avoid wasted work.
-                       extractAmount(latinLines, "MLKit").also {
-                           if (it != null) Log.d(TAG, "Amount → ML Kit text fallback: $it")
-                           else Log.w(TAG, "Amount → ML Kit text also failed")
-                       }
-                   } else {
-                       Log.d(TAG, "ML Kit text lines contain no ₪ — skipping text scan")
-                       null
+        // Text extraction takes priority — ₪ symbol gives unambiguous context.
+        // mlKitAmount (spatial bbox) is only used as a fallback because it can pick up
+        // stray numbers from the contact name/address (e.g. "רבין 18" → 18.0).
+        Log.d(TAG, "--- Amount extraction ---")
+        val textAmount = extractAmount(hebrewLines, "Tesseract")
+            ?: if (latinLines !== hebrewLines && latinText != hebrewText
+                    && latinLines.any { it.contains("₪") }) {
+                   extractAmount(latinLines, "MLKit").also {
+                       if (it != null) Log.d(TAG, "Amount → ML Kit text fallback: $it")
+                       else Log.w(TAG, "Amount → ML Kit text also failed")
                    }
-        } ?: run {
-            Log.w(TAG, "Amount → ALL engines failed — creating with amount=0 for manual input")
-            0.0
+               } else {
+                   Log.d(TAG, "ML Kit text lines contain no ₪ — skipping text scan")
+                   null
+               }
+
+        val amount = when {
+            textAmount != null -> {
+                if (mlKitAmount != null && mlKitAmount != textAmount)
+                    Log.w(TAG, "Amount → text ($textAmount) overrides bbox ($mlKitAmount) — bbox may have picked up address/name digits")
+                else
+                    Log.d(TAG, "Amount → text: $textAmount")
+                textAmount
+            }
+            mlKitAmount != null -> {
+                Log.d(TAG, "Amount → ML Kit bbox fallback (no ₪ in text): $mlKitAmount")
+                mlKitAmount
+            }
+            else -> {
+                Log.w(TAG, "Amount → ALL engines failed — creating with amount=0 for manual input")
+                0.0
+            }
         }
 
         // ML Kit first for timestamp — more accurate on digits; Tesseract as fallback only
