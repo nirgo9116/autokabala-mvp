@@ -16,3 +16,9 @@ local.properties
 backend/.env
 backend/.env.local
 backend/node_modules/
+
+# Node tooling (image annotation scripts)
+node_modules/
+package.json
+package-lock.json
+annotate_screenshots.js

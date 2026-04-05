@@ -31,6 +31,60 @@ private data class TutorialSlide(
 
 private val SLIDES = listOf(
     TutorialSlide(
+        drawableRes = R.drawable.tutorial_setup_welcome,
+        title = "ברוך הבא לאוטוקבלה!",
+        description = "האפליקציה מפיקה קבלה אוטומטית ברגע שמשתמשים אישור תשלום מביט או פייבוקס.",
+        contentScale = androidx.compose.ui.layout.ContentScale.Fit
+    ),
+    TutorialSlide(
+        drawableRes = R.drawable.tutorial_setup_overlay,
+        title = "הרשאה ראשונה: הצגה מעל אפליקציות",
+        description = "כדי שטופס הקבלה יוצג מעל ביט ופייבוקס, יש לאשר הצגה מעל אפליקציות אחרות.",
+        contentScale = androidx.compose.ui.layout.ContentScale.Fit
+    ),
+    TutorialSlide(
+        drawableRes = R.drawable.tutorial_setup_notifications,
+        title = "הרשאה שנייה: גישה להתראות",
+        description = "כדי לזהות תשלומים נכנסים, יש להפעיל גישה להתראות עבור אוטוקבלה.",
+        contentScale = androidx.compose.ui.layout.ContentScale.Fit
+    ),
+    TutorialSlide(
+        drawableRes = R.drawable.tutorial_icount_login,
+        title = "שלב 1: כניסה ל-iCount",
+        description = "כנסו לאתר app.icount.co.il והתחברו עם המייל, מזהה החברה והסיסמה שלכם.",
+        contentScale = androidx.compose.ui.layout.ContentScale.Fit
+    ),
+    TutorialSlide(
+        drawableRes = R.drawable.tutorial_icount_dashboard,
+        title = "שלב 2: פתחו את תפריט מערכת",
+        description = "בתחתית סרגל הניווט הימני לחצו על 'מערכת' (החץ מסמן היכן ללחוץ).",
+        contentScale = androidx.compose.ui.layout.ContentScale.Fit
+    ),
+    TutorialSlide(
+        drawableRes = R.drawable.tutorial_icount_settings_nav,
+        title = "שלב 3: כנסו להגדרות",
+        description = "לאחר פתיחת תפריט מערכת, לחצו על 'הגדרות' כפי שמסומן בחץ.",
+        contentScale = androidx.compose.ui.layout.ContentScale.Fit
+    ),
+    TutorialSlide(
+        drawableRes = R.drawable.tutorial_icount_settings,
+        title = "שלב 4: בחרו אוטומציה",
+        description = "בדף ההגדרות לחצו על הכרטיס 'אוטומציה' כפי שמסומן בחץ.",
+        contentScale = androidx.compose.ui.layout.ContentScale.Fit
+    ),
+    TutorialSlide(
+        drawableRes = R.drawable.tutorial_icount_api_tokens,
+        title = "שלב 5: לשונית API Tokens",
+        description = "בדף האוטומציה לחצו על הלשונית 'API Tokens' כפי שמסומן בחץ.",
+        contentScale = androidx.compose.ui.layout.ContentScale.Fit
+    ),
+    TutorialSlide(
+        drawableRes = R.drawable.tutorial_icount_create_token,
+        title = "שלב 6: צרו טוקן API",
+        description = "לחצו על 'יצירת טוקן API' כפי שמסומן בחץ. לאחר יצירת הטוקן העתיקו אותו והדביקו בהגדרות האפליקציה.",
+        contentScale = androidx.compose.ui.layout.ContentScale.Fit
+    ),
+    TutorialSlide(
         drawableRes = R.drawable.tutorial_ishur,
         title = "שתף אישור תשלום",
         description = "כנס לאישור תשלום בביט ולחץ על כפתור השיתוף\n(מסומן בעיגול אדום בתמונה)",
@@ -147,15 +201,15 @@ private fun TutorialSlideView(slide: TutorialSlide) {
     Column(
         modifier = Modifier
             .fillMaxSize()
-            .padding(horizontal = 24.dp),
+            .padding(horizontal = 8.dp),
         horizontalAlignment = Alignment.CenterHorizontally,
-        verticalArrangement = Arrangement.spacedBy(16.dp)
+        verticalArrangement = Arrangement.spacedBy(12.dp)
     ) {
         Box(
             modifier = Modifier
                 .fillMaxWidth()
-                .height(340.dp)
-                .clip(RoundedCornerShape(16.dp))
+                .weight(1f)
+                .clip(RoundedCornerShape(12.dp))
                 .background(MaterialTheme.colorScheme.surfaceVariant),
             contentAlignment = Alignment.Center
         ) {
@@ -179,17 +233,18 @@ private fun TutorialSlideView(slide: TutorialSlide) {
 
         Text(
             slide.title,
-            style = MaterialTheme.typography.titleLarge,
+            style = MaterialTheme.typography.titleMedium,
             fontWeight = FontWeight.Bold,
             textAlign = TextAlign.Center
         )
 
         Text(
             slide.description,
-            style = MaterialTheme.typography.bodyMedium,
+            style = MaterialTheme.typography.bodySmall,
             textAlign = TextAlign.Center,
             color = MaterialTheme.colorScheme.onSurfaceVariant,
-            lineHeight = MaterialTheme.typography.bodyMedium.lineHeight
+            lineHeight = MaterialTheme.typography.bodySmall.lineHeight,
+            modifier = Modifier.padding(bottom = 4.dp)
         )
     }
 }
