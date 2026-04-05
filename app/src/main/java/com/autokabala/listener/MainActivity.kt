@@ -1026,7 +1026,7 @@ fun PaymentCard(
                     if (amountMissing) {
                         Spacer(Modifier.height(6.dp))
                         Text(
-                            "אופס משהו השתבש — הזן סכום ידנית",
+                            "אופס משהו השתבש — הזינו סכום ידנית",
                             color = Color(0xFFFF6B6B),
                             style = MaterialTheme.typography.labelMedium,
                             modifier = Modifier.fillMaxWidth(),
@@ -1125,7 +1125,7 @@ fun PaymentCard(
                             .fillMaxWidth()
                             .padding(start = 16.dp, end = 16.dp, top = 10.dp, bottom = 10.dp)
                     ) {
-                        Text("לכבוד — בחר לקוח:", color = lblColor, style = MaterialTheme.typography.bodyMedium, fontWeight = FontWeight.SemiBold)
+                        Text("לכבוד — בחרו לקוח:", color = lblColor, style = MaterialTheme.typography.bodyMedium, fontWeight = FontWeight.SemiBold)
                         Spacer(Modifier.height(10.dp))
                         FlowRow(
                             horizontalArrangement = Arrangement.spacedBy(8.dp),
@@ -1412,7 +1412,7 @@ fun PaymentCard(
                             decorationBox = { inner ->
                                 Box {
                                     if (editedDescription.isEmpty()) {
-                                        Text("הזן פרטים...", style = MaterialTheme.typography.bodyLarge.copy(color = Color(0xFFBBBBBB), fontStyle = FontStyle.Italic))
+                                        Text("הזינו פרטים...", style = MaterialTheme.typography.bodyLarge.copy(color = Color(0xFFBBBBBB), fontStyle = FontStyle.Italic))
                                     }
                                     inner()
                                 }
@@ -1763,7 +1763,7 @@ private fun ClientChipField(
                 }
             } else {
                 Icon(Icons.Default.Add, null, tint = chipText, modifier = Modifier.size(18.dp))
-                Text("לחץ לבחור לקוח", color = chipText, style = MaterialTheme.typography.bodyMedium, fontWeight = FontWeight.SemiBold,
+                Text("לחצו לבחור לקוח", color = chipText, style = MaterialTheme.typography.bodyMedium, fontWeight = FontWeight.SemiBold,
                     modifier = Modifier.weight(1f))
             }
             Icon(Icons.Default.KeyboardArrowDown, null, tint = chipText, modifier = Modifier.size(20.dp))
@@ -2862,6 +2862,61 @@ fun SettingsTab(
                 OutlinedButton(onClick = onOpenSettings, modifier = Modifier.fillMaxWidth()) {
                     Text("הגדרות הרשאות")
                 }
+            }
+        }
+
+        // ── iCount credentials card ───────────────────────────────────────
+        val icountCtx = LocalContext.current
+        val icountPrefs = remember {
+            icountCtx.getSharedPreferences(BubbleService.PREFS_NAME, android.content.Context.MODE_PRIVATE)
+        }
+        var icountCid  by remember { mutableStateOf(icountPrefs.getString(BubbleService.KEY_ICOUNT_CID,  "") ?: "") }
+        var icountUser by remember { mutableStateOf(icountPrefs.getString(BubbleService.KEY_ICOUNT_USER, "") ?: "") }
+        var icountPass by remember { mutableStateOf(icountPrefs.getString(BubbleService.KEY_ICOUNT_PASS, "") ?: "") }
+
+        Card(modifier = Modifier.fillMaxWidth()) {
+            Column(
+                modifier = Modifier.padding(16.dp),
+                verticalArrangement = Arrangement.spacedBy(10.dp)
+            ) {
+                Text(
+                    "חיבור ל-iCount",
+                    style = MaterialTheme.typography.titleMedium,
+                    fontWeight = FontWeight.Bold
+                )
+                OutlinedTextField(
+                    value = icountCid,
+                    onValueChange = {
+                        icountCid = it
+                        icountPrefs.edit().putString(BubbleService.KEY_ICOUNT_CID, it).apply()
+                        ReceiptApiClient.configure(icountCtx)
+                    },
+                    label = { Text("מזהה חברה (CID)") },
+                    singleLine = true,
+                    modifier = Modifier.fillMaxWidth()
+                )
+                OutlinedTextField(
+                    value = icountUser,
+                    onValueChange = {
+                        icountUser = it
+                        icountPrefs.edit().putString(BubbleService.KEY_ICOUNT_USER, it).apply()
+                        ReceiptApiClient.configure(icountCtx)
+                    },
+                    label = { Text("שם משתמש") },
+                    singleLine = true,
+                    modifier = Modifier.fillMaxWidth()
+                )
+                OutlinedTextField(
+                    value = icountPass,
+                    onValueChange = {
+                        icountPass = it
+                        icountPrefs.edit().putString(BubbleService.KEY_ICOUNT_PASS, it).apply()
+                        ReceiptApiClient.configure(icountCtx)
+                    },
+                    label = { Text("טוקן API") },
+                    singleLine = true,
+                    modifier = Modifier.fillMaxWidth()
+                )
             }
         }
 

@@ -110,9 +110,12 @@ class BubbleService : Service() {
         const val EXTRA_ORIGINAL_URI   = "original_uri"  // original gallery URI for later deletion
         private const val NOTIF_ID     = 9001
         const val CHANNEL_ID           = "bubble_channel"
-        const val PREFS_NAME           = "autokabala_prefs"
+        const val PREFS_NAME                = "autokabala_prefs"
         const val KEY_BUBBLE_ENABLED        = "bubble_enabled"
         const val KEY_FILTER_ACTIVE_CLIENTS = "filter_active_clients"
+        const val KEY_ICOUNT_CID            = "icount_cid"
+        const val KEY_ICOUNT_USER           = "icount_user"
+        const val KEY_ICOUNT_PASS           = "icount_pass"
         const val KEY_SHARED_URIS           = "shared_image_uris"  // Set<String> of gallery URIs to clean
         private const val KEY_RECEIPT_COUNT = "receipt_count"
         private var instance: BubbleService? = null
@@ -359,7 +362,7 @@ class BubbleService : Service() {
         removeTooltip()
         val dp = resources.displayMetrics.density
         val tv = android.widget.TextView(this).apply {
-            text = "שתף אישור להפקת קבלה"
+            text = "שתפו אישור להפקת קבלה"
             textSize = 13f
             setTextColor(0xFFFFFFFF.toInt())
             val pad = (12 * dp).toInt()
@@ -463,7 +466,7 @@ class BubbleService : Service() {
             Log.d("BubbleService", "Falling back to ML Kit + Tesseract")
             if (!OcrUtils.isTesseractAvailable()) {
                 bitmap.recycle()
-                overlayState.value = OverlayState.Err("לא ניתן לקרוא את התשלום — נסה שוב או שתף תמונה")
+                overlayState.value = OverlayState.Err("לא ניתן לקרוא את התשלום — נסו שוב או שתפו תמונה")
                 return
             }
 
@@ -641,7 +644,7 @@ class BubbleService : Service() {
                     overlayState.value = OverlayState.Done(client.name)
                     handler.postDelayed({ removeOverlay(); maybeShowGalleryCleanup() }, 3000)
                 } else {
-                    overlayState.value = OverlayState.Err("שגיאה בהפקת קבלה — בדוק חיבור לאינטרנט")
+                    overlayState.value = OverlayState.Err("שגיאה בהפקת קבלה — בדקו חיבור לאינטרנט")
                 }
             } catch (e: Exception) {
                 overlayState.value = OverlayState.Err("שגיאה: ${e.message}")
@@ -811,7 +814,7 @@ class BubbleService : Service() {
         return NotificationCompat.Builder(this, CHANNEL_ID)
             .setSmallIcon(R.drawable.ic_launcher_foreground)
             .setContentTitle("אוטוקבלה פעילה")
-            .setContentText("שתף את אישור התשלום לקבלת קבלה")
+            .setContentText("שתפו את אישור התשלום לקבלת קבלה")
             .setPriority(NotificationCompat.PRIORITY_LOW)
             .addAction(0, "סגור", stopIntent)
             .build()

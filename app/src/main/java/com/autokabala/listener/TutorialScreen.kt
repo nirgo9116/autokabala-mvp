@@ -18,8 +18,11 @@ import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
+import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.unit.dp
 import kotlinx.coroutines.launch
+
+private val TutorialTextColor = Color(0xFF64B5F6) // light blue
 
 private data class TutorialSlide(
     val drawableRes: Int?,
@@ -32,8 +35,8 @@ private data class TutorialSlide(
 private val SLIDES = listOf(
     TutorialSlide(
         drawableRes = R.drawable.tutorial_setup_welcome,
-        title = "ברוך הבא לאוטוקבלה!",
-        description = "האפליקציה מפיקה קבלה אוטומטית ברגע שמשתמשים אישור תשלום מביט או פייבוקס.",
+        title = "ברוכים הבאים לאוטוקבלה!",
+        description = "האפליקציה מפיקה קבלה אוטומטית ברגע שמאשרים תשלום מביט או פייבוקס.",
         contentScale = androidx.compose.ui.layout.ContentScale.Fit
     ),
     TutorialSlide(
@@ -81,26 +84,32 @@ private val SLIDES = listOf(
     TutorialSlide(
         drawableRes = R.drawable.tutorial_icount_create_token,
         title = "שלב 6: צרו טוקן API",
-        description = "לחצו על 'יצירת טוקן API' כפי שמסומן בחץ. לאחר יצירת הטוקן העתיקו אותו והדביקו בהגדרות האפליקציה.",
+        description = "לחצו על 'יצירת טוקן API' כפי שמסומן בחץ. לאחר יצירת הטוקן, העתיקו אותו ועברו להגדרות האפליקציה ← חיבור ל-iCount ← שדה 'טוקן API'.",
+        contentScale = androidx.compose.ui.layout.ContentScale.Fit
+    ),
+    TutorialSlide(
+        drawableRes = R.drawable.tutorial_icount_connect,
+        title = "שלב 7: הזינו את פרטי החיבור באפליקציה",
+        description = "בהגדרות אוטוקבלה, תחת 'חיבור ל-iCount', מלאו:\n• מזהה חברה (CID) — מספר החברה ב-iCount\n• שם משתמש — המייל שלכם\n• טוקן API — הטוקן שיצרתם בשלב 6\nלאחר מכן לחצו 'סנכרן לקוחות'.",
         contentScale = androidx.compose.ui.layout.ContentScale.Fit
     ),
     TutorialSlide(
         drawableRes = R.drawable.tutorial_ishur,
-        title = "שתף אישור תשלום",
-        description = "כנס לאישור תשלום בביט ולחץ על כפתור השיתוף\n(מסומן בעיגול אדום בתמונה)",
+        title = "שתפו אישור תשלום",
+        description = "כנסו לאישור תשלום בביט ולחצו על כפתור השיתוף\n(מסומן בעיגול אדום בתמונה)",
         contentScale = androidx.compose.ui.layout.ContentScale.Fit
     ),
     TutorialSlide(
         drawableRes = R.drawable.tutorial_shituf,
-        title = "בחר אוטוקבלה",
-        description = "במסך השיתוף לחץ על האייקון של אוטוקבלה.\nאם לא מופיע לחץ על 'עוד' ובחר אוטוקבלה",
+        title = "בחרו אוטוקבלה",
+        description = "במסך השיתוף לחצו על האייקון של אוטוקבלה.\nאם לא מופיע לחצו על 'עוד' ובחרו אוטוקבלה.\nטיפ: לאחר הלחיצה הראשונה האנדרואיד יזכור את הבחירה ואוטוקבלה תופיע ראשונה בפעם הבאה.",
         contentScale = androidx.compose.ui.layout.ContentScale.Crop,
         imageAlignment = androidx.compose.ui.Alignment.BottomCenter
     ),
     TutorialSlide(
         drawableRes = R.drawable.tutorial_kabala,
-        title = "בדוק את הקבלה",
-        description = "אם השם או הסכום לא זהים לאלה שבביט\nלחץ על 'שלח למפתח'",
+        title = "בדקו את הקבלה",
+        description = "אם השם או הסכום לא זהים לאלה שבביט\nלחצו על 'שלח למפתח'",
         contentScale = androidx.compose.ui.layout.ContentScale.Crop,
         imageAlignment = androidx.compose.ui.Alignment.TopCenter
     )
@@ -119,10 +128,20 @@ fun TutorialScreen(onDone: () -> Unit) {
             .systemBarsPadding(),
         horizontalAlignment = Alignment.CenterHorizontally
     ) {
-        Spacer(Modifier.height(24.dp))
+        Box(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(horizontal = 16.dp)
+                .padding(top = 8.dp),
+            contentAlignment = Alignment.CenterEnd
+        ) {
+            TextButton(onClick = onDone) {
+                Text("דלג", color = TutorialTextColor)
+            }
+        }
 
         Text(
-            "ברוך הבא לאוטוקבלה!",
+            "ברוכים הבאים לאוטוקבלה!",
             style = MaterialTheme.typography.headlineSmall,
             fontWeight = FontWeight.Bold,
             color = MaterialTheme.colorScheme.primary
@@ -235,14 +254,15 @@ private fun TutorialSlideView(slide: TutorialSlide) {
             slide.title,
             style = MaterialTheme.typography.titleMedium,
             fontWeight = FontWeight.Bold,
-            textAlign = TextAlign.Center
+            textAlign = TextAlign.Center,
+            color = TutorialTextColor
         )
 
         Text(
             slide.description,
             style = MaterialTheme.typography.bodySmall,
             textAlign = TextAlign.Center,
-            color = MaterialTheme.colorScheme.onSurfaceVariant,
+            color = TutorialTextColor,
             lineHeight = MaterialTheme.typography.bodySmall.lineHeight,
             modifier = Modifier.padding(bottom = 4.dp)
         )

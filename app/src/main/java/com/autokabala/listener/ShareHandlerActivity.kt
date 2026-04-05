@@ -5,6 +5,7 @@ import android.content.Intent
 import android.net.Uri
 import android.os.Bundle
 import android.util.Log
+import androidx.core.content.pm.ShortcutManagerCompat
 import java.io.File
 
 /**
@@ -21,6 +22,7 @@ class ShareHandlerActivity : Activity() {
             @Suppress("DEPRECATION")
             val srcUri = intent.getParcelableExtra<Uri>(Intent.EXTRA_STREAM)
             if (srcUri != null) {
+                ShortcutManagerCompat.reportShortcutUsed(this, "autokabala_share_target")
                 val fileUri = copyToCache(srcUri)
                 BubbleService.processShare(this, fileUri ?: srcUri, srcUri)
             }

@@ -37,7 +37,7 @@ class ChatViewModel(application: Application) : AndroidViewModel(application) {
             )
             _messages.value = updatedMessages + ChatMessage(
                 role = "assistant",
-                content = response ?: "מצטער, לא הצלחתי להתחבר. בדוק את מפתח ה-API ונסה שוב."
+                content = response ?: "לא הצלחתי להתחבר. בדקו את מפתח ה-API ונסו שוב."
             )
             _isLoading.value = false
         }

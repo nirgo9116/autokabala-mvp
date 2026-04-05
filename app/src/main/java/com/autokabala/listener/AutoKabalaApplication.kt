@@ -36,6 +36,7 @@ class AutoKabalaApplication : Application() {
     override fun onCreate() {
         super.onCreate()
         publishShareShortcut()
+        ReceiptApiClient.configure(this)
         receiptRepository.startListeningForPayments(applicationScope)
 
         applicationScope.launch {

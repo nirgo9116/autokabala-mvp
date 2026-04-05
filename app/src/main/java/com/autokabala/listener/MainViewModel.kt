@@ -330,7 +330,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                     val phone = client.phone ?: receiptRepository.fetchAndCachePhone(client.id)
                     _justIssuedCards.value = _justIssuedCards.value + (payment.id to IssuedReceiptInfo(docUrl = outcome.docUrl, clientPhone = phone, docNum = outcome.docNum, clientName = client.name, amount = payment.amount, timestamp = payment.timestamp))
                 } else {
-                    _uiEvent.send(UiEvent.ShowError("שגיאה בהפקת קבלה. בדוק חיבור לאינטרנט ונסה שוב."))
+                    _uiEvent.send(UiEvent.ShowError("שגיאה בהפקת קבלה. בדקו חיבור לאינטרנט ונסו שוב."))
                 }
             }
         }
@@ -399,7 +399,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
             if (success) {
                 _uiEvent.send(UiEvent.ShowMessage("מייל נשלח ללקוח ע״י iCount ✓"))
             } else {
-                _uiEvent.send(UiEvent.ShowError("שליחת המייל נכשלה — בדוק חיבור לאינטרנט"))
+                _uiEvent.send(UiEvent.ShowError("שליחת המייל נכשלה — בדקו חיבור לאינטרנט"))
             }
         }
     }
@@ -554,7 +554,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                         return@launch
                     }
                     val bitText = tesseractText ?: mlKitText ?: run {
-                        _uiEvent.send(UiEvent.ShowError("לא ניתן לקרוא טקסט מהתמונה. נסה תמונה ברורה יותר."))
+                        _uiEvent.send(UiEvent.ShowError("לא ניתן לקרוא טקסט מהתמונה. נסו תמונה ברורה יותר."))
                         return@launch
                     }
                     val paymentData = BitShareParser.parse(
@@ -634,7 +634,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                 }
             }
             if (calendarFailed) {
-                _uiEvent.send(UiEvent.ShowMessage("הפגישה נשמרה, אך לא ניתן לסנכרן עם לוח השנה. בדוק הרשאות."))
+                _uiEvent.send(UiEvent.ShowMessage("הפגישה נשמרה, אך לא ניתן לסנכרן עם לוח השנה. בדקו הרשאות."))
             }
         }
     }
@@ -707,7 +707,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                 scheduledPaymentDao.updateScheduledPayment(session.copy(tookPlace = true, receiptIssued = true))
                 _uiEvent.send(UiEvent.ShowMessage("קבלה הופקה בהצלחה ✓"))
             } else {
-                _uiEvent.send(UiEvent.ShowError("שגיאה בהפקת קבלה. בדוק חיבור לאינטרנט ונסה שוב."))
+                _uiEvent.send(UiEvent.ShowError("שגיאה בהפקת קבלה. בדקו חיבור לאינטרנט ונסו שוב."))
             }
         }
     }

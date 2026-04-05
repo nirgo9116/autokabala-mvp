@@ -1,5 +1,6 @@
 package com.autokabala.listener
 
+import android.content.Context
 import android.util.Log
 import io.ktor.client.HttpClient
 import io.ktor.client.call.body
@@ -179,6 +180,17 @@ object ReceiptApiClient {
 
     private const val BASE_URL = "https://api.icount.co.il/api/v3.php"
 
+    private var cid:  String = ""
+    private var user: String = ""
+    private var pass: String = ""
+
+    fun configure(context: Context) {
+        val prefs = context.getSharedPreferences(BubbleService.PREFS_NAME, Context.MODE_PRIVATE)
+        cid  = prefs.getString(BubbleService.KEY_ICOUNT_CID,  "") ?: ""
+        user = prefs.getString(BubbleService.KEY_ICOUNT_USER, "") ?: ""
+        pass = prefs.getString(BubbleService.KEY_ICOUNT_PASS, "") ?: ""
+    }
+
     private val client = HttpClient(CIO) {
         install(ContentNegotiation) {
             json(Json { isLenient = true; ignoreUnknownKeys = true })
@@ -189,9 +201,9 @@ object ReceiptApiClient {
         Log.i("AutoKabalaAPI", "--- Starting Document Issuance for client ID: $clientId ---")
         return try {
             val requestBody = CreateDocumentWithClientIdRequest(
-                cid = BuildConfig.ICOUNT_CID,
-                user = BuildConfig.ICOUNT_USER,
-                pass = BuildConfig.ICOUNT_PASS,
+                cid = cid,
+                user = user,
+                pass = pass,
                 docType = "receipt",
                 clientId = clientId.toInt(),
                 currencyCode = "ILS",
@@ -223,9 +235,9 @@ object ReceiptApiClient {
         val num = docNum.toIntOrNull() ?: return false
         return try {
             val requestBody = SendEmailRequest(
-                cid = BuildConfig.ICOUNT_CID,
-                user = BuildConfig.ICOUNT_USER,
-                pass = BuildConfig.ICOUNT_PASS,
+                cid = cid,
+                user = user,
+                pass = pass,
                 docType = "receipt",
                 docNum = num,
                 emailToClient = true
@@ -249,9 +261,9 @@ object ReceiptApiClient {
         Log.i("AutoKabalaAPI", "--- Fetching client list ---")
         return try {
             val requestBody = GetClientsRequest(
-                cid = BuildConfig.ICOUNT_CID,
-                user = BuildConfig.ICOUNT_USER,
-                pass = BuildConfig.ICOUNT_PASS
+                cid = cid,
+                user = user,
+                pass = pass
             )
 
             val response = client.post("$BASE_URL/client/get_list") {
@@ -289,9 +301,9 @@ object ReceiptApiClient {
         Log.i("AutoKabalaAPI", "--- Creating new client: $clientName ---")
         return try {
             val requestBody = CreateClientRequest(
-                cid = BuildConfig.ICOUNT_CID,
-                user = BuildConfig.ICOUNT_USER,
-                pass = BuildConfig.ICOUNT_PASS,
+                cid = cid,
+                user = user,
+                pass = pass,
                 clientName = clientName,
                 phone = phone,
                 email = email
@@ -333,9 +345,9 @@ object ReceiptApiClient {
             val pageSize = 1000
             while (true) {
                 val requestBody = DocSearchRequest(
-                    cid = BuildConfig.ICOUNT_CID,
-                    user = BuildConfig.ICOUNT_USER,
-                    pass = BuildConfig.ICOUNT_PASS,
+                    cid = cid,
+                    user = user,
+                    pass = pass,
                     startDate = fromDate,
                     limit = pageSize,
                     offset = offset
@@ -369,9 +381,9 @@ object ReceiptApiClient {
             val response = client.post("$BASE_URL/client/info") {
                 contentType(ContentType.Application.Json)
                 setBody(buildJsonObject {
-                    put("cid",          BuildConfig.ICOUNT_CID)
-                    put("user",         BuildConfig.ICOUNT_USER)
-                    put("pass",         BuildConfig.ICOUNT_PASS)
+                    put("cid",          cid)
+                    put("user",         user)
+                    put("pass",         pass)
                     put("client_id",    clientId.toInt())
                     put("get_contacts", true)
                 })
