@@ -39,8 +39,10 @@ class AutoKabalaApplication : Application() {
         ReceiptApiClient.configure(this)
         receiptRepository.startListeningForPayments(applicationScope)
 
-        applicationScope.launch {
-            receiptRepository.syncClients()
+        if (ReceiptApiClient.hasCredentials()) {
+            applicationScope.launch {
+                receiptRepository.syncClients()
+            }
         }
 
         val reminderWork = PeriodicWorkRequestBuilder<PaymentReminderWorker>(6, TimeUnit.HOURS)

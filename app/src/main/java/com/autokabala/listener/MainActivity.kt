@@ -142,6 +142,8 @@ import androidx.compose.ui.platform.LocalFocusManager
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.ImeAction
 import androidx.compose.ui.text.input.KeyboardType
+import androidx.compose.ui.text.input.PasswordVisualTransformation
+import androidx.compose.ui.text.input.VisualTransformation
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import androidx.core.app.NotificationManagerCompat
@@ -619,6 +621,7 @@ private fun MainTabsScreen(
                     onToggleListener = { viewModel.onEnableDisableClicked() },
                     onOpenSettings = onOpenSettingsClicked,
                     onSyncClients = { viewModel.onSyncClientsClicked() },
+                    onTestConnection = { viewModel.onTestICountConnection() },
                     onAddFakePayment = { viewModel.onAddFakePaymentClicked() },
                     onAddFakeOverduePayment = { viewModel.onAddFakeOverduePaymentClicked() },
                     onShowTutorial = onShowTutorial,
@@ -2780,6 +2783,7 @@ fun SettingsTab(
     onToggleListener: () -> Unit,
     onOpenSettings: () -> Unit,
     onSyncClients: () -> Unit,
+    onTestConnection: () -> Unit = {},
     onAddFakePayment: () -> Unit,
     onAddFakeOverduePayment: () -> Unit,
     onShowTutorial: () -> Unit = {},
@@ -2873,6 +2877,8 @@ fun SettingsTab(
         var icountCid  by remember { mutableStateOf(icountPrefs.getString(BubbleService.KEY_ICOUNT_CID,  "") ?: "") }
         var icountUser by remember { mutableStateOf(icountPrefs.getString(BubbleService.KEY_ICOUNT_USER, "") ?: "") }
         var icountPass by remember { mutableStateOf(icountPrefs.getString(BubbleService.KEY_ICOUNT_PASS, "") ?: "") }
+        var passVisible by remember { mutableStateOf(false) }
+        val credentialsFilled = icountCid.isNotBlank() && icountUser.isNotBlank() && icountPass.isNotBlank()
 
         Card(modifier = Modifier.fillMaxWidth()) {
             Column(
@@ -2884,6 +2890,13 @@ fun SettingsTab(
                     style = MaterialTheme.typography.titleMedium,
                     fontWeight = FontWeight.Bold
                 )
+                if (!credentialsFilled) {
+                    Text(
+                        "יש למלא את כל השדות כדי להפיק קבלות",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.error
+                    )
+                }
                 OutlinedTextField(
                     value = icountCid,
                     onValueChange = {
@@ -2915,12 +2928,29 @@ fun SettingsTab(
                     },
                     label = { Text("טוקן API") },
                     singleLine = true,
+                    visualTransformation = if (passVisible) VisualTransformation.None else PasswordVisualTransformation(),
+                    trailingIcon = {
+                        TextButton(onClick = { passVisible = !passVisible }) {
+                            Text(if (passVisible) "הסתר" else "הצג", style = MaterialTheme.typography.labelSmall)
+                        }
+                    },
                     modifier = Modifier.fillMaxWidth()
                 )
+                OutlinedButton(
+                    onClick = onTestConnection,
+                    enabled = credentialsFilled,
+                    modifier = Modifier.fillMaxWidth()
+                ) {
+                    Text("בדוק חיבור")
+                }
             }
         }
 
-        Button(onClick = onSyncClients, modifier = Modifier.fillMaxWidth()) {
+        Button(
+            onClick = onSyncClients,
+            enabled = credentialsFilled,
+            modifier = Modifier.fillMaxWidth()
+        ) {
             Text("סנכרן לקוחות")
         }
 

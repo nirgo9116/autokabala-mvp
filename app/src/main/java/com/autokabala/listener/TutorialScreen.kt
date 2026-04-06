@@ -6,7 +6,6 @@ import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.pager.HorizontalPager
 import androidx.compose.foundation.pager.rememberPagerState
-import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.*
 import androidx.compose.runtime.Composable
@@ -161,26 +160,13 @@ fun TutorialScreen(onDone: () -> Unit) {
             TutorialSlideView(slide = SLIDES[page])
         }
 
-        // Page indicators
-        Row(
-            horizontalArrangement = Arrangement.spacedBy(8.dp),
-            verticalAlignment = Alignment.CenterVertically,
-            modifier = Modifier.padding(vertical = 16.dp)
-        ) {
-            repeat(SLIDES.size) { i ->
-                Box(
-                    modifier = Modifier
-                        .size(if (pagerState.currentPage == i) 10.dp else 7.dp)
-                        .clip(CircleShape)
-                        .background(
-                            if (pagerState.currentPage == i)
-                                MaterialTheme.colorScheme.primary
-                            else
-                                MaterialTheme.colorScheme.onSurface.copy(alpha = 0.25f)
-                        )
-                )
-            }
-        }
+        // Page counter
+        Text(
+            "${pagerState.currentPage + 1} / ${SLIDES.size}",
+            style = MaterialTheme.typography.bodySmall,
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
+            modifier = Modifier.padding(vertical = 12.dp)
+        )
 
         // Navigation buttons
         Row(

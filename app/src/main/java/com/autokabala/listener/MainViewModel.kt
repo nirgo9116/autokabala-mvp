@@ -375,8 +375,24 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
     }
 
     fun onSyncClientsClicked() {
+        if (!ReceiptApiClient.hasCredentials()) {
+            viewModelScope.launch { _uiEvent.send(UiEvent.ShowError("יש להגדיר פרטי חיבור ל-iCount לפני הסנכרון.")) }
+            return
+        }
         viewModelScope.launch {
             receiptRepository.syncClients()
+        }
+    }
+
+    fun onTestICountConnection() {
+        viewModelScope.launch {
+            if (!ReceiptApiClient.hasCredentials()) {
+                _uiEvent.send(UiEvent.ShowError("יש למלא את כל שדות החיבור ל-iCount."))
+                return@launch
+            }
+            val ok = ReceiptApiClient.testConnection()
+            if (ok) _uiEvent.send(UiEvent.ShowMessage("החיבור ל-iCount תקין ✓"))
+            else    _uiEvent.send(UiEvent.ShowError("החיבור נכשל — בדקו את הפרטים ונסו שוב."))
         }
     }
 

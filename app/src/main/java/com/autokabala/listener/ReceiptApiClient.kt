@@ -191,6 +191,14 @@ object ReceiptApiClient {
         pass = prefs.getString(BubbleService.KEY_ICOUNT_PASS, "") ?: ""
     }
 
+    fun hasCredentials() = cid.isNotBlank() && user.isNotBlank() && pass.isNotBlank()
+
+    suspend fun testConnection(): Boolean = try {
+        getClients() != null
+    } catch (e: Exception) {
+        false
+    }
+
     private val client = HttpClient(CIO) {
         install(ContentNegotiation) {
             json(Json { isLenient = true; ignoreUnknownKeys = true })
