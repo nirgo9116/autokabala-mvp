@@ -524,8 +524,14 @@ class BubbleService : Service() {
             // ── Fallback: ML Kit + Tesseract ──────────────────────────────────
             Log.d("BubbleService", "Falling back to ML Kit + Tesseract")
             if (!OcrUtils.isTesseractAvailable()) {
+                Log.d("BubbleService", "Tesseract unavailable — trying Gemini fallback")
+                val geminiResult = OcrUtils.runGeminiOcr(bitmap)
                 bitmap.recycle()
-                overlayState.value = OverlayState.Err("לא ניתן לקרוא את התשלום — נסו שוב או שתפו תמונה")
+                if (geminiResult is OcrUtils.GeminiResult.Success) {
+                    finishPaymentFlow(geminiResult.data, startMs)
+                } else {
+                    overlayState.value = OverlayState.Err("לא ניתן לקרוא את התשלום — נסו שוב או שתפו תמונה")
+                }
                 return
             }
 
@@ -570,13 +576,20 @@ class BubbleService : Service() {
                 }
             }
 
-            bitmap.recycle()
-
             if (paymentData == null) {
-                val hint = if (isPaybox) "ודא שמדובר באישור פייבוקס" else "ודא שמדובר באישור ביט"
-                overlayState.value = OverlayState.Err("לא נמצאו פרטי תשלום — $hint")
+                Log.d("BubbleService", "ML Kit + Tesseract unparseable — trying Gemini fallback")
+                val geminiResult = OcrUtils.runGeminiOcr(bitmap)
+                bitmap.recycle()
+                if (geminiResult is OcrUtils.GeminiResult.Success) {
+                    finishPaymentFlow(geminiResult.data, startMs)
+                } else {
+                    val hint = if (isPaybox) "ודא שמדובר באישור פייבוקס" else "ודא שמדובר באישור ביט"
+                    overlayState.value = OverlayState.Err("לא נמצאו פרטי תשלום — $hint")
+                }
                 return
             }
+
+            bitmap.recycle()
 
             finishPaymentFlow(paymentData, startMs)
 

@@ -90,8 +90,9 @@ class AutoKabalaNotificationService : NotificationListenerService() {
             BubbleService.show(this)
         } else {
             if (current == lastForegroundPkg) return
+            val wasOnPaymentApp = lastForegroundPkg in PAYMENT_PACKAGES
             lastForegroundPkg = current
-            if (current != null) {
+            if (wasOnPaymentApp) {
                 BubbleService.hide(this)
             }
         }
