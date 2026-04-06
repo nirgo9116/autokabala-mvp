@@ -120,6 +120,7 @@ class BubbleService : Service() {
         const val OCR_ENGINE_AUTO           = "AUTO"
         const val OCR_ENGINE_VISION         = "VISION"
         const val OCR_ENGINE_MLKIT          = "MLKIT"
+        const val OCR_ENGINE_OPENAI         = "OPENAI"
         const val KEY_SHARED_URIS           = "shared_image_uris"  // Set<String> of gallery URIs to clean
         private const val KEY_RECEIPT_COUNT = "receipt_count"
         private var instance: BubbleService? = null
@@ -152,6 +153,8 @@ class BubbleService : Service() {
     private var pendingPaymentId: Int? = null  // DB id of in-progress payment; deleted on cancel
 
     private val prefs by lazy { getSharedPreferences(PREFS_NAME, MODE_PRIVATE) }
+    private var feedbackOriginalUri: android.net.Uri? = null  // original share screenshot
+    private var feedbackCroppedUri: android.net.Uri? = null   // cropped image sent to OpenAI
 
     // Minimal LifecycleOwner so ComposeView works inside a Service
     private val serviceLifecycle = object : LifecycleOwner, SavedStateRegistryOwner {
@@ -424,7 +427,47 @@ class BubbleService : Service() {
     private suspend fun processScreenshot(bitmap: Bitmap) {
         val startMs = System.currentTimeMillis()
         val ocrEngine = prefs.getString(KEY_OCR_ENGINE, OCR_ENGINE_AUTO) ?: OCR_ENGINE_AUTO
+
+        // Save original screenshot for "שלח למפתח" feedback (release builds)
+        if (!BuildConfig.DEBUG) {
+            feedbackOriginalUri = withContext(Dispatchers.IO) {
+                try {
+                    val file = java.io.File(cacheDir, "feedback_original.jpg")
+                    java.io.FileOutputStream(file).use { bitmap.compress(android.graphics.Bitmap.CompressFormat.JPEG, 85, it) }
+                    androidx.core.content.FileProvider.getUriForFile(this@BubbleService, "${packageName}.provider", file)
+                } catch (_: Exception) { null }
+            }
+        }
         try {
+            // ── OpenAI Vision (when explicitly selected) ──────────────────────
+            if (ocrEngine == OCR_ENGINE_OPENAI) {
+                Log.d("BubbleService", "Trying OpenAI OCR (attempt 1)")
+                val croppedBitmap = OcrUtils.cropForOpenAi(bitmap)
+                if (!BuildConfig.DEBUG) {
+                    feedbackCroppedUri = withContext(Dispatchers.IO) {
+                        try {
+                            val file = java.io.File(cacheDir, "feedback_cropped.jpg")
+                            java.io.FileOutputStream(file).use { croppedBitmap.compress(android.graphics.Bitmap.CompressFormat.JPEG, 85, it) }
+                            androidx.core.content.FileProvider.getUriForFile(this@BubbleService, "${packageName}.provider", file)
+                        } catch (_: Exception) { null }
+                    }
+                }
+                var openAiResult = OcrUtils.runOpenAiOcr(croppedBitmap)
+                if (croppedBitmap !== bitmap) croppedBitmap.recycle()
+                if (openAiResult == null) {
+                    Log.d("BubbleService", "OpenAI attempt 1 null — retrying (attempt 2)")
+                    val retryBitmap = OcrUtils.cropForOpenAi(bitmap)
+                    openAiResult = OcrUtils.runOpenAiOcr(retryBitmap)
+                    if (retryBitmap !== bitmap) retryBitmap.recycle()
+                }
+                bitmap.recycle()
+                when (openAiResult) {
+                    is OcrUtils.GeminiResult.Success -> { finishPaymentFlow(openAiResult.data, startMs); return }
+                    is OcrUtils.GeminiResult.Rejected -> { overlayState.value = OverlayState.Err("OpenAI: לא זוהה תשלום בתמונה"); return }
+                    null -> { overlayState.value = OverlayState.Err("OpenAI לא הצליח לקרוא את התשלום — נסו שוב"); return }
+                }
+            }
+
             // ── Google Cloud Vision ───────────────────────────────────────────
             val skipVision = ocrEngine == OCR_ENGINE_MLKIT
             var visionResult: com.autokabala.listener.OcrUtils.VisionResult? = null
@@ -634,6 +677,57 @@ class BubbleService : Service() {
         return dp[a.length][b.length]
     }
 
+    // ─── Developer feedback (release testing) ────────────────────────────────
+
+    private fun sendFeedbackToWhatsApp(payment: PaymentEntity) {
+        removeOverlay()
+        val text = buildString {
+            append("🔍 AutoKabala OCR Report\n")
+            append("מקור: ${if (payment.source == "bit") "ביט" else "פייבוקס"}\n")
+            append("שם מקורי (OCR): ${payment.senderName.ifBlank { "לא זוהה" }}\n")
+            append("שם מפוענח: ${payment.senderName.ifBlank { "לא זוהה" }}\n")
+            append("סכום: ₪${payment.amount}\n")
+        }
+        val uris = ArrayList<android.net.Uri>()
+        feedbackOriginalUri?.let { uris.add(it) }
+        feedbackCroppedUri?.let { uris.add(it) }
+
+        val intent = when {
+            uris.size >= 2 -> android.content.Intent(android.content.Intent.ACTION_SEND_MULTIPLE).apply {
+                type = "image/*"
+                putParcelableArrayListExtra(android.content.Intent.EXTRA_STREAM, uris)
+                putExtra(android.content.Intent.EXTRA_TEXT, text)
+                addFlags(android.content.Intent.FLAG_GRANT_READ_URI_PERMISSION)
+                addFlags(android.content.Intent.FLAG_ACTIVITY_NEW_TASK)
+                setPackage("com.whatsapp")
+            }
+            uris.size == 1 -> android.content.Intent(android.content.Intent.ACTION_SEND).apply {
+                type = "image/*"
+                putExtra(android.content.Intent.EXTRA_STREAM, uris[0])
+                putExtra(android.content.Intent.EXTRA_TEXT, text)
+                addFlags(android.content.Intent.FLAG_GRANT_READ_URI_PERMISSION)
+                addFlags(android.content.Intent.FLAG_ACTIVITY_NEW_TASK)
+                setPackage("com.whatsapp")
+            }
+            else -> android.content.Intent(android.content.Intent.ACTION_VIEW,
+                android.net.Uri.parse("whatsapp://send?phone=972506818414&text=${android.net.Uri.encode(text)}")).apply {
+                addFlags(android.content.Intent.FLAG_ACTIVITY_NEW_TASK)
+            }
+        }
+        try {
+            startActivity(intent)
+        } catch (_: android.content.ActivityNotFoundException) {
+            val fallback = android.content.Intent(android.content.Intent.ACTION_SEND).apply {
+                type = "text/plain"
+                putExtra(android.content.Intent.EXTRA_TEXT, text)
+                addFlags(android.content.Intent.FLAG_ACTIVITY_NEW_TASK)
+            }
+            startActivity(android.content.Intent.createChooser(fallback, null).apply {
+                addFlags(android.content.Intent.FLAG_ACTIVITY_NEW_TASK)
+            })
+        }
+    }
+
     // ─── Receipt issuance ─────────────────────────────────────────────────────
 
     private fun issueReceipt(client: ClientEntity, amount: Double, timestamp: Long, description: String) {
@@ -760,12 +854,13 @@ class BubbleService : Service() {
             setContent {
                 MaterialTheme {
                     ReceiptOverlayCard(
-                        state          = overlayState.value,
-                        animVisible    = overlayAnimVisible.value,
-                        onIssue        = ::issueReceipt,
-                        onDemoReceipt  = ::demoReceipt,
-                        onDismiss      = ::removeOverlay,
-                        onSelectPending = ::selectPendingPayment
+                        state           = overlayState.value,
+                        animVisible     = overlayAnimVisible.value,
+                        onIssue         = ::issueReceipt,
+                        onDemoReceipt   = ::demoReceipt,
+                        onDismiss       = ::removeOverlay,
+                        onSelectPending = ::selectPendingPayment,
+                        onSendFeedback  = ::sendFeedbackToWhatsApp
                     )
                 }
             }
@@ -860,7 +955,8 @@ private fun ReceiptOverlayCard(
     onDemoReceipt: () -> Unit,
     onDismiss: () -> Unit,
     onSelectPending: (PaymentEntity) -> Unit,
-    onCreateClient: () -> Unit = {}
+    onCreateClient: () -> Unit = {},
+    onSendFeedback: (PaymentEntity) -> Unit = {}
 ) {
     AnimatedVisibility(
         visible = animVisible,
@@ -874,7 +970,7 @@ private fun ReceiptOverlayCard(
         )
     ) {
         if (state is OverlayState.Ready) {
-            ReadyContent(state, onIssue, onDemoReceipt, onDismiss, onCreateClient)
+            ReadyContent(state, onIssue, onDemoReceipt, onDismiss, onCreateClient, onSendFeedback)
             return@AnimatedVisibility
         }
         if (state is OverlayState.PendingList) {
@@ -946,7 +1042,8 @@ private fun ReadyContent(
     onIssue: (ClientEntity, Double, Long, String) -> Unit,
     onDemoReceipt: () -> Unit,
     onDismiss: () -> Unit,
-    onCreateClient: () -> Unit = {}
+    onCreateClient: () -> Unit = {},
+    onSendFeedback: (PaymentEntity) -> Unit = {}
 ) {
     var selectedClient by remember {
         mutableStateOf((state.matchResult as? MatchResult.SingleMatch)?.client)
@@ -1110,38 +1207,53 @@ private fun ReadyContent(
                     ) {
                         Text("✕", fontSize = 20.sp, color = dismissText)
                     }
-                    // הפק קבלה
-                    val issueEnabled = btnEnabled
-                    Box(
-                        modifier = Modifier
-                            .weight(1f)
-                            .height(54.dp)
-                            .alpha(if (issueEnabled) 1f else 0.45f)
-                            .clip(RoundedCornerShape(14.dp))
-                            .background(brand)
-                            .clickable(enabled = issueEnabled) {
-                                effectiveClient?.let {
-                                    if (editedAmount != state.payment.amount && state.payment.amount != 0.0)
-                                        showAmountDialog = true
-                                    else
-                                        onIssue(it, editedAmount, editedTimestamp, editedDescription)
-                                }
-                            },
-                        contentAlignment = Alignment.Center
-                    ) {
-                        Text("הפק קבלה", color = ctaText, fontWeight = FontWeight.Bold, fontSize = 18.sp)
-                    }
-                    // קבלת דמה — always visible so testers can exercise the flow
-                    Box(
-                        modifier = Modifier
-                            .size(54.dp)
-                            .clip(RoundedCornerShape(14.dp))
-                            .background(dismissBg)
-                            .border(1.dp, dismissBorder, RoundedCornerShape(14.dp))
-                            .clickable { onDemoReceipt() },
-                        contentAlignment = Alignment.Center
-                    ) {
-                        Text("🔬", fontSize = 20.sp)
+                    if (BuildConfig.DEBUG) {
+                        // ── DEBUG: הפק קבלה רגיל ────────────────────────────
+                        val issueEnabled = btnEnabled
+                        Box(
+                            modifier = Modifier
+                                .weight(1f)
+                                .height(54.dp)
+                                .alpha(if (issueEnabled) 1f else 0.45f)
+                                .clip(RoundedCornerShape(14.dp))
+                                .background(brand)
+                                .clickable(enabled = issueEnabled) {
+                                    effectiveClient?.let {
+                                        if (editedAmount != state.payment.amount && state.payment.amount != 0.0)
+                                            showAmountDialog = true
+                                        else
+                                            onIssue(it, editedAmount, editedTimestamp, editedDescription)
+                                    }
+                                },
+                            contentAlignment = Alignment.Center
+                        ) {
+                            Text("הפק קבלה", color = ctaText, fontWeight = FontWeight.Bold, fontSize = 18.sp)
+                        }
+                        // קבלת דמה
+                        Box(
+                            modifier = Modifier
+                                .size(54.dp)
+                                .clip(RoundedCornerShape(14.dp))
+                                .background(dismissBg)
+                                .border(1.dp, dismissBorder, RoundedCornerShape(14.dp))
+                                .clickable { onDemoReceipt() },
+                            contentAlignment = Alignment.Center
+                        ) {
+                            Text("🔬", fontSize = 20.sp)
+                        }
+                    } else {
+                        // ── RELEASE: שלח למפתח ───────────────────────────────
+                        Box(
+                            modifier = Modifier
+                                .weight(1f)
+                                .height(54.dp)
+                                .clip(RoundedCornerShape(14.dp))
+                                .background(brand)
+                                .clickable { onSendFeedback(state.payment) },
+                            contentAlignment = Alignment.Center
+                        ) {
+                            Text("📤 שלח למפתח", color = ctaText, fontWeight = FontWeight.Bold, fontSize = 16.sp)
+                        }
                     }
                 }
             }

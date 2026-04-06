@@ -75,7 +75,9 @@ class AutoKabalaApplication : Application() {
             })
             .setCategories(setOf("com.autokabala.listener.SHARE_TARGET"))
             .setLongLived(true)
+            .setRank(0)
             .build()
         ShortcutManagerCompat.pushDynamicShortcut(this, shortcut)
+        ShortcutManagerCompat.reportShortcutUsed(this, "autokabala_share_target")
     }
 }

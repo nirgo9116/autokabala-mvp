@@ -511,7 +511,9 @@ private fun MainTabsScreen(
             }
         },
         bottomBar = {
-            NavigationBar {
+            // windowInsets=0 + navigationBarsPadding on the Column gives consistent icon
+            // alignment across devices (fixes Samsung RTL inset inconsistency)
+            NavigationBar(windowInsets = androidx.compose.foundation.layout.WindowInsets(0)) {
                 NavigationBarItem(
                     selected = selectedTab == 0,
                     onClick = { viewModel.onTabSelected(0) },
@@ -2977,7 +2979,8 @@ fun SettingsTab(
                 val engines = listOf(
                     BubbleService.OCR_ENGINE_AUTO   to "אוטומטי",
                     BubbleService.OCR_ENGINE_VISION to "Google Vision",
-                    BubbleService.OCR_ENGINE_MLKIT  to "ML Kit + Tesseract"
+                    BubbleService.OCR_ENGINE_MLKIT  to "ML Kit + Tesseract",
+                    BubbleService.OCR_ENGINE_OPENAI to "OpenAI"
                 )
                 engines.forEach { (key, label) ->
                     Row(

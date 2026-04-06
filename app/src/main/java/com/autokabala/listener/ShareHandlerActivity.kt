@@ -19,6 +19,7 @@ class ShareHandlerActivity : Activity() {
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         if (intent?.action == Intent.ACTION_SEND) {
+            ShortcutManagerCompat.reportShortcutUsed(this, "autokabala_share_target")
             @Suppress("DEPRECATION")
             val srcUri = intent.getParcelableExtra<Uri>(Intent.EXTRA_STREAM)
             if (srcUri != null) {
