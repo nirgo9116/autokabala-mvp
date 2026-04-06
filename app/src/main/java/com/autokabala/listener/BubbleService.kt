@@ -116,6 +116,10 @@ class BubbleService : Service() {
         const val KEY_ICOUNT_CID            = "icount_cid"
         const val KEY_ICOUNT_USER           = "icount_user"
         const val KEY_ICOUNT_PASS           = "icount_pass"
+        const val KEY_OCR_ENGINE            = "ocr_engine"
+        const val OCR_ENGINE_AUTO           = "AUTO"
+        const val OCR_ENGINE_VISION         = "VISION"
+        const val OCR_ENGINE_MLKIT          = "MLKIT"
         const val KEY_SHARED_URIS           = "shared_image_uris"  // Set<String> of gallery URIs to clean
         private const val KEY_RECEIPT_COUNT = "receipt_count"
         private var instance: BubbleService? = null
@@ -419,15 +423,21 @@ class BubbleService : Service() {
 
     private suspend fun processScreenshot(bitmap: Bitmap) {
         val startMs = System.currentTimeMillis()
+        val ocrEngine = prefs.getString(KEY_OCR_ENGINE, OCR_ENGINE_AUTO) ?: OCR_ENGINE_AUTO
         try {
-            // ── Primary: Google Cloud Vision (up to 2 attempts) ──────────────
-            Log.d("BubbleService", "Trying Google Vision OCR (attempt 1)")
-            var visionResult = OcrUtils.runGoogleVisionOcr(bitmap)
-            if (visionResult == null) {
-                Log.d("BubbleService", "Google Vision attempt 1 null — retrying (attempt 2)")
+            // ── Google Cloud Vision ───────────────────────────────────────────
+            val skipVision = ocrEngine == OCR_ENGINE_MLKIT
+            var visionResult: com.autokabala.listener.OcrUtils.VisionResult? = null
+            if (!skipVision) {
+                Log.d("BubbleService", "Trying Google Vision OCR (attempt 1)")
                 visionResult = OcrUtils.runGoogleVisionOcr(bitmap)
+                if (visionResult == null) {
+                    Log.d("BubbleService", "Google Vision attempt 1 null — retrying (attempt 2)")
+                    visionResult = OcrUtils.runGoogleVisionOcr(bitmap)
+                }
             }
 
+            val forceVision = ocrEngine == OCR_ENGINE_VISION
             if (visionResult != null) {
                 val visionText = visionResult.text
                 Log.d("BubbleService", "Google Vision text:\n$visionText")
@@ -460,6 +470,12 @@ class BubbleService : Service() {
                     return
                 }
                 Log.d("BubbleService", "Google Vision text unparseable — falling back to ML Kit")
+            }
+
+            if (forceVision) {
+                bitmap.recycle()
+                overlayState.value = OverlayState.Err("Google Vision לא הצליח לקרוא את התשלום — נסו שוב")
+                return
             }
 
             // ── Fallback: ML Kit + Tesseract ──────────────────────────────────
