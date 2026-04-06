@@ -113,6 +113,11 @@ class BubbleService : Service() {
         const val PREFS_NAME           = "autokabala_prefs"
         const val KEY_BUBBLE_ENABLED        = "bubble_enabled"
         const val KEY_FILTER_ACTIVE_CLIENTS = "filter_active_clients"
+        const val KEY_OCR_ENGINE            = "ocr_engine"
+        const val OCR_ENGINE_AUTO           = "AUTO"
+        const val OCR_ENGINE_VISION         = "VISION"
+        const val OCR_ENGINE_MLKIT          = "MLKIT"
+        const val OCR_ENGINE_OPENAI         = "OPENAI"
         const val KEY_SHARED_URIS           = "shared_image_uris"  // Set<String> of gallery URIs to clean
         private const val KEY_RECEIPT_COUNT = "receipt_count"
         private var instance: BubbleService? = null
@@ -418,6 +423,8 @@ class BubbleService : Service() {
 
     private suspend fun processScreenshot(bitmap: Bitmap) {
         val startMs = System.currentTimeMillis()
+        val ocrEngine = prefs.getString(KEY_OCR_ENGINE, OCR_ENGINE_AUTO) ?: OCR_ENGINE_AUTO
+
         // Save original screenshot for "שלח למפתח" feedback (release builds)
         if (!BuildConfig.DEBUG) {
             feedbackOriginalUri = withContext(Dispatchers.IO) {
@@ -429,8 +436,62 @@ class BubbleService : Service() {
             }
         }
         try {
-            // ── Primary: ML Kit + Tesseract ───────────────────────────────────
-            Log.d("BubbleService", "Starting ML Kit + Tesseract OCR")
+            // ── OpenAI (when explicitly selected) ────────────────────────────
+            if (ocrEngine == OCR_ENGINE_OPENAI) {
+                Log.d("BubbleService", "Trying OpenAI OCR")
+                val croppedBitmap = OcrUtils.cropForOpenAi(bitmap)
+                var openAiResult = OcrUtils.runOpenAiOcr(croppedBitmap)
+                if (croppedBitmap !== bitmap) croppedBitmap.recycle()
+                if (openAiResult == null) {
+                    val retryBitmap = OcrUtils.cropForOpenAi(bitmap)
+                    openAiResult = OcrUtils.runOpenAiOcr(retryBitmap)
+                    if (retryBitmap !== bitmap) retryBitmap.recycle()
+                }
+                bitmap.recycle()
+                when (openAiResult) {
+                    is OcrUtils.GeminiResult.Success -> { finishPaymentFlow(openAiResult.data, startMs); return }
+                    is OcrUtils.GeminiResult.Rejected -> { overlayState.value = OverlayState.Err("OpenAI: לא זוהה תשלום בתמונה"); return }
+                    null -> { overlayState.value = OverlayState.Err("OpenAI לא הצליח — נסו שוב"); return }
+                }
+            }
+
+            // ── Google Vision (AUTO or VISION mode) ──────────────────────────
+            val skipVision = ocrEngine == OCR_ENGINE_MLKIT
+            var visionResult: OcrUtils.VisionResult? = null
+            if (!skipVision) {
+                Log.d("BubbleService", "Trying Google Vision OCR")
+                visionResult = OcrUtils.runGoogleVisionOcr(bitmap)
+                if (visionResult == null) visionResult = OcrUtils.runGoogleVisionOcr(bitmap)
+            }
+
+            val forceVision = ocrEngine == OCR_ENGINE_VISION
+            if (visionResult != null) {
+                val visionText = visionResult.text
+                val isPayboxVision = PayboxShareParser.isPaybox(visionText)
+                val visionAmount = OcrUtils.extractAmountFromText(visionText)
+                val visionPaymentData = if (isPayboxVision) {
+                    PayboxShareParser.parse(visionText, visionText, visionAmount, null)
+                } else {
+                    if (BitShareParser.isExpired(visionText)) {
+                        bitmap.recycle(); overlayState.value = OverlayState.Err("תשלום זה פג תוקף"); return
+                    }
+                    BitShareParser.parse(hebrewText = visionText, latinText = visionText, mlKitAmount = visionAmount)
+                }
+                if (visionPaymentData != null) {
+                    Log.d("BubbleService", "Google Vision parsed: ${visionPaymentData.senderName} / ${visionPaymentData.amount}")
+                    bitmap.recycle(); finishPaymentFlow(visionPaymentData, startMs); return
+                }
+                Log.d("BubbleService", "Google Vision unparseable — falling back to ML Kit")
+            }
+
+            if (forceVision) {
+                bitmap.recycle()
+                overlayState.value = OverlayState.Err("Google Vision לא הצליח — נסו שוב")
+                return
+            }
+
+            // ── ML Kit + Tesseract ────────────────────────────────────────────
+            Log.d("BubbleService", "Running ML Kit + Tesseract OCR")
             if (!OcrUtils.isTesseractAvailable()) {
                 bitmap.recycle()
                 overlayState.value = OverlayState.Err("לא ניתן לקרוא את התשלום — נסה שוב או שתף תמונה")

@@ -91,6 +91,7 @@ import androidx.compose.material3.ModalBottomSheet
 import androidx.compose.material3.NavigationBar
 import androidx.compose.material3.NavigationBarItem
 import androidx.compose.material3.OutlinedButton
+import androidx.compose.material3.RadioButton
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.OutlinedTextFieldDefaults
 import androidx.compose.material3.Scaffold
@@ -2850,6 +2851,60 @@ fun SettingsTab(
 
         Button(onClick = onSyncClients, modifier = Modifier.fillMaxWidth()) {
             Text("סנכרן לקוחות")
+        }
+
+        // ── OCR engine selector ───────────────────────────────────────────────
+        val ocrCtx = LocalContext.current
+        val ocrPrefs = remember {
+            ocrCtx.getSharedPreferences(BubbleService.PREFS_NAME, android.content.Context.MODE_PRIVATE)
+        }
+        var ocrEngine by remember {
+            mutableStateOf(ocrPrefs.getString(BubbleService.KEY_OCR_ENGINE, BubbleService.OCR_ENGINE_AUTO) ?: BubbleService.OCR_ENGINE_AUTO)
+        }
+        Card(modifier = Modifier.fillMaxWidth()) {
+            Column(
+                modifier = Modifier.padding(16.dp),
+                verticalArrangement = Arrangement.spacedBy(10.dp)
+            ) {
+                Text("מנוע OCR", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Bold)
+                Text(
+                    "בחרו איזה מנוע קריאת טקסט ישמש לעיבוד תמונות התשלום",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                )
+                val engines = listOf(
+                    BubbleService.OCR_ENGINE_AUTO   to "אוטומטי",
+                    BubbleService.OCR_ENGINE_VISION to "Google Vision",
+                    BubbleService.OCR_ENGINE_MLKIT  to "ML Kit + Tesseract",
+                    BubbleService.OCR_ENGINE_OPENAI to "OpenAI"
+                )
+                engines.forEach { (key, label) ->
+                    Row(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .clickable {
+                                ocrEngine = key
+                                ocrPrefs.edit().putString(BubbleService.KEY_OCR_ENGINE, key).apply()
+                            }
+                            .padding(vertical = 4.dp),
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.spacedBy(12.dp)
+                    ) {
+                        RadioButton(selected = ocrEngine == key, onClick = {
+                            ocrEngine = key
+                            ocrPrefs.edit().putString(BubbleService.KEY_OCR_ENGINE, key).apply()
+                        })
+                        Column {
+                            Text(label, style = MaterialTheme.typography.bodyMedium)
+                            if (key == BubbleService.OCR_ENGINE_AUTO) {
+                                Text("מנסה Google Vision קודם, עובר ל-ML Kit אם נכשל",
+                                    style = MaterialTheme.typography.bodySmall,
+                                    color = MaterialTheme.colorScheme.onSurfaceVariant)
+                            }
+                        }
+                    }
+                }
+            }
         }
 
         OutlinedButton(onClick = onShowTutorial, modifier = Modifier.fillMaxWidth()) {

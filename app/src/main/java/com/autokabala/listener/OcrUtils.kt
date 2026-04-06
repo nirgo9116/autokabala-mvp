@@ -30,6 +30,9 @@ object OcrUtils {
 
     data class MlKitResult(val text: String, val amount: Double?, val nameAboveAmount: String?)
 
+    /** Returned by [runGoogleVisionOcr]: plain text for amount/timestamp + structured name from word bounding boxes. */
+    data class VisionResult(val text: String, val senderName: String?)
+
     sealed class GeminiResult {
         object Rejected : GeminiResult()
         data class Success(val data: PaymentData) : GeminiResult()
@@ -720,6 +723,259 @@ object OcrUtils {
         } catch (e: Exception) {
             Log.e("OcrUtils", "OpenAI OCR failed", e)
             null
+        }
+    }
+
+    // ── Google Cloud Vision — word-level bounding-box name extractor ─────────
+    //
+    // Vision's fullTextAnnotation contains pages → blocks → paragraphs → words,
+    // each word with a boundingPoly (4 vertices).  We use X/Y pixel positions to
+    // reconstruct spatial lines and extract the sender name reliably for mixed
+    // Hebrew+Latin text, ignoring lower-screen noise.
+
+    private data class VisionWord(val text: String, val left: Int, val centerY: Int)
+
+    private const val VISION_LINE_CLUSTER_PX = 14   // words within this vertical distance → same line
+    private const val VISION_NAME_ZONE       = 0.38f // top 38% of scaled image — generous for wrapped lines
+
+    private val BIT_TRIGGERS = listOf("ביקשת", "נשלחו", "שלח", "שלחה")
+
+    /** Parse word tokens from Vision's fullTextAnnotation, filtered to the top name zone. */
+    private fun parseVisionWords(responseObj: JSONObject, scaledHeight: Int): List<VisionWord> {
+        val cutoffY = (scaledHeight * VISION_NAME_ZONE).toInt()
+        val words   = mutableListOf<VisionWord>()
+
+        val pages = responseObj.optJSONObject("fullTextAnnotation")
+            ?.optJSONArray("pages") ?: return emptyList()
+        val blocks = pages.optJSONObject(0)?.optJSONArray("blocks") ?: return emptyList()
+
+        for (bi in 0 until blocks.length()) {
+            val paragraphs = blocks.optJSONObject(bi)?.optJSONArray("paragraphs") ?: continue
+            for (pi in 0 until paragraphs.length()) {
+                val wordArr = paragraphs.optJSONObject(pi)?.optJSONArray("words") ?: continue
+                for (wi in 0 until wordArr.length()) {
+                    val word    = wordArr.optJSONObject(wi) ?: continue
+                    val symbols = word.optJSONArray("symbols") ?: continue
+
+                    val text = buildString {
+                        for (si in 0 until symbols.length())
+                            append(symbols.optJSONObject(si)?.optString("text", "") ?: "")
+                    }.trim()
+                    if (text.isBlank()) continue
+
+                    val vertices = word.optJSONObject("boundingPoly")
+                        ?.optJSONArray("vertices") ?: continue
+                    if (vertices.length() < 2) continue
+
+                    val xs = (0 until vertices.length()).mapNotNull { vertices.optJSONObject(it)?.optInt("x") }
+                    val ys = (0 until vertices.length()).mapNotNull { vertices.optJSONObject(it)?.optInt("y") }
+                    if (xs.isEmpty() || ys.isEmpty()) continue
+
+                    val centerY = (ys.min() + ys.max()) / 2
+                    if (centerY > cutoffY) continue
+
+                    words += VisionWord(text, left = xs.min(), centerY = centerY)
+                }
+            }
+        }
+        return words
+    }
+
+    /** Cluster words into lines by vertical proximity, then sort each line left→right. */
+    private fun clusterVisionLines(words: List<VisionWord>): List<List<VisionWord>> {
+        if (words.isEmpty()) return emptyList()
+        val clusters = mutableListOf<MutableList<VisionWord>>()
+
+        for (word in words.sortedBy { it.centerY }) {
+            val match = clusters.lastOrNull { c ->
+                kotlin.math.abs(c.sumOf { it.centerY } / c.size - word.centerY) <= VISION_LINE_CLUSTER_PX
+            }
+            if (match != null) match += word else clusters += mutableListOf(word)
+        }
+        return clusters.map { it.sortedBy { w -> w.left } }
+    }
+
+    /** True when a word looks like part of a personal name (Latin-dominant, no garbage). */
+    private fun isVisionNameWord(word: String): Boolean {
+        if (word.length < 2) return false
+        val latin = word.count { it in 'A'..'Z' || it in 'a'..'z' || it == '\'' || it == '-' }
+        if (latin.toFloat() / word.length < 0.75f) return false         // rejects Hebrew garbage
+        if (!word.any { it.isLetter() }) return false
+        val dominant = word.groupBy { it }.maxOf { it.value.size }
+        if (dominant.toFloat() / word.length > 0.65f) return false      // rejects "zzz", "וחח"
+        return true
+    }
+
+    /** True when a word ends a name run (majority Hebrew, pure digit, ₪).
+     *  Words like "מMeital" (Hebrew prefix + Latin name) are NOT breakers — they pass
+     *  isVisionNameWord and their Hebrew prefix gets stripped in extractVisionNameFromLine. */
+    private fun isVisionNameBreaker(word: String): Boolean =
+        word.count { it in '\u05D0'..'\u05EA' }.toFloat() / word.length > 0.5f ||
+        word.all    { it.isDigit() || it == ',' } ||
+        word.contains('₪')
+
+    /** Extract the best name candidate from a single (spatially sorted) line. */
+    private fun extractVisionNameFromLine(line: List<VisionWord>): String? {
+        val runs    = mutableListOf<List<String>>()
+        var current = mutableListOf<String>()
+
+        for (word in line) {
+            when {
+                isVisionNameWord(word.text)    -> current += word.text
+                isVisionNameBreaker(word.text) -> { if (current.isNotEmpty()) { runs += current; current = mutableListOf() } }
+                else                           -> { if (current.isNotEmpty()) { runs += current; current = mutableListOf() } }
+            }
+        }
+        if (current.isNotEmpty()) runs += current
+
+        // Pick the run with the longest total length; bonus for ≥2 words (first + last name)
+        val best = runs
+            .filter  { run -> run.any { it.length >= 3 } }
+            .maxByOrNull { run -> run.sumOf { it.length } + if (run.size >= 2) 6 else 0 }
+            ?: return null
+
+        // Post-process: drop trailing all-lowercase noise tokens; collapse doubled trailing letter
+        val words = best.toMutableList()
+        while (words.size > 1 && words.last().length <= 4 && words.last().all { it.isLowerCase() })
+            words.removeLast()
+        return words.joinToString(" ") { w -> w.replace(Regex("([A-Za-z])\\1\$"), "$1") }
+            .trim()
+            .replace(Regex("^[^A-Za-z]+"), "")  // strip Hebrew prefix chars (e.g. "מMeital" → "Meital")
+    }
+
+    /**
+     * Extract sender name from Vision's structured word data.
+     * Returns null when no confident name is found (caller falls back to BitShareParser regex).
+     */
+    private fun extractVisionSenderName(responseObj: JSONObject, scaledHeight: Int): String? {
+        val words = parseVisionWords(responseObj, scaledHeight)
+        if (words.isEmpty()) return null
+
+        val lines = clusterVisionLines(words)
+        Log.d("VisionName", "Lines in top zone: ${lines.map { l -> l.joinToString(" ") { it.text } }}")
+
+        // Pass 1: lines containing a Bit payment trigger phrase
+        for (line in lines.filter { l -> l.any { w -> BIT_TRIGGERS.any { t -> w.text.contains(t) } } }) {
+            extractVisionNameFromLine(line)?.let {
+                Log.d("VisionName", "Name from trigger line: '$it'")
+                return it
+            }
+        }
+
+        // Pass 2: line with the most name-like words (no trigger found — Paybox or partial image)
+        val best = lines
+            .map    { line -> line to line.count { isVisionNameWord(it.text) } }
+            .filter { it.second >= 2 }
+            .maxByOrNull { it.second }
+            ?.first ?: return null
+
+        return extractVisionNameFromLine(best).also {
+            if (it != null) Log.d("VisionName", "Name from best-scoring line: '$it'")
+        }
+    }
+
+    // ── Google Cloud Vision (primary OCR) ────────────────────────────────────
+
+    private val visionClient: OkHttpClient by lazy {
+        OkHttpClient.Builder()
+            .connectTimeout(15, TimeUnit.SECONDS)
+            .readTimeout(30, TimeUnit.SECONDS)
+            .build()
+    }
+
+    suspend fun runGoogleVisionOcr(bitmap: Bitmap): VisionResult? = withContext(Dispatchers.IO) {
+        try {
+            val apiKey = BuildConfig.GOOGLE_VISION_API_KEY
+            if (apiKey.isBlank()) {
+                Log.w("OcrUtils", "Google Vision API key not configured")
+                return@withContext null
+            }
+
+            // Scale to max 1024px — Vision API handles full-res but this reduces cost and latency
+            val maxDim = 1024
+            val scale = maxDim.toFloat() / maxOf(bitmap.width, bitmap.height)
+            val scaledHeight = if (scale < 1f) (bitmap.height * scale).toInt() else bitmap.height
+            val small = if (scale < 1f)
+                Bitmap.createScaledBitmap(bitmap, (bitmap.width * scale).toInt(), scaledHeight, true)
+            else bitmap
+            val baos = ByteArrayOutputStream()
+            small.compress(Bitmap.CompressFormat.JPEG, 85, baos)
+            if (small !== bitmap) small.recycle()
+            val base64Image = Base64.encodeToString(baos.toByteArray(), Base64.NO_WRAP)
+
+            val body = JSONObject().apply {
+                put("requests", org.json.JSONArray().apply {
+                    put(JSONObject().apply {
+                        put("image", JSONObject().apply {
+                            put("content", base64Image)
+                        })
+                        put("features", org.json.JSONArray().apply {
+                            put(JSONObject().apply {
+                                put("type", "TEXT_DETECTION")
+                            })
+                        })
+                        put("imageContext", JSONObject().apply {
+                            // Hint both Hebrew and Latin so numbers + mixed names are read correctly
+                            put("languageHints", org.json.JSONArray().apply {
+                                put("he")
+                                put("en")
+                            })
+                        })
+                    })
+                })
+            }.toString()
+
+            val request = Request.Builder()
+                .url("https://vision.googleapis.com/v1/images:annotate?key=$apiKey")
+                .post(body.toRequestBody("application/json".toMediaType()))
+                .build()
+
+            val response = visionClient.newCall(request).execute()
+            val rawBody = response.body?.string() ?: ""
+            Log.d("OcrUtils", "Google Vision HTTP ${response.code}")
+            if (!response.isSuccessful) {
+                Log.w("OcrUtils", "Google Vision error: $rawBody")
+                return@withContext null
+            }
+
+            val responseObj = try {
+                JSONObject(rawBody).getJSONArray("responses").getJSONObject(0)
+            } catch (e: Exception) {
+                Log.e("OcrUtils", "Google Vision response parse failed", e)
+                return@withContext null
+            }
+
+            // fullTextAnnotation preserves newlines; fall back to textAnnotations[0].description
+            val text = responseObj.optJSONObject("fullTextAnnotation")?.optString("text")
+                ?: responseObj.optJSONArray("textAnnotations")?.optJSONObject(0)?.optString("description")
+
+            if (text.isNullOrBlank()) {
+                Log.w("OcrUtils", "Google Vision returned empty text")
+                return@withContext null
+            }
+
+            Log.d("OcrUtils", "Google Vision text: $text")
+
+            // Extract sender name from word bounding boxes (more reliable than regex on flat text
+            // for mixed RTL+LTR lines — sorts words by pixel position, ignores lower-screen noise).
+            val senderName = extractVisionSenderName(responseObj, scaledHeight)
+            Log.d("OcrUtils", "Google Vision structured name: $senderName")
+
+            VisionResult(text = text, senderName = senderName)
+        } catch (e: Exception) {
+            Log.e("OcrUtils", "Google Vision OCR failed", e)
+            null
+        }
+    }
+
+    /** Extract payment amount (₪) from raw OCR text. */
+    fun extractAmountFromText(text: String): Double? {
+        val pattern = Regex("""₪\s*([\d,]+(?:\.\d{1,2})?)|([\d,]+(?:\.\d{1,2})?)\s*₪""")
+        return pattern.find(text)?.let { match ->
+            (match.groupValues[1].ifBlank { match.groupValues[2] })
+                .replace(",", "")
+                .toDoubleOrNull()
+                ?.takeIf { it in 1.0..99_999.0 }
         }
     }
 

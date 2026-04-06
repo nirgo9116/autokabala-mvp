@@ -67,8 +67,11 @@ object BitShareParser {
         Log.d(TAG, "Tesseract (Hebrew):\n$hebrewText")
         if (latinText !== hebrewText) Log.d(TAG, "ML Kit (Latin):\n$latinText")
 
-        val hebrewLines = hebrewText.split("\n").map { it.trim() }.filter { it.isNotBlank() }
-        val latinLines  = latinText.split("\n").map  { it.trim() }.filter { it.isNotBlank() }
+        val normHebrew = OcrNormalizer.normalize(hebrewText)
+        val normLatin  = if (latinText === hebrewText) normHebrew else OcrNormalizer.normalize(latinText)
+
+        val hebrewLines = normHebrew.split("\n").map { it.trim() }.filter { it.isNotBlank() }
+        val latinLines  = normLatin.split("\n").map  { it.trim() }.filter { it.isNotBlank() }
 
         Log.d(TAG, "Hebrew lines: ${hebrewLines.joinToString(" | ")}")
 
@@ -182,16 +185,45 @@ object BitShareParser {
         return null
     }
 
+    // Collects name words, merging consecutive short Hebrew fragments.
+    // Fixes OCR splitting like "ד וד לוי" → ["דוד","לוי"] instead of dropping "ד".
+    private fun collectNameWords(text: String): List<String> {
+        val rawTokens = text.trim().split(Regex("\\s+"))
+            .filter { tok -> tok.isNotBlank() && tok.all { c ->
+                c in '\u05D0'..'\u05EA' || c in 'A'..'Z' || c in 'a'..'z' || c == '\''
+            }}
+        val result = mutableListOf<String>()
+        var i = 0
+        while (i < rawTokens.size) {
+            val token = rawTokens[i]
+            val isHebrewFragment = token.length <= 2 && token.all { it in '\u05D0'..'\u05EA' }
+            if (isHebrewFragment) {
+                val merged = StringBuilder(token)
+                var j = i + 1
+                while (j < rawTokens.size) {
+                    val next = rawTokens[j]
+                    if (next.all { it in '\u05D0'..'\u05EA' } && next.length <= 2) {
+                        merged.append(next); j++
+                    } else break
+                }
+                val word = merged.toString()
+                if (word.length >= 2) result.add(word)
+                i = j
+            } else {
+                result.add(token)
+                i++
+            }
+        }
+        return result
+    }
+
     private fun tryExtractNameFromLines(lines: List<String>): String? {
         for ((idx, line) in lines.withIndex()) {
             // "נשלחו לך מ [name]" — payment received
             val m = nameReceivedPattern.matcher(line)
             if (m.find()) {
                 val nameSection = line.substring(m.start(1))
-                val words = mutableListOf<String>()
-                mixedWordPattern.matcher(nameSection).let { hw ->
-                    while (hw.find()) words.add(hw.group())
-                }
+                val words = collectNameWords(nameSection).toMutableList()
                 // Always check the next line — Bit wraps long display names onto a second line
                 // (e.g. "יריב ה' באייר 126 ק3" / "טגנסקי", "שני החשמונאים 8 קג" / "פנחס").
                 // We include it unconditionally as long as it contains no digits, ₪, or date.
@@ -202,9 +234,7 @@ object BitShareParser {
                     !nextLine.contains("₪") &&
                     !datePattern.matcher(nextLine).find()
                 ) {
-                    mixedWordPattern.matcher(nextLine).let { hw ->
-                        while (hw.find()) words.add(hw.group())
-                    }
+                    words.addAll(collectNameWords(nextLine))
                 }
                 if (words.isEmpty()) continue
                 // Remove leading OCR artifact: a ≤2-char word before a longer name word
