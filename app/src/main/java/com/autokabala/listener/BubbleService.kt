@@ -423,7 +423,7 @@ class BubbleService : Service() {
 
     private suspend fun processScreenshot(bitmap: Bitmap) {
         val startMs = System.currentTimeMillis()
-        val ocrEngine = prefs.getString(KEY_OCR_ENGINE, OCR_ENGINE_AUTO) ?: OCR_ENGINE_AUTO
+        val ocrEngine = prefs.getString(KEY_OCR_ENGINE, OCR_ENGINE_MLKIT) ?: OCR_ENGINE_MLKIT
 
         // Save original screenshot for "שלח למפתח" feedback (release builds)
         if (!BuildConfig.DEBUG) {
