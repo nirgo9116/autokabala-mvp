@@ -6,6 +6,8 @@ import android.app.NotificationManager
 import android.content.Context
 import android.content.Intent
 import android.net.Uri
+import android.util.Log
+import org.opencv.android.OpenCVLoader
 import androidx.core.app.Person
 import androidx.core.content.pm.ShortcutInfoCompat
 import androidx.core.content.pm.ShortcutManagerCompat
@@ -35,6 +37,9 @@ class AutoKabalaApplication : Application() {
 
     override fun onCreate() {
         super.onCreate()
+        if (!OpenCVLoader.initLocal()) {
+            Log.e("OpenCV", "OpenCV initialization failed")
+        }
         publishShareShortcut()
         ReceiptApiClient.configure(this)
         receiptRepository.startListeningForPayments(applicationScope)

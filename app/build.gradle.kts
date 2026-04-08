@@ -109,6 +109,9 @@ dependencies {
     implementation("com.google.mlkit:text-recognition:16.0.1")
     implementation("cz.adaptech.tesseract4android:tesseract4android:4.7.0")
 
+    // OpenCV — image preprocessing (grayscale, threshold, CLAHE, etc.)
+    implementation("org.opencv:opencv:4.9.0")
+
     // Room
     val room_version = "2.6.1"
     implementation("androidx.room:room-runtime:$room_version")
