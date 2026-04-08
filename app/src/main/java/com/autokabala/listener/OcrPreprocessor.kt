@@ -1,8 +1,11 @@
 package com.autokabala.listener
 
 import android.graphics.Bitmap
+import android.os.Environment
 import android.util.Log
 import org.opencv.android.Utils
+import java.io.File
+import java.io.FileOutputStream
 import org.opencv.core.Core
 import org.opencv.core.Mat
 import org.opencv.core.MatOfPoint
@@ -19,7 +22,7 @@ import org.opencv.imgproc.Imgproc
  *
  * Coordinate conventions (all percentages of image dimensions, 0.0–1.0):
  *   Amount region: x 20–80%, y 30–65%   (central band where ₪ amount appears)
- *   Name region:   x  5–95%, y 10–30%   (upper band where sender name appears)
+ *   Name region:   x  5–95%, y 18–32%   (upper band where sender name appears)
  *
  * Dark mode: detected by sampling mean brightness; if mean < 128 the image is
  * inverted before thresholding so Tesseract sees dark text on a light background.
@@ -218,9 +221,19 @@ object OcrPreprocessor {
         return Bitmap.createBitmap(fixed, left, top, right - left, bottom - top)
     }
 
-    /** Crops the upper band where the sender name is shown (x 5–95%, y 10–30%). */
+    /**
+     * Crops the band where the sender name line appears in Bit payment screenshots.
+     *
+     * Two Bit payment types have the name at different vertical positions:
+     *   "נשלחו לך מ [name]"  (received) → name at roughly y 22–30%
+     *   "ביקשת מ [name]"     (requested) → name at roughly y 28–36%
+     *
+     * y 18–38% covers both cases without reaching the status bar (top) or the
+     * amount row (bottom).  The previous yEnd of 50% incorrectly included the
+     * large ₪ amount text and the category label in the crop.
+     */
     fun cropNameRegion(bitmap: Bitmap): Bitmap =
-        cropRegion(bitmap, xStart = 0.05f, yStart = 0.10f, xEnd = 0.95f, yEnd = 0.30f)
+        cropRegion(bitmap, xStart = 0.05f, yStart = 0.18f, xEnd = 0.95f, yEnd = 0.32f)
 
     // ── Upscaling ─────────────────────────────────────────────────────────────
 
@@ -327,6 +340,32 @@ object OcrPreprocessor {
             return sharpened.toBitmap()
         } finally {
             mat.release()
+        }
+    }
+
+    // ── Debug save ────────────────────────────────────────────────────────────
+
+    /**
+     * Saves [bitmap] as a JPEG to Pictures/AutoKabala/[filename] on external storage.
+     * No-op (with a log warning) if external storage is unavailable.
+     */
+    fun saveBitmapToFile(bitmap: Bitmap, filename: String) {
+        val dir = File(
+            Environment.getExternalStoragePublicDirectory(Environment.DIRECTORY_PICTURES),
+            "AutoKabala"
+        )
+        if (!dir.exists() && !dir.mkdirs()) {
+            Log.w(TAG, "saveBitmapToFile: could not create dir $dir")
+            return
+        }
+        val file = File(dir, filename)
+        try {
+            FileOutputStream(file).use { out ->
+                bitmap.compress(Bitmap.CompressFormat.JPEG, 90, out)
+            }
+            Log.d(TAG, "saveBitmapToFile: saved to ${file.absolutePath}")
+        } catch (e: Exception) {
+            Log.e(TAG, "saveBitmapToFile: failed for $filename", e)
         }
     }
 
