@@ -25,8 +25,8 @@ android {
         applicationId = "com.autokabala.listener"
         minSdk = 26
         targetSdk = 35
-        versionCode = 1
-        versionName = "1.0"
+        versionCode = 2
+        versionName = "1.1"
 
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
 
@@ -47,6 +47,10 @@ android {
         buildConfigField("String", "GEMINI_API_KEY", "\"$geminiApiKey\"")
         buildConfigField("String", "OPENAI_API_KEY", "\"$openaiApiKey\"")
         buildConfigField("String", "GOOGLE_VISION_API_KEY", "\"$googleVisionApiKey\"")
+
+        ndk {
+            abiFilters += listOf("arm64-v8a")
+        }
     }
 
     buildTypes {
@@ -55,10 +59,6 @@ android {
             proguardFiles(getDefaultProguardFile("proguard-android-optimize.txt"), "proguard-rules.pro")
         }
         debug {
-            ndk {
-                abiFilters.add("arm64-v8a")
-                abiFilters.add("armeabi-v7a")
-            }
             firebaseAppDistribution {
             }
         }

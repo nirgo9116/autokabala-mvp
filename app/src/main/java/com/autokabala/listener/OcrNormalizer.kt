@@ -23,6 +23,7 @@ object OcrNormalizer {
     fun normalize(text: String): String =
         text.lines()
             .map { collapseSpaces(it) }
+            .map { stripLeadingDotFromAmount(it) }
             .joinToString("\n")
             .let { reconnectTriggers(it) }
 
@@ -35,6 +36,12 @@ object OcrNormalizer {
     // Each regex allows an optional space between every letter of the trigger word.
     // Only the specific words we need for Bit; broad letter-reconnection would corrupt
     // legitimate text (e.g. merging a preposition with the following word).
+
+    private val leadingDotAmount = Regex("""^[.„]([\d,]+)$""")
+    private fun stripLeadingDotFromAmount(line: String): String {
+        val m = leadingDotAmount.matchEntire(line) ?: return line
+        return "₪${m.groupValues[1]}"
+    }
 
     private val brokenNshlachu = Regex("""נ\s+ש\s*ל\s*ח\s*ו""")
     private val brokenLcha     = Regex("""(?<![א-ת])ל\s+ך(?![א-ת])""")   // standalone לך only

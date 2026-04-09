@@ -441,8 +441,8 @@ object OcrUtils {
                 }
 
                 Rules:
-                1. source: "bit" if you see "נשלחו לך", "paybox" if you see "העברה מ", otherwise "".
-                2. senderLine: Copy the FULL line containing "נשלחו לך" or "העברה מ" EXACTLY as it appears.
+                1. source: "bit" if you see "נשלחו לך" OR "ביקשת מ", "paybox" if you see "העברה מ", otherwise "".
+                2. senderLine: Copy the FULL line containing "נשלחו לך", "ביקשת מ", or "העברה מ" EXACTLY as it appears.
                    - STRICT CHARACTER MODE: copy each Hebrew character one by one, exactly as it appears in the image.
                    - Do NOT autocomplete names. Do NOT infer or add missing letters. Do NOT shorten names.
                    - Do NOT translate Hebrew. Do NOT fix or correct Hebrew spelling. Do NOT reorder words.
@@ -452,7 +452,7 @@ object OcrUtils {
                 4. dateTime: Date and time exactly as shown. Combine with space if separate. "" if not found.
                 5. If unsure about any field → return "" or 0. Do NOT guess.
                 6. CRITICAL — sender vs recipient: This screen shows money RECEIVED by the phone owner.
-                   - The SENDER is the person who sent the money. Their name follows "העברה מ" or "נשלחו לך מ".
+                   - The SENDER is the person who sent the money. Their name follows "העברה מ", "נשלחו לך מ", or "ביקשת מ".
                    - The phone owner's name (recipient/account holder) may appear elsewhere in the UI — do NOT use it.
                    - Copy the name that immediately follows the payment phrase, character by character.
                 7. VERIFICATION: Before returning, re-read the senderLine in the image character by character and confirm every letter matches what you wrote.
@@ -529,12 +529,14 @@ object OcrUtils {
             Log.d("OcrUtils", "Gemini parsed: source='$source' senderLine='$senderLine' amount=$amount dateTime='$dateTimeStr'")
             val effectiveSource = when {
                 source == "paybox" || senderLine.contains("העברה מ") -> "paybox"
-                source == "bit"    || senderLine.contains("נשלחו לך") -> "bit"
+                source == "bit"    || senderLine.contains("נשלחו לך") || senderLine.contains("ביקשת מ") -> "bit"
                 else -> ""
             }
             if (effectiveSource != source) Log.d("OcrUtils", "Gemini: source derived from senderLine → '$effectiveSource'")
             val senderName = when (effectiveSource) {
-                "bit"    -> Regex("נשלחו לך מ(.+)").find(senderLine)?.groupValues?.get(1)?.trim() ?: ""
+                "bit"    -> (Regex("נשלחו לך מ(.+)").find(senderLine)
+                                ?: Regex("ביקשת מ(.+)").find(senderLine))
+                                ?.groupValues?.get(1)?.trim() ?: ""
                 "paybox" -> Regex("העברה מ(.+)").find(senderLine)?.groupValues?.get(1)?.trim() ?: ""
                 else     -> ""
             }
@@ -605,8 +607,8 @@ object OcrUtils {
                 }
 
                 Rules:
-                1. source: "bit" if you see "נשלחו לך", "paybox" if you see "העברה מ", otherwise "".
-                2. senderLine: Copy the FULL line containing "נשלחו לך" or "העברה מ" EXACTLY as it appears.
+                1. source: "bit" if you see "נשלחו לך" OR "ביקשת מ", "paybox" if you see "העברה מ", otherwise "".
+                2. senderLine: Copy the FULL line containing "נשלחו לך", "ביקשת מ", or "העברה מ" EXACTLY as it appears.
                    - STRICT CHARACTER MODE: copy each Hebrew character one by one, exactly as it appears in the image.
                    - Do NOT autocomplete names. Do NOT infer or add missing letters. Do NOT shorten names.
                    - Do NOT translate Hebrew. Do NOT fix or correct Hebrew spelling. Do NOT reorder words.
@@ -616,7 +618,7 @@ object OcrUtils {
                 4. dateTime: Date and time exactly as shown. Combine with space if separate. "" if not found.
                 5. If unsure about any field → return "" or 0. Do NOT guess.
                 6. CRITICAL — sender vs recipient: This screen shows money RECEIVED by the phone owner.
-                   - The SENDER is the person who sent the money. Their name follows "העברה מ" or "נשלחו לך מ".
+                   - The SENDER is the person who sent the money. Their name follows "העברה מ", "נשלחו לך מ", or "ביקשת מ".
                    - The phone owner's name (recipient/account holder) may appear elsewhere in the UI — do NOT use it.
                    - Copy the name that immediately follows the payment phrase, character by character.
                 7. VERIFICATION: Before returning, re-read the senderLine in the image character by character and confirm every letter matches what you wrote.
@@ -686,12 +688,14 @@ object OcrUtils {
             Log.d("OcrUtils", "OpenAI parsed: source='$source' senderLine='$senderLine' amount=$amount dateTime='$dateTimeStr'")
             val effectiveSource = when {
                 source == "paybox" || senderLine.contains("העברה מ") -> "paybox"
-                source == "bit"    || senderLine.contains("נשלחו לך") -> "bit"
+                source == "bit"    || senderLine.contains("נשלחו לך") || senderLine.contains("ביקשת מ") -> "bit"
                 else -> ""
             }
             if (effectiveSource != source) Log.d("OcrUtils", "OpenAI: source derived from senderLine → '$effectiveSource'")
             val senderName = when (effectiveSource) {
-                "bit"    -> Regex("נשלחו לך מ(.+)").find(senderLine)?.groupValues?.get(1)?.trim() ?: ""
+                "bit"    -> (Regex("נשלחו לך מ(.+)").find(senderLine)
+                                ?: Regex("ביקשת מ(.+)").find(senderLine))
+                                ?.groupValues?.get(1)?.trim() ?: ""
                 "paybox" -> Regex("העברה מ(.+)").find(senderLine)?.groupValues?.get(1)?.trim() ?: ""
                 else     -> ""
             }
@@ -891,15 +895,15 @@ object OcrUtils {
                 return@withContext null
             }
 
-            // Scale to max 1024px — Vision API handles full-res but this reduces cost and latency
-            val maxDim = 1024
+            // Scale to max 1600px — higher resolution reduces ₪ misread as $/$$/IN
+            val maxDim = 1600
             val scale = maxDim.toFloat() / maxOf(bitmap.width, bitmap.height)
             val scaledHeight = if (scale < 1f) (bitmap.height * scale).toInt() else bitmap.height
             val small = if (scale < 1f)
                 Bitmap.createScaledBitmap(bitmap, (bitmap.width * scale).toInt(), scaledHeight, true)
             else bitmap
             val baos = ByteArrayOutputStream()
-            small.compress(Bitmap.CompressFormat.JPEG, 85, baos)
+            small.compress(Bitmap.CompressFormat.JPEG, 95, baos)  // higher quality → fewer OCR artifacts
             if (small !== bitmap) small.recycle()
             val base64Image = Base64.encodeToString(baos.toByteArray(), Base64.NO_WRAP)
 
@@ -968,15 +972,39 @@ object OcrUtils {
         }
     }
 
-    /** Extract payment amount (₪) from raw OCR text. */
+    /** Extract payment amount from raw OCR text.
+     *  Handles ₪ variants that Vision OCR sometimes misreads:
+     *    ₪300, ₪1,200        — normal
+     *    $300, $$300         — ₪ misread as $
+     *    .300, .1200         — ₪ misread as period (split lines)
+     *    ₪\n300              — ₪ and number on separate lines
+     *    IN 58               — ₪ misread as IN (rare)
+     */
     fun extractAmountFromText(text: String): Double? {
-        val pattern = Regex("""₪\s*([\d,]+(?:\.\d{1,2})?)|([\d,]+(?:\.\d{1,2})?)\s*₪""")
-        return pattern.find(text)?.let { match ->
-            (match.groupValues[1].ifBlank { match.groupValues[2] })
-                .replace(",", "")
-                .toDoubleOrNull()
-                ?.takeIf { it in 1.0..99_999.0 }
+        // Standard ₪ prefix or suffix
+        val shekelPattern = Regex("""[₪$]\$?\s*([\d,]+(?:\.\d{1,2})?)|([\d,]+(?:\.\d{1,2})?)\s*₪""")
+        shekelPattern.find(text)?.let { match ->
+            val raw = (match.groupValues[1].ifBlank { match.groupValues[2] }).replace(",", "")
+            raw.toDoubleOrNull()?.takeIf { it in 1.0..99_999.0 }?.let { return it }
         }
+
+        // ₪ on one line, number on next line (e.g. "₪\n300" or "₪\n.300")
+        val splitPattern = Regex("""[₪$]\$?\s*\n\.?([\d,]+)""")
+        splitPattern.find(text)?.let { match ->
+            match.groupValues[1].replace(",", "").toDoubleOrNull()
+                ?.takeIf { it in 1.0..99_999.0 }?.let { return it }
+        }
+
+        // Period-prefixed number on its own line (e.g. ".300") — only if ₪ appeared on prior line
+        if (text.contains("₪") || text.contains("$")) {
+            val dotNumber = Regex("""^\.([\d,]+)$""", RegexOption.MULTILINE)
+            dotNumber.find(text)?.let { match ->
+                match.groupValues[1].replace(",", "").toDoubleOrNull()
+                    ?.takeIf { it in 1.0..99_999.0 }?.let { return it }
+            }
+        }
+
+        return null
     }
 
     fun ensureTessData(context: Context): String {

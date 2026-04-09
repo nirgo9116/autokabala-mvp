@@ -179,6 +179,25 @@ object ReceiptApiClient {
 
     private const val BASE_URL = "https://api.icount.co.il/api/v3.php"
 
+    // SharedPreferences keys (same prefs file as BubbleService)
+    const val KEY_CID  = "icount_cid"
+    const val KEY_USER = "icount_user"
+    const val KEY_PASS = "icount_pass"
+
+    lateinit var appContext: android.content.Context
+
+    private val prefs get() = appContext.getSharedPreferences(BubbleService.PREFS_NAME, android.content.Context.MODE_PRIVATE)
+
+    val cid:  String get() = prefs.getString(KEY_CID,  BuildConfig.ICOUNT_CID)  ?.takeIf { it.isNotBlank() } ?: BuildConfig.ICOUNT_CID
+    val user: String get() = prefs.getString(KEY_USER, BuildConfig.ICOUNT_USER) ?.takeIf { it.isNotBlank() } ?: BuildConfig.ICOUNT_USER
+    val pass: String get() = prefs.getString(KEY_PASS, BuildConfig.ICOUNT_PASS) ?.takeIf { it.isNotBlank() } ?: BuildConfig.ICOUNT_PASS
+
+    fun saveCredentials(cid: String, user: String, pass: String) {
+        prefs.edit().putString(KEY_CID, cid).putString(KEY_USER, user).putString(KEY_PASS, pass).apply()
+    }
+
+    fun isConfigured(): Boolean = cid.isNotBlank() && user.isNotBlank() && pass.isNotBlank()
+
     private val client = HttpClient(CIO) {
         install(ContentNegotiation) {
             json(Json { isLenient = true; ignoreUnknownKeys = true })
@@ -189,9 +208,9 @@ object ReceiptApiClient {
         Log.i("AutoKabalaAPI", "--- Starting Document Issuance for client ID: $clientId ---")
         return try {
             val requestBody = CreateDocumentWithClientIdRequest(
-                cid = BuildConfig.ICOUNT_CID,
-                user = BuildConfig.ICOUNT_USER,
-                pass = BuildConfig.ICOUNT_PASS,
+                cid = cid,
+                user = user,
+                pass = pass,
                 docType = "receipt",
                 clientId = clientId.toInt(),
                 currencyCode = "ILS",
@@ -223,9 +242,9 @@ object ReceiptApiClient {
         val num = docNum.toIntOrNull() ?: return false
         return try {
             val requestBody = SendEmailRequest(
-                cid = BuildConfig.ICOUNT_CID,
-                user = BuildConfig.ICOUNT_USER,
-                pass = BuildConfig.ICOUNT_PASS,
+                cid = cid,
+                user = user,
+                pass = pass,
                 docType = "receipt",
                 docNum = num,
                 emailToClient = true
@@ -289,9 +308,9 @@ object ReceiptApiClient {
         Log.i("AutoKabalaAPI", "--- Creating new client: $clientName ---")
         return try {
             val requestBody = CreateClientRequest(
-                cid = BuildConfig.ICOUNT_CID,
-                user = BuildConfig.ICOUNT_USER,
-                pass = BuildConfig.ICOUNT_PASS,
+                cid = cid,
+                user = user,
+                pass = pass,
                 clientName = clientName,
                 phone = phone,
                 email = email
@@ -369,9 +388,9 @@ object ReceiptApiClient {
             val response = client.post("$BASE_URL/client/info") {
                 contentType(ContentType.Application.Json)
                 setBody(buildJsonObject {
-                    put("cid",          BuildConfig.ICOUNT_CID)
-                    put("user",         BuildConfig.ICOUNT_USER)
-                    put("pass",         BuildConfig.ICOUNT_PASS)
+                    put("cid",          cid)
+                    put("user",         user)
+                    put("pass",         pass)
                     put("client_id",    clientId.toInt())
                     put("get_contacts", true)
                 })

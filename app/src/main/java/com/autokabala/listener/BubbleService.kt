@@ -222,8 +222,8 @@ class BubbleService : Service() {
                     showOverlayWindow()
                     scope.launch { processShareUri(fileUri) }
                 } else {
-                    overlayState.value = OverlayState.Err("לא התקבלה תמונה לעיבוד")
                     showOverlayWindow()
+                    scope.launch { showBlankPayment("bit") }
                 }
             }
         }
@@ -411,13 +411,13 @@ class BubbleService : Service() {
                 }
             }
             if (bitmap == null) {
-                overlayState.value = OverlayState.Err("לא ניתן לקרוא את התמונה")
+                showBlankPayment("bit")
                 return
             }
             processScreenshot(bitmap)
         } catch (e: Exception) {
             Log.e("BubbleService", "Failed to process share URI", e)
-            overlayState.value = OverlayState.Err("שגיאה בטעינת התמונה: ${e.message}")
+            showBlankPayment("bit")
         }
     }
 
@@ -450,43 +450,35 @@ class BubbleService : Service() {
                 bitmap.recycle()
                 when (openAiResult) {
                     is OcrUtils.GeminiResult.Success -> { finishPaymentFlow(openAiResult.data, startMs); return }
-                    is OcrUtils.GeminiResult.Rejected -> { overlayState.value = OverlayState.Err("OpenAI: לא זוהה תשלום בתמונה"); return }
-                    null -> { overlayState.value = OverlayState.Err("OpenAI לא הצליח — נסו שוב"); return }
+                    is OcrUtils.GeminiResult.Rejected -> { showBlankPayment("bit"); return }
+                    null -> { showBlankPayment("bit"); return }
                 }
             }
 
-            // ── Google Vision (AUTO or VISION mode) ──────────────────────────
-            val skipVision = ocrEngine == OCR_ENGINE_MLKIT
-            var visionResult: OcrUtils.VisionResult? = null
-            if (!skipVision) {
-                Log.d("BubbleService", "Trying Google Vision OCR")
-                visionResult = OcrUtils.runGoogleVisionOcr(bitmap)
+            // ── Google Vision (VISION force mode only) ───────────────────────
+            if (ocrEngine == OCR_ENGINE_VISION) {
+                Log.d("BubbleService", "Trying Google Vision OCR (forced)")
+                var visionResult = OcrUtils.runGoogleVisionOcr(bitmap)
                 if (visionResult == null) visionResult = OcrUtils.runGoogleVisionOcr(bitmap)
-            }
-
-            val forceVision = ocrEngine == OCR_ENGINE_VISION
-            if (visionResult != null) {
-                val visionText = visionResult.text
-                val isPayboxVision = PayboxShareParser.isPaybox(visionText)
-                val visionAmount = OcrUtils.extractAmountFromText(visionText)
-                val visionPaymentData = if (isPayboxVision) {
-                    PayboxShareParser.parse(visionText, visionText, visionAmount, null)
-                } else {
-                    if (BitShareParser.isExpired(visionText)) {
-                        bitmap.recycle(); overlayState.value = OverlayState.Err("תשלום זה פג תוקף"); return
+                if (visionResult != null) {
+                    val visionText = visionResult.text
+                    val isPayboxVision = PayboxShareParser.isPaybox(visionText)
+                    val visionAmount = OcrUtils.extractAmountFromText(visionText)
+                    val visionPaymentData = if (isPayboxVision) {
+                        PayboxShareParser.parse(visionText, visionText, visionAmount, null)
+                    } else {
+                        if (BitShareParser.isExpired(visionText)) {
+                            bitmap.recycle(); overlayState.value = OverlayState.Err("תשלום זה פג תוקף"); return
+                        }
+                        BitShareParser.parse(hebrewText = visionText, latinText = visionText, mlKitAmount = visionAmount)
                     }
-                    BitShareParser.parse(hebrewText = visionText, latinText = visionText, mlKitAmount = visionAmount)
+                    if (visionPaymentData != null && visionPaymentData.amount > 0) {
+                        Log.d("BubbleService", "Google Vision parsed: ${visionPaymentData.senderName} / ${visionPaymentData.amount}")
+                        bitmap.recycle(); finishPaymentFlow(visionPaymentData, startMs); return
+                    }
                 }
-                if (visionPaymentData != null) {
-                    Log.d("BubbleService", "Google Vision parsed: ${visionPaymentData.senderName} / ${visionPaymentData.amount}")
-                    bitmap.recycle(); finishPaymentFlow(visionPaymentData, startMs); return
-                }
-                Log.d("BubbleService", "Google Vision unparseable — falling back to ML Kit")
-            }
-
-            if (forceVision) {
                 bitmap.recycle()
-                overlayState.value = OverlayState.Err("Google Vision לא הצליח — נסו שוב")
+                showBlankPayment("bit")
                 return
             }
 
@@ -494,7 +486,7 @@ class BubbleService : Service() {
             Log.d("BubbleService", "Running ML Kit + Tesseract OCR")
             if (!OcrUtils.isTesseractAvailable()) {
                 bitmap.recycle()
-                overlayState.value = OverlayState.Err("לא ניתן לקרוא את התשלום — נסה שוב או שתף תמונה")
+                showBlankPayment("bit")
                 return
             }
 
@@ -539,11 +531,29 @@ class BubbleService : Service() {
                 }
             }
 
+            // ── OpenAI fallback (when MLKit amount=0, no result, or name is suspicious) ──
+            // "Latin in ML Kit name area + all-Hebrew extracted name" = Tesseract garbled a Latin name
+            val mlKitNameHasLatin = mlKitResult?.nameAboveAmount?.any { it in 'A'..'z' } == true
+            val extractedNameAllHebrew = paymentData?.senderName?.all {
+                it in '\u05D0'..'\u05EA' || it in '\u05F0'..'\u05F4' || it == ' '
+            } == true
+            val nameGarbledByTess = !isPaybox && mlKitNameHasLatin && extractedNameAllHebrew
+            val nameIsSuspicious = paymentData != null && (isSuspiciousOcrName(paymentData.senderName) || nameGarbledByTess)
+            if (nameIsSuspicious) Log.d("BubbleService", "Suspicious name '${paymentData!!.senderName}' (garbledByTess=$nameGarbledByTess) — trying OpenAI fallback")
+            // OpenAI fallback temporarily disabled for ML Kit / Tesseract testing
+            // if (paymentData == null || paymentData.amount == 0.0 || nameIsSuspicious) {
+            //     val croppedBitmap = OcrUtils.cropForOpenAi(bitmap)
+            //     val openAiResult = OcrUtils.runOpenAiOcr(croppedBitmap)
+            //     if (croppedBitmap !== bitmap) croppedBitmap.recycle()
+            //     if (openAiResult is OcrUtils.GeminiResult.Success) {
+            //         bitmap.recycle(); finishPaymentFlow(openAiResult.data, startMs); return
+            //     }
+            // }
+
             bitmap.recycle()
 
             if (paymentData == null) {
-                val hint = if (isPaybox) "ודא שמדובר באישור פייבוקס" else "ודא שמדובר באישור ביט"
-                overlayState.value = OverlayState.Err("לא נמצאו פרטי תשלום — $hint")
+                showBlankPayment(if (isPaybox) "paybox" else "bit")
                 return
             }
 
@@ -551,8 +561,40 @@ class BubbleService : Service() {
 
         } catch (e: Exception) {
             Log.e("BubbleService", "Error processing screenshot", e)
-            overlayState.value = OverlayState.Err("שגיאה בעיבוד: ${e.message}")
+            showBlankPayment("bit")
         }
+    }
+
+    /**
+     * Returns true when the extracted sender name looks like OCR garbage and OpenAI should
+     * re-parse the screenshot.  Triggers for:
+     *  - Very short names (≤ 3 chars) — real names are at least 4 chars
+     *  - Names containing dotless-ı (U+0131) — ML Kit OCR artifact for "i" or "l"
+     *  - All-lowercase single-word Latin ≤ 5 chars — typical ML Kit misread pattern ("nni", "nnı")
+     */
+    private fun isSuspiciousOcrName(name: String): Boolean {
+        if (name.isBlank() || name.length <= 3) return true
+        if (name.contains('\u0131')) return true
+        val isLatinOnly = name.all { it.isLetter() && it.code < 256 || it == ' ' || it == '\'' || it == '-' }
+        if (isLatinOnly && !name.contains(' ') && name.length <= 5 && name.all { !it.isLetter() || it.isLowerCase() }) return true
+        return false
+    }
+
+    /** Shows a blank Ready card (amount=0, no name) so the user can fill in manually. */
+    private suspend fun showBlankPayment(source: String) {
+        val db = (application as AutoKabalaApplication).database
+        val entity = PaymentEntity(
+            source      = source,
+            senderName  = "",
+            amount      = 0.0,
+            isConfirmed = false,
+            timestamp   = System.currentTimeMillis()
+        )
+        val rowId = withContext(Dispatchers.IO) { db.paymentDao().insertPayment(entity) }
+        val saved = entity.copy(id = if (rowId > 0) rowId.toInt() else entity.id)
+        pendingPaymentId = saved.id
+        val clients = withContext(Dispatchers.IO) { db.clientDao().getAllClientsSnapshot() }
+        overlayState.value = OverlayState.Ready(saved, MatchResult.NoMatch, clients)
     }
 
     private suspend fun finishPaymentFlow(paymentData: PaymentData, startMs: Long) {

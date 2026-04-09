@@ -127,9 +127,10 @@ object BitShareParser {
             val hasBitContext = lines.any { it.startsWith("נשלחו לך מ") || it.startsWith("ביקשת מ") }
             if (isAllHebrew && hasBitContext && fallbackLines !== lines) {
                 tryExtractLatinName(fallbackLines)?.let { latinName ->
-                    // Require at least 2 words (first + last name).
-                    // Single-word matches like "bit" (the app logo) are OCR noise, not names.
-                    if (latinName.contains(' ')) {
+                    // Prefer ML Kit Latin only if it has ProperCase (at least one uppercase letter).
+                    // All-lowercase results like "inzu" are OCR noise, not real names.
+                    val hasProperCase = latinName.any { it.isUpperCase() }
+                    if (hasProperCase && (latinName.contains(' ') || latinName.length >= 4)) {
                         Log.d(TAG, "Preferring ML Kit Latin '$latinName' over garbled Tesseract Hebrew '$tessName'")
                         return latinName
                     }
@@ -153,12 +154,24 @@ object BitShareParser {
     // Also handles hyphenated names ("Anne-Marie") and apostrophe names ("O'Connor" prefix).
     // Stops at the first token that isn't pure letters/hyphen/apostrophe (digits, Hebrew, etc.).
     private fun tryExtractLatinName(lines: List<String>): String? {
-        val firstLine = lines.firstOrNull() ?: return null
-        // All words may start with upper or lower case (handles "michal Shpiegel").
-        // Separator between words: space, hyphen, or apostrophe.
-        val m = Pattern.compile("""^([A-Za-z][a-z]+(?:[ '\-][A-Za-z][a-z]+)*)""").matcher(firstLine)
-        if (m.find()) {
-            var name = m.group(1)?.trim() ?: return null
+        // Search each line without ^ anchor — ML Kit often prefixes the name with garbled chars
+        // (e.g. "NNVNp Meital Tannip u"). Requires uppercase+2lower OR 3+lowercase so that
+        // short noise tokens like "Np" or "p" are skipped. Handles lowercase-first names too.
+        val namePattern = Pattern.compile(
+            """(?<![A-Za-z])((?:[A-Z][a-z]{2,}|[a-z]{3,})(?:[ '\-](?:[A-Z][a-z]{2,}|[a-z]{3,})*)*)"""
+        )
+        for (line in lines) {
+            val m = namePattern.matcher(line)
+            if (!m.find()) continue
+            var name = m.group(1)?.trim() ?: continue
+
+            // Normalize ML Kit OCR artifacts before any further processing:
+            // dotless-ı (U+0131) → regular i  (common in Bit screenshot fonts)
+            // Leading "nn" per word → "m"  (ML Kit often splits lowercase "m" into "nn")
+            name = name.replace('\u0131', 'i')
+            name = name.split(" ").joinToString(" ") { word ->
+                if (word.length >= 3 && word.startsWith("nn")) "m" + word.drop(2) else word
+            }
 
             // Strip trailing short all-lowercase words — OCR garbage from Hebrew content
             // (e.g. "Reut Lazarn inu" → "Reut Lazarn"; "inu" is 3 chars, all-lowercase).
@@ -189,9 +202,19 @@ object BitShareParser {
     // Fixes OCR splitting like "ד וד לוי" → ["דוד","לוי"] instead of dropping "ד".
     private fun collectNameWords(text: String): List<String> {
         val rawTokens = text.trim().split(Regex("\\s+"))
-            .filter { tok -> tok.isNotBlank() && tok.all { c ->
-                c in '\u05D0'..'\u05EA' || c in 'A'..'Z' || c in 'a'..'z' || c == '\''
-            }}
+            .mapNotNull { tok ->
+                when {
+                    tok.isBlank() -> null
+                    // Parenthetical pure-Hebrew word like "(יובל)" — strip parens and keep content
+                    tok.matches(Regex("\\([\u05D0-\u05EA]+\\)")) -> tok.trim('(', ')')
+                    // Normal allowed chars
+                    tok.all { c -> c in '\u05D0'..'\u05EA' || c in 'A'..'Z' || c in 'a'..'z' || c == '\'' } -> {
+                        // Filter Hebrew words where all letters are identical — OCR artifact (e.g. "חח", "חחח")
+                        if (tok.all { it in '\u05D0'..'\u05EA' } && tok.toSet().size == 1) null else tok
+                    }
+                    else -> null
+                }
+            }
         val result = mutableListOf<String>()
         var i = 0
         while (i < rawTokens.size) {

@@ -1010,7 +1010,7 @@ fun PaymentCard(
                     if (amountMissing) {
                         Spacer(Modifier.height(6.dp))
                         Text(
-                            "אופס משהו השתבש — הזן סכום ידנית",
+                            "הזן סכום ידנית",
                             color = Color(0xFFFF6B6B),
                             style = MaterialTheme.typography.labelMedium,
                             modifier = Modifier.fillMaxWidth(),
@@ -2859,7 +2859,7 @@ fun SettingsTab(
             ocrCtx.getSharedPreferences(BubbleService.PREFS_NAME, android.content.Context.MODE_PRIVATE)
         }
         var ocrEngine by remember {
-            mutableStateOf(ocrPrefs.getString(BubbleService.KEY_OCR_ENGINE, BubbleService.OCR_ENGINE_AUTO) ?: BubbleService.OCR_ENGINE_AUTO)
+            mutableStateOf(ocrPrefs.getString(BubbleService.KEY_OCR_ENGINE, BubbleService.OCR_ENGINE_MLKIT) ?: BubbleService.OCR_ENGINE_MLKIT)
         }
         Card(modifier = Modifier.fillMaxWidth()) {
             Column(
@@ -2873,10 +2873,14 @@ fun SettingsTab(
                     color = MaterialTheme.colorScheme.onSurfaceVariant
                 )
                 val engines = listOf(
-                    BubbleService.OCR_ENGINE_AUTO   to "אוטומטי",
-                    BubbleService.OCR_ENGINE_VISION to "Google Vision",
                     BubbleService.OCR_ENGINE_MLKIT  to "ML Kit + Tesseract",
+                    BubbleService.OCR_ENGINE_VISION to "Google Vision",
                     BubbleService.OCR_ENGINE_OPENAI to "OpenAI"
+                )
+                val engineDescriptions = mapOf(
+                    BubbleService.OCR_ENGINE_MLKIT  to "ברירת מחדל — מהיר, ללא עלות. OpenAI כ-fallback אם הסכום לא זוהה",
+                    BubbleService.OCR_ENGINE_VISION to "Google Vision בלבד (ללא fallback)",
+                    BubbleService.OCR_ENGINE_OPENAI to "GPT-4o Vision — מדויק ביותר, בתשלום"
                 )
                 engines.forEach { (key, label) ->
                     Row(
@@ -2896,13 +2900,63 @@ fun SettingsTab(
                         })
                         Column {
                             Text(label, style = MaterialTheme.typography.bodyMedium)
-                            if (key == BubbleService.OCR_ENGINE_AUTO) {
-                                Text("מנסה Google Vision קודם, עובר ל-ML Kit אם נכשל",
-                                    style = MaterialTheme.typography.bodySmall,
+                            engineDescriptions[key]?.let {
+                                Text(it, style = MaterialTheme.typography.bodySmall,
                                     color = MaterialTheme.colorScheme.onSurfaceVariant)
                             }
                         }
                     }
+                }
+            }
+        }
+
+        // ── iCount credentials ───────────────────────────────────────────────
+        val icountCtx = LocalContext.current
+        val icountPrefs = remember {
+            icountCtx.getSharedPreferences(BubbleService.PREFS_NAME, android.content.Context.MODE_PRIVATE)
+        }
+        var icountCid  by remember { mutableStateOf(icountPrefs.getString(ReceiptApiClient.KEY_CID,  "") ?: "") }
+        var icountUser by remember { mutableStateOf(icountPrefs.getString(ReceiptApiClient.KEY_USER, "") ?: "") }
+        var icountPass by remember { mutableStateOf(icountPrefs.getString(ReceiptApiClient.KEY_PASS, "") ?: "") }
+        var icountSaved by remember { mutableStateOf(false) }
+
+        Card(modifier = Modifier.fillMaxWidth()) {
+            Column(
+                modifier = Modifier.padding(16.dp),
+                verticalArrangement = Arrangement.spacedBy(10.dp)
+            ) {
+                Text("חיבור ל-iCount", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Bold)
+                OutlinedTextField(
+                    value = icountCid,
+                    onValueChange = { icountCid = it; icountSaved = false },
+                    label = { Text("CID (שם חברה)") },
+                    singleLine = true,
+                    modifier = Modifier.fillMaxWidth()
+                )
+                OutlinedTextField(
+                    value = icountUser,
+                    onValueChange = { icountUser = it; icountSaved = false },
+                    label = { Text("אימייל משתמש") },
+                    singleLine = true,
+                    keyboardOptions = androidx.compose.foundation.text.KeyboardOptions(keyboardType = androidx.compose.ui.text.input.KeyboardType.Email),
+                    modifier = Modifier.fillMaxWidth()
+                )
+                OutlinedTextField(
+                    value = icountPass,
+                    onValueChange = { icountPass = it; icountSaved = false },
+                    label = { Text("טוקן API") },
+                    singleLine = true,
+                    visualTransformation = androidx.compose.ui.text.input.PasswordVisualTransformation(),
+                    modifier = Modifier.fillMaxWidth()
+                )
+                Button(
+                    onClick = {
+                        ReceiptApiClient.saveCredentials(icountCid.trim(), icountUser.trim(), icountPass.trim())
+                        icountSaved = true
+                    },
+                    modifier = Modifier.fillMaxWidth()
+                ) {
+                    Text(if (icountSaved) "נשמר ✓" else "שמור פרטי iCount")
                 }
             }
         }
