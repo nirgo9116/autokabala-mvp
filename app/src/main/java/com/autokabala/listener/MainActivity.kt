@@ -2960,11 +2960,24 @@ fun SettingsTab(
                 ) {
                     Text(if (icountSaved) "נשמר ✓" else "שמור פרטי iCount")
                 }
-                OutlinedButton(
-                    onClick = { viewModel.onTestConnectionClicked() },
-                    modifier = Modifier.fillMaxWidth()
-                ) {
-                    Text("בדוק חיבור ל-iCount")
+                Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                    OutlinedButton(
+                        onClick = { viewModel.onTestConnectionClicked() },
+                        modifier = Modifier.weight(1f)
+                    ) {
+                        Text("בדוק חיבור")
+                    }
+                    OutlinedButton(
+                        onClick = {
+                            ReceiptApiClient.saveCredentials("", "", "")
+                            icountCid = ""; icountUser = ""; icountPass = ""
+                            icountSaved = false
+                            viewModel.clearTestConnectionResult()
+                        },
+                        modifier = Modifier.weight(1f)
+                    ) {
+                        Text("נקה פרטים")
+                    }
                 }
                 testConnectionResult?.let { result ->
                     val isSuccess = result.startsWith("✓")
