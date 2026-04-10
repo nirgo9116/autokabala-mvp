@@ -2919,7 +2919,7 @@ fun SettingsTab(
         var icountUser by remember { mutableStateOf(icountPrefs.getString(ReceiptApiClient.KEY_USER, "") ?: "") }
         var icountPass by remember { mutableStateOf(icountPrefs.getString(ReceiptApiClient.KEY_PASS, "") ?: "") }
         var icountSaved by remember { mutableStateOf(false) }
-        val testConnectionResult by viewModel.testConnectionResult.collectAsState(initial = null)
+        val testConnectionResult: String? by viewModel.testConnectionResult.collectAsState(initial = null)
 
         Card(modifier = Modifier.fillMaxWidth()) {
             Column(
