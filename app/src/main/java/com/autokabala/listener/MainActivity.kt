@@ -609,7 +609,10 @@ private fun MainTabsScreen(
                     testResults = testResults,
                     onSendFailure = { result -> launchDeveloperFeedbackFromResult(context, result) },
                     onClearResults = { viewModel.clearTestResults() },
-                    onDeleteAllPayments = { viewModel.onDeleteAllPaymentsClicked() }
+                    onDeleteAllPayments = { viewModel.onDeleteAllPaymentsClicked() },
+                    onTestConnection = { viewModel.onTestConnectionClicked() },
+                    onClearConnectionResult = { viewModel.clearTestConnectionResult() },
+                    testConnectionResult = viewModel.testConnectionResult.collectAsState().value
                 )
                 2 -> HistoryScreen(
                     modifier = Modifier.padding(innerPadding),
@@ -2770,7 +2773,10 @@ fun SettingsTab(
     testResults: List<ParseTestResult> = emptyList(),
     onSendFailure: (ParseTestResult) -> Unit = {},
     onClearResults: () -> Unit = {},
-    onDeleteAllPayments: () -> Unit = {}
+    onDeleteAllPayments: () -> Unit = {},
+    onTestConnection: () -> Unit = {},
+    onClearConnectionResult: () -> Unit = {},
+    testConnectionResult: String? = null
 ) {
     var showTestResults by remember { mutableStateOf(false) }
     var showFaq by remember { mutableStateOf(false) }
@@ -2919,7 +2925,6 @@ fun SettingsTab(
         var icountUser by remember { mutableStateOf(icountPrefs.getString(ReceiptApiClient.KEY_USER, "") ?: "") }
         var icountPass by remember { mutableStateOf(icountPrefs.getString(ReceiptApiClient.KEY_PASS, "") ?: "") }
         var icountSaved by remember { mutableStateOf(false) }
-        val testConnectionResult: String? by viewModel.testConnectionResult.collectAsState(initial = null)
 
         Card(modifier = Modifier.fillMaxWidth()) {
             Column(
@@ -2954,7 +2959,7 @@ fun SettingsTab(
                     onClick = {
                         ReceiptApiClient.saveCredentials(icountCid.trim(), icountUser.trim(), icountPass.trim())
                         icountSaved = true
-                        viewModel.clearTestConnectionResult()
+                        onClearConnectionResult()
                     },
                     modifier = Modifier.fillMaxWidth()
                 ) {
@@ -2962,7 +2967,7 @@ fun SettingsTab(
                 }
                 Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                     OutlinedButton(
-                        onClick = { viewModel.onTestConnectionClicked() },
+                        onClick = { onTestConnection() },
                         modifier = Modifier.weight(1f)
                     ) {
                         Text("בדוק חיבור")
@@ -2972,7 +2977,7 @@ fun SettingsTab(
                             ReceiptApiClient.saveCredentials("", "", "")
                             icountCid = ""; icountUser = ""; icountPass = ""
                             icountSaved = false
-                            viewModel.clearTestConnectionResult()
+                            onClearConnectionResult()
                         },
                         modifier = Modifier.weight(1f)
                     ) {

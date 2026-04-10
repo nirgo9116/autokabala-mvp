@@ -366,7 +366,7 @@ object ReceiptApiClient {
             val json = Json { ignoreUnknownKeys = true; isLenient = true }
             val allIds = mutableSetOf<String>()
             var offset = 0
-            val pageSize = 1000
+            val pageSize = 50
             while (true) {
                 val requestBody = DocSearchRequest(
                     cid = cid,
