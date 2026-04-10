@@ -2919,6 +2919,7 @@ fun SettingsTab(
         var icountUser by remember { mutableStateOf(icountPrefs.getString(ReceiptApiClient.KEY_USER, "") ?: "") }
         var icountPass by remember { mutableStateOf(icountPrefs.getString(ReceiptApiClient.KEY_PASS, "") ?: "") }
         var icountSaved by remember { mutableStateOf(false) }
+        val testConnectionResult by viewModel.testConnectionResult.collectAsState()
 
         Card(modifier = Modifier.fillMaxWidth()) {
             Column(
@@ -2953,10 +2954,26 @@ fun SettingsTab(
                     onClick = {
                         ReceiptApiClient.saveCredentials(icountCid.trim(), icountUser.trim(), icountPass.trim())
                         icountSaved = true
+                        viewModel.clearTestConnectionResult()
                     },
                     modifier = Modifier.fillMaxWidth()
                 ) {
                     Text(if (icountSaved) "נשמר ✓" else "שמור פרטי iCount")
+                }
+                OutlinedButton(
+                    onClick = { viewModel.onTestConnectionClicked() },
+                    modifier = Modifier.fillMaxWidth()
+                ) {
+                    Text("בדוק חיבור ל-iCount")
+                }
+                testConnectionResult?.let { result ->
+                    val isSuccess = result.startsWith("✓")
+                    Text(
+                        text = result,
+                        color = if (isSuccess) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.error,
+                        style = MaterialTheme.typography.bodyMedium,
+                        modifier = Modifier.fillMaxWidth()
+                    )
                 }
             }
         }

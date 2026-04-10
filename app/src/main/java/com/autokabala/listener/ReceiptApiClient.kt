@@ -188,15 +188,32 @@ object ReceiptApiClient {
 
     private val prefs get() = appContext.getSharedPreferences(BubbleService.PREFS_NAME, android.content.Context.MODE_PRIVATE)
 
-    val cid:  String get() = prefs.getString(KEY_CID,  BuildConfig.ICOUNT_CID)  ?.takeIf { it.isNotBlank() } ?: BuildConfig.ICOUNT_CID
-    val user: String get() = prefs.getString(KEY_USER, BuildConfig.ICOUNT_USER) ?.takeIf { it.isNotBlank() } ?: BuildConfig.ICOUNT_USER
-    val pass: String get() = prefs.getString(KEY_PASS, BuildConfig.ICOUNT_PASS) ?.takeIf { it.isNotBlank() } ?: BuildConfig.ICOUNT_PASS
+    val cid:  String get() = prefs.getString(KEY_CID,  "") ?.takeIf { it.isNotBlank() } ?: ""
+    val user: String get() = prefs.getString(KEY_USER, "") ?.takeIf { it.isNotBlank() } ?: ""
+    val pass: String get() = prefs.getString(KEY_PASS, "") ?.takeIf { it.isNotBlank() } ?: ""
 
     fun saveCredentials(cid: String, user: String, pass: String) {
         prefs.edit().putString(KEY_CID, cid).putString(KEY_USER, user).putString(KEY_PASS, pass).apply()
     }
 
     fun isConfigured(): Boolean = cid.isNotBlank() && user.isNotBlank() && pass.isNotBlank()
+
+    /** Returns null on success, or an error message string on failure. */
+    suspend fun testConnection(): String? {
+        if (!isConfigured()) return "יש להזין פרטי iCount בהגדרות"
+        return try {
+            val requestBody = GetClientsRequest(cid = cid, user = user, pass = pass)
+            val response = client.post("$BASE_URL/client/get_list") {
+                contentType(ContentType.Application.Json)
+                setBody(requestBody)
+            }
+            val parsed = Json { ignoreUnknownKeys = true; isLenient = true }
+                .decodeFromString<GetClientsResponse>(response.body<String>())
+            if (parsed.status) null else "שגיאה מ-iCount: ${parsed.error ?: "תגובה לא תקינה"}"
+        } catch (e: Exception) {
+            "בעיית חיבור: ${e.message}"
+        }
+    }
 
     private val client = HttpClient(CIO) {
         install(ContentNegotiation) {
@@ -268,9 +285,9 @@ object ReceiptApiClient {
         Log.i("AutoKabalaAPI", "--- Fetching client list ---")
         return try {
             val requestBody = GetClientsRequest(
-                cid = BuildConfig.ICOUNT_CID,
-                user = BuildConfig.ICOUNT_USER,
-                pass = BuildConfig.ICOUNT_PASS
+                cid = cid,
+                user = user,
+                pass = pass
             )
 
             val response = client.post("$BASE_URL/client/get_list") {
@@ -352,9 +369,9 @@ object ReceiptApiClient {
             val pageSize = 1000
             while (true) {
                 val requestBody = DocSearchRequest(
-                    cid = BuildConfig.ICOUNT_CID,
-                    user = BuildConfig.ICOUNT_USER,
-                    pass = BuildConfig.ICOUNT_PASS,
+                    cid = cid,
+                    user = user,
+                    pass = pass,
                     startDate = fromDate,
                     limit = pageSize,
                     offset = offset

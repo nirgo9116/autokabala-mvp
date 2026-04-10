@@ -380,6 +380,19 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         }
     }
 
+    private val _testConnectionResult = MutableStateFlow<String?>(null)
+    val testConnectionResult: StateFlow<String?> = _testConnectionResult
+
+    fun onTestConnectionClicked() {
+        viewModelScope.launch {
+            _testConnectionResult.value = "בודק..."
+            val error = ReceiptApiClient.testConnection()
+            _testConnectionResult.value = if (error == null) "✓ החיבור הצליח" else error
+        }
+    }
+
+    fun clearTestConnectionResult() { _testConnectionResult.value = null }
+
     fun onFakeIssueReceiptClicked(payment: PaymentEntity) {
         viewModelScope.launch {
             val matchedClientName = paymentProcessingStates.value
