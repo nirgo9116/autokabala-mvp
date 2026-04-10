@@ -1,6 +1,8 @@
 package com.autokabala.listener
 
 import android.util.Log
+import java.text.SimpleDateFormat
+import java.util.Locale
 import io.ktor.client.HttpClient
 import io.ktor.client.call.body
 import io.ktor.client.engine.cio.CIO
@@ -143,13 +145,14 @@ data class DocSearchRequest(
 
 @Serializable
 data class DocSearchItem(
-    @SerialName("client_id") val clientId: Int? = null
+    @SerialName("client_id") val clientId: String? = null,
+    @SerialName("dateissued") val dateIssued: String? = null  // "yyyy-MM-dd"
 )
 
 @Serializable
 data class DocSearchResponse(
     @SerialName("status") val status: Boolean,
-    @SerialName("docs") val docs: Map<String, DocSearchItem>? = null,
+    @SerialName("results_list") val resultsList: List<DocSearchItem>? = null,
     @SerialName("reason") val reason: String? = null,
     @SerialName("error_description") val errorDescription: String? = null,
     @SerialName("results_count") val resultsCount: Int? = null
@@ -360,11 +363,14 @@ object ReceiptApiClient {
         }
     }
 
-    suspend fun getActiveClientIds(fromDate: String): Set<String>? {
+    // Returns Map<clientId, lastReceiptEpochMillis> for all clients with receipts since fromDate
+    suspend fun getActiveClientIds(fromDate: String): Map<String, Long>? {
         Log.i("AutoKabalaAPI", "--- Fetching active client IDs since $fromDate ---")
         return try {
             val json = Json { ignoreUnknownKeys = true; isLenient = true }
-            val allIds = mutableSetOf<String>()
+            val dateFormat = SimpleDateFormat("yyyy-MM-dd", Locale.US)
+            // clientId → max receipt date in millis
+            val lastReceiptMap = mutableMapOf<String, Long>()
             var offset = 0
             val pageSize = 50
             while (true) {
@@ -382,18 +388,19 @@ object ReceiptApiClient {
                 }
                 val rawBody = response.body<String>()
                 val parsed = json.decodeFromString<DocSearchResponse>(rawBody)
-                if (!parsed.status || parsed.docs == null) {
-                    Log.w("AutoKabalaAPI", "getActiveClientIds page $offset: reason=${parsed.reason} resultsCount=${parsed.resultsCount}")
-                    break
+                Log.d("AutoKabalaAPI", "getActiveClientIds[$offset]: status=${parsed.status} results=${parsed.resultsList?.size} reason=${parsed.reason}")
+                if (!parsed.status || parsed.resultsList == null) break
+                for (item in parsed.resultsList) {
+                    val id = item.clientId?.takeIf { it.isNotBlank() } ?: continue
+                    val dateMillis = item.dateIssued?.let { runCatching { dateFormat.parse(it)?.time }.getOrNull() } ?: 0L
+                    lastReceiptMap[id] = maxOf(lastReceiptMap[id] ?: 0L, dateMillis)
                 }
-                val pageIds = parsed.docs.values.mapNotNull { it.clientId?.toString() }
-                allIds.addAll(pageIds)
-                Log.d("AutoKabalaAPI", "getActiveClientIds page $offset: ${pageIds.size} docs, ${allIds.size} unique clients so far")
-                if (parsed.docs.size < pageSize) break
+                Log.d("AutoKabalaAPI", "getActiveClientIds[$offset]: ${lastReceiptMap.size} unique clients so far")
+                if (parsed.resultsList.size < pageSize) break
                 offset += pageSize
             }
-            Log.i("AutoKabalaAPI", "Active client IDs total: ${allIds.size} unique clients")
-            allIds.ifEmpty { null }
+            Log.i("AutoKabalaAPI", "Active client IDs total: ${lastReceiptMap.size} unique clients")
+            lastReceiptMap.ifEmpty { null }
         } catch (e: Exception) {
             Log.w("AutoKabalaAPI", "getActiveClientIds failed", e)
             null

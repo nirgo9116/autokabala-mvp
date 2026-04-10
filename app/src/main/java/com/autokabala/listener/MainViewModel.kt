@@ -25,6 +25,7 @@ import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.flow.flatMapLatest
+import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.flow.flowOf
 import kotlinx.coroutines.flow.receiveAsFlow
 import kotlinx.coroutines.flow.stateIn
@@ -183,40 +184,30 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
     val allClients: StateFlow<List<ClientEntity>> = receiptRepository.allClients
         .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), emptyList())
 
-    // --- Overdue clients ---
-    private val _overdueFilterDays = MutableStateFlow(7)
-    val overdueFilterDays: StateFlow<Int> = _overdueFilterDays.asStateFlow()
-
-    val overdueClients: StateFlow<List<OverdueClient>> = combine(
-        receiptRepository.getLastPaymentPerClient(),
-        allClients,
-        _overdueFilterDays
-    ) { lastPayments, clients, filterDays ->
+    // --- Overdue clients: active clients whose last iCount receipt is 7+ days ago ---
+    val overdueClients: StateFlow<List<OverdueClient>> = allClients.map { clients ->
         val now = System.currentTimeMillis()
-        val filterMs = filterDays.toLong() * 24 * 3600 * 1000
-        val clientMap = clients.associateBy { it.id }
-        lastPayments
-            .filter { (now - it.lastPaymentTime) > filterMs }
-            .mapNotNull { lp ->
-                val client = clientMap[lp.clientId] ?: return@mapNotNull null
-                val days = ((now - lp.lastPaymentTime) / (24L * 3600 * 1000)).toInt()
+        val sevenDaysMs = 7L * 24 * 3600 * 1000
+        clients
+            .filter { it.isActive && it.lastReceiptDate != null && (now - it.lastReceiptDate) > sevenDaysMs }
+            .map { client ->
+                val days = ((now - client.lastReceiptDate!!) / (24L * 3600 * 1000)).toInt()
                 OverdueClient(client, days)
             }
             .sortedByDescending { it.daysSinceLastPayment }
     }.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), emptyList())
 
-    fun onOverdueFilterChanged(days: Int) { _overdueFilterDays.value = days }
-
     val paymentProcessingStates: StateFlow<List<PaymentProcessingState>> = combine(
         pendingPayments, allClients
     ) { payments, clients ->
+        val activeClients = clients.filter { it.isActive }
         payments.map { payment ->
             val senderWords = payment.senderName.trim().split(Regex("\\s+")).filter { it.isNotBlank() }
             val senderFirst = senderWords.firstOrNull() ?: ""
 
             // Step 1: clients where senderFirst matches any word in the client name
             val firstNameMatches = if (senderFirst.isBlank()) emptyList() else {
-                clients.filter { client ->
+                activeClients.filter { client ->
                     val clientWords = client.name.trim().split(Regex("\\s+")).filter { it.isNotBlank() }
                     clientWords.any { wordsMatch(it, senderFirst) }
                 }

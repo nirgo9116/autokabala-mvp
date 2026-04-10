@@ -35,6 +35,12 @@ interface ClientDao {
     @Query("UPDATE clients SET whatsappMessage = :msg WHERE id = :clientId")
     suspend fun updateWhatsAppMessage(clientId: String, msg: String)
 
+    @Query("UPDATE clients SET isActive = :isActive WHERE id = :clientId")
+    suspend fun updateIsActive(clientId: String, isActive: Boolean)
+
+    @Query("UPDATE clients SET lastReceiptDate = :lastReceiptDate WHERE id = :clientId")
+    suspend fun updateLastReceiptDate(clientId: String, lastReceiptDate: Long)
+
     /**
      * Deletes all clients from the table.
      */

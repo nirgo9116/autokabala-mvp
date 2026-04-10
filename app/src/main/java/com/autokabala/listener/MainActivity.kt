@@ -45,6 +45,7 @@ import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.wrapContentWidth
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.foundation.shape.RoundedCornerShape
@@ -340,7 +341,6 @@ private fun MainTabsScreen(
     val paymentHistory by viewModel.paymentHistory.collectAsState()
     val selectedTab by viewModel.selectedTabIndex.collectAsState()
     val overdueClients by viewModel.overdueClients.collectAsState()
-    val overdueFilterDays by viewModel.overdueFilterDays.collectAsState()
     val justIssuedCards by viewModel.justIssuedCards.collectAsState()
     val pendingSessionLinks by viewModel.pendingSessionLinks.collectAsState()
     val pendingNewClients by viewModel.pendingNewClients.collectAsState()
@@ -657,8 +657,6 @@ private fun MainTabsScreen(
                 4 -> OverdueClientsScreen(
                     modifier = Modifier.padding(innerPadding),
                     overdueClients = overdueClients,
-                    filterDays = overdueFilterDays,
-                    onFilterChanged = { viewModel.onOverdueFilterChanged(it) },
                     onSendReminder = { client ->
                         val msg = "שלום ${client.name},\nרציתי להזכיר שיש תשלום פתוח. תודה רבה! 🙏"
                         launchWhatsApp(context, clientPhone = client.phone, text = msg)
@@ -2530,16 +2528,27 @@ fun ClientDetailScreen(
 // Overdue clients tab
 // ─────────────────────────────────────────────────────────────────────────────
 
+enum class OverdueFilter { ALL, WEEK, MONTH, LONG }
+
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun OverdueClientsScreen(
     modifier: Modifier = Modifier,
     overdueClients: List<OverdueClient>,
-    filterDays: Int,
-    onFilterChanged: (Int) -> Unit,
     onSendReminder: (ClientEntity) -> Unit,
     onOpenClientDetail: (ClientEntity) -> Unit
 ) {
+    var activeFilter by remember { mutableStateOf(OverdueFilter.ALL) }
+
+    val filtered = remember(overdueClients, activeFilter) {
+        when (activeFilter) {
+            OverdueFilter.ALL   -> overdueClients
+            OverdueFilter.WEEK  -> overdueClients.filter { it.daysSinceLastPayment in 7..13 }
+            OverdueFilter.MONTH -> overdueClients.filter { it.daysSinceLastPayment in 14..29 }
+            OverdueFilter.LONG  -> overdueClients.filter { it.daysSinceLastPayment >= 30 }
+        }
+    }
+
     Column(modifier = modifier.fillMaxSize()) {
         Spacer(Modifier.height(16.dp))
         Text(
@@ -2550,31 +2559,48 @@ fun OverdueClientsScreen(
         )
         Spacer(Modifier.height(8.dp))
         Row(
-            modifier = Modifier.padding(horizontal = 16.dp),
+            modifier = Modifier
+                .padding(horizontal = 16.dp)
+                .horizontalScroll(rememberScrollState()),
             horizontalArrangement = Arrangement.spacedBy(8.dp)
         ) {
-            FilterChip(
-                selected = filterDays == 7,
-                onClick = { onFilterChanged(7) },
-                label = { Text("מעל שבוע") }
-            )
-            FilterChip(
-                selected = filterDays == 30,
-                onClick = { onFilterChanged(30) },
-                label = { Text("מעל חודש") }
-            )
+            listOf(
+                OverdueFilter.ALL   to "כולם",
+                OverdueFilter.WEEK  to "7–14",
+                OverdueFilter.MONTH to "14–30",
+                OverdueFilter.LONG  to "30+"
+            ).forEach { (filter, label) ->
+                val dotColor = when (filter) {
+                    OverdueFilter.WEEK  -> Color(0xFFFFF9C4)
+                    OverdueFilter.MONTH -> Color(0xFFFFCC80)
+                    OverdueFilter.LONG  -> Color(0xFFEF9A9A)
+                    OverdueFilter.ALL   -> MaterialTheme.colorScheme.primary
+                }
+                FilterChip(
+                    selected = activeFilter == filter,
+                    onClick = { activeFilter = filter },
+                    label = { Text(label) },
+                    leadingIcon = if (filter != OverdueFilter.ALL) ({
+                        Box(
+                            Modifier
+                                .size(8.dp)
+                                .background(dotColor, androidx.compose.foundation.shape.CircleShape)
+                        )
+                    }) else null
+                )
+            }
         }
         Spacer(Modifier.height(8.dp))
-        if (overdueClients.isEmpty()) {
+        if (filtered.isEmpty()) {
             Box(modifier = Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
                 Text(
-                    "כל הלקוחות שילמו לאחרונה 👍",
+                    if (overdueClients.isEmpty()) "כל הלקוחות שילמו לאחרונה 👍" else "אין לקוחות בטווח זה",
                     color = MaterialTheme.colorScheme.onSurfaceVariant
                 )
             }
         } else {
             LazyColumn {
-                items(overdueClients, key = { it.client.id }) { overdueClient ->
+                items(filtered, key = { it.client.id }) { overdueClient ->
                     OverdueClientRow(
                         overdueClient = overdueClient,
                         onSendReminder = { onSendReminder(overdueClient.client) },
@@ -2595,9 +2621,9 @@ private fun OverdueClientRow(
 ) {
     val daysText = "${overdueClient.daysSinceLastPayment} ימים ללא תשלום"
     val urgencyColor = when {
-        overdueClient.daysSinceLastPayment >= 30 -> Color(0xFFEF9A9A)  // light red for 30+
-        overdueClient.daysSinceLastPayment >= 14 -> Color(0xFFFFCC80)  // light orange for 14+
-        else -> MaterialTheme.colorScheme.onSurfaceVariant
+        overdueClient.daysSinceLastPayment >= 30 -> Color(0xFFEF9A9A)  // red: 30+ days
+        overdueClient.daysSinceLastPayment >= 14 -> Color(0xFFFFCC80)  // orange: 14-30 days
+        else -> Color(0xFFFFF9C4)                                       // yellow: 7-14 days
     }
 
     Row(
@@ -2607,6 +2633,12 @@ private fun OverdueClientRow(
             .padding(horizontal = 16.dp, vertical = 12.dp),
         verticalAlignment = Alignment.CenterVertically
     ) {
+        Box(
+            modifier = Modifier
+                .size(12.dp)
+                .background(urgencyColor, shape = androidx.compose.foundation.shape.CircleShape)
+        )
+        Spacer(Modifier.width(10.dp))
         Column(modifier = Modifier.weight(1f)) {
             Text(
                 overdueClient.client.name,

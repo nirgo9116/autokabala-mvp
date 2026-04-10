@@ -13,5 +13,6 @@ data class ClientEntity(
     val autoSend: Boolean = false,
     val whatsappMessage: String? = null,
     val billingType: BillingType = BillingType.PER_SESSION,
-    val isActive: Boolean = true
+    val isActive: Boolean = true,
+    val lastReceiptDate: Long? = null  // epoch millis of most recent iCount receipt
 )

@@ -1,9 +1,6 @@
 package com.autokabala.listener
 
 import android.util.Log
-import java.text.SimpleDateFormat
-import java.util.Date
-import java.util.Locale
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.MutableSharedFlow
@@ -187,11 +184,8 @@ class ReceiptRepository(private val paymentDao: PaymentDao, private val clientDa
         if (clientsFromApi != null) {
             Log.d("SyncClients", "Successfully fetched ${clientsFromApi.size} clients. Updating database...")
 
-            // TEST: fetch active clients from last 7 days via API
-            val fromDate = SimpleDateFormat("yyyy-MM-dd", Locale.US)
-                .format(Date(System.currentTimeMillis() - 7L * 24 * 3600 * 1000))
-            val activeIds = ReceiptApiClient.getActiveClientIds(fromDate)
-            Log.d("SyncClients", "Active IDs from last 7 days: ${activeIds?.size ?: "fetch failed"}")
+            // Preserve isActive and lastReceiptDate — updated nightly by ActiveClientsWorker
+            val existing = clientDao.getAllClientsSnapshot().associateBy { it.id }
 
             val clientEntities = clientsFromApi.map { clientData ->
                 ClientEntity(
@@ -199,7 +193,8 @@ class ReceiptRepository(private val paymentDao: PaymentDao, private val clientDa
                     name = clientData.name,
                     email = clientData.email,
                     phone = clientData.phone ?: clientData.mobile,
-                    isActive = if (activeIds != null) clientData.id in activeIds else true
+                    isActive = existing[clientData.id]?.isActive ?: true,
+                    lastReceiptDate = existing[clientData.id]?.lastReceiptDate
                 )
             }
             clientDao.syncAll(clientEntities)

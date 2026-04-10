@@ -12,7 +12,9 @@ import androidx.core.content.pm.ShortcutManagerCompat
 import androidx.core.graphics.drawable.IconCompat
 import androidx.work.Constraints
 import androidx.work.ExistingPeriodicWorkPolicy
+import androidx.work.ExistingWorkPolicy
 import androidx.work.NetworkType
+import androidx.work.OneTimeWorkRequestBuilder
 import androidx.work.PeriodicWorkRequestBuilder
 import androidx.work.WorkManager
 import kotlinx.coroutines.CoroutineScope
@@ -50,6 +52,14 @@ class AutoKabalaApplication : Application() {
             .enqueueUniquePeriodicWork("payment_reminders", ExistingPeriodicWorkPolicy.KEEP, reminderWork)
 
         DailySessionReminderWorker.schedule(this)
+        ActiveClientsWorker.schedule(this)
+
+        // Run once immediately to fix isActive flags (especially after first install or stale data)
+        val immediateWork = OneTimeWorkRequestBuilder<ActiveClientsWorker>()
+            .setConstraints(Constraints.Builder().setRequiredNetworkType(NetworkType.CONNECTED).build())
+            .build()
+        WorkManager.getInstance(this)
+            .enqueueUniqueWork("active_clients_once", ExistingWorkPolicy.KEEP, immediateWork)
 
         val notificationManager = getSystemService(Context.NOTIFICATION_SERVICE) as NotificationManager
         notificationManager.createNotificationChannel(
