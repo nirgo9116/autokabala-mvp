@@ -63,18 +63,6 @@ private val SLIDES = listOf(
         contentScale = androidx.compose.ui.layout.ContentScale.Fit
     ),
     TutorialSlide(
-        drawableRes = R.drawable.tutorial_homescreen_settings,
-        title = "הרשאה ראשונה: הצגה מעל אפליקציות",
-        description = "פתחו את מסך הבית ולחצו על אייקון 'הגדרות' (מסומן בעיגול).",
-        contentScale = androidx.compose.ui.layout.ContentScale.Fit
-    ),
-    TutorialSlide(
-        drawableRes = R.drawable.tutorial_settings_main,
-        title = "בחרו יישומים",
-        description = "בתוך הגדרות, גללו ולחצו על 'יישומים'.",
-        contentScale = androidx.compose.ui.layout.ContentScale.Fit
-    ),
-    TutorialSlide(
         drawableRes = R.drawable.tutorial_apps_list,
         title = "מצאו את אוטוקבלה",
         description = "ברשימת היישומים מצאו את AutoKabalaListener ולחצו עליו.",
