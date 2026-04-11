@@ -284,47 +284,14 @@ private fun TutorialSlideView(slide: TutorialSlide) {
             contentAlignment = Alignment.Center
         ) {
             if (slide.drawableRes != null) {
-                val painter = painterResource(slide.drawableRes)
-                var boxSize by remember { mutableStateOf(Size.Zero) }
-                Box(
-                    modifier = Modifier
-                        .fillMaxSize()
-                        .onSizeChanged { boxSize = it.toSize() }
-                ) {
-                    ZoomableImage(
-                        drawableRes = slide.drawableRes,
-                        contentDescription = slide.title,
-                        contentScale = slide.contentScale,
-                        alignment = slide.imageAlignment,
-                        modifier = Modifier.fillMaxSize()
-                    )
-                    // Red circle overlay — iCount slides only
-                    val ch = slide.circleHighlight
-                    if (ch != null && boxSize != Size.Zero) {
-                        val imgSize = painter.intrinsicSize
-                        if (imgSize.width > 0f && imgSize.height > 0f) {
-                            val scale = minOf(
-                                boxSize.width / imgSize.width,
-                                boxSize.height / imgSize.height
-                            )
-                            val rendW = imgSize.width * scale
-                            val rendH = imgSize.height * scale
-                            val left = (boxSize.width - rendW) / 2f
-                            val top  = (boxSize.height - rendH) / 2f
-                            val cx = left + ch.centerX * rendW
-                            val cy = top  + ch.centerY * rendH
-                            val r  = ch.radiusRatio * minOf(rendW, rendH)
-                            Canvas(modifier = Modifier.fillMaxSize()) {
-                                drawCircle(
-                                    color = Color(0xFFFF3B30),
-                                    radius = r,
-                                    center = Offset(cx, cy),
-                                    style = Stroke(width = 3.dp.toPx())
-                                )
-                            }
-                        }
-                    }
-                }
+                ZoomableImage(
+                    drawableRes = slide.drawableRes,
+                    contentDescription = slide.title,
+                    contentScale = slide.contentScale,
+                    alignment = slide.imageAlignment,
+                    circleHighlight = slide.circleHighlight,
+                    modifier = Modifier.fillMaxSize()
+                )
             } else {
                 Text(
                     "📸\n\n[תמונה תופיע כאן]",
@@ -360,6 +327,7 @@ private fun ZoomableImage(
     contentDescription: String,
     contentScale: ContentScale,
     alignment: Alignment,
+    circleHighlight: CircleHighlight? = null,
     modifier: Modifier = Modifier
 ) {
     var scale by remember { mutableStateOf(1f) }
@@ -394,9 +362,9 @@ private fun ZoomableImage(
             }
             .transformable(state = transformableState)
     ) {
-        androidx.compose.foundation.Image(
-            painter = painterResource(drawableRes),
-            contentDescription = contentDescription,
+        // Image and circle share one graphicsLayer so the circle zooms/pans with the image
+        val painter = painterResource(drawableRes)
+        Box(
             modifier = Modifier
                 .fillMaxSize()
                 .graphicsLayer {
@@ -404,10 +372,41 @@ private fun ZoomableImage(
                     scaleY = scale
                     translationX = offset.x
                     translationY = offset.y
-                },
-            contentScale = contentScale,
-            alignment = alignment
-        )
+                }
+        ) {
+            androidx.compose.foundation.Image(
+                painter = painter,
+                contentDescription = contentDescription,
+                modifier = Modifier.fillMaxSize(),
+                contentScale = contentScale,
+                alignment = alignment
+            )
+            // Circle overlay — iCount slides only, drawn inside the transform
+            if (circleHighlight != null && composableSize != Size.Zero) {
+                val imgSize = painter.intrinsicSize
+                if (imgSize.width > 0f && imgSize.height > 0f) {
+                    val fitScale = minOf(
+                        composableSize.width / imgSize.width,
+                        composableSize.height / imgSize.height
+                    )
+                    val rendW = imgSize.width * fitScale
+                    val rendH = imgSize.height * fitScale
+                    val left = (composableSize.width - rendW) / 2f
+                    val top  = (composableSize.height - rendH) / 2f
+                    val cx = left + circleHighlight.centerX * rendW
+                    val cy = top  + circleHighlight.centerY * rendH
+                    val r  = circleHighlight.radiusRatio * minOf(rendW, rendH)
+                    Canvas(modifier = Modifier.fillMaxSize()) {
+                        drawCircle(
+                            color = Color(0xFFFF3B30),
+                            radius = r,
+                            center = Offset(cx, cy),
+                            style = Stroke(width = 3.dp.toPx())
+                        )
+                    }
+                }
+            }
+        }
 
         if (scale == 1f) {
             Box(
