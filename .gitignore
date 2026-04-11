@@ -16,3 +16,6 @@ local.properties
 backend/.env
 backend/.env.local
 backend/node_modules/
+node_modules/
+build/
+.gradle/

@@ -1,0 +1,26 @@
+{
+  "name": "autokabalalistener",
+  "version": "1.0.0",
+  "description": "AutoKabala is a **native Android application** that automatically processes payment notifications (Bit, PayBox, etc.) and helps self‑employed users generate and manage receipts.",
+  "main": "index.js",
+  "scripts": {
+    "test": "echo \"Error: no test specified\" && exit 1"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/nirgo9116/autokabala-mvp.git"
+  },
+  "keywords": [],
+  "author": "",
+  "license": "ISC",
+  "bugs": {
+    "url": "https://github.com/nirgo9116/autokabala-mvp/issues"
+  },
+  "homepage": "https://github.com/nirgo9116/autokabala-mvp#readme",
+  "dependencies": {
+    "jimp": "^1.6.0"
+  },
+  "devDependencies": {
+    "sharp": "^0.34.5"
+  }
+}
