@@ -104,27 +104,28 @@ private val SLIDES = listOf(
         title = "שלב 3: כנסו להגדרות",
         description = "לאחר פתיחת תפריט מערכת, לחצו על 'הגדרות' כפי שמסומן בחץ.",
         contentScale = androidx.compose.ui.layout.ContentScale.Fit,
-        circleHighlight = CircleHighlight(centerX = 0.905f, centerY = 0.838f, radiusRatio = 0.09f)
+        circleHighlight = CircleHighlight(centerX = 0.904f, centerY = 0.800f, radiusRatio = 0.08f)
     ),
     TutorialSlide(
         drawableRes = R.drawable.tutorial_icount_settings,
         title = "שלב 4: בחרו אוטומציה",
         description = "בדף ההגדרות לחצו על הכרטיס 'אוטומציה' כפי שמסומן בחץ.",
         contentScale = androidx.compose.ui.layout.ContentScale.Fit,
-        circleHighlight = CircleHighlight(centerX = 0.382f, centerY = 0.892f, radiusRatio = 0.13f)
+        circleHighlight = CircleHighlight(centerX = 0.43f, centerY = 0.850f, radiusRatio = 0.13f)
     ),
     TutorialSlide(
         drawableRes = R.drawable.tutorial_icount_api_tokens,
         title = "שלב 5: לשונית API Tokens",
         description = "בדף האוטומציה לחצו על הלשונית 'API Tokens' כפי שמסומן בחץ.",
         contentScale = androidx.compose.ui.layout.ContentScale.Fit,
-        circleHighlight = CircleHighlight(centerX = 0.305f, centerY = 0.499f, radiusRatio = 0.10f)
+        circleHighlight = CircleHighlight(centerX = 0.300f, centerY = 0.390f, radiusRatio = 0.10f)
     ),
     TutorialSlide(
         drawableRes = R.drawable.tutorial_icount_create_token,
         title = "שלב 6: צרו טוקן API",
         description = "לחצו על 'יצירת טוקן API' כפי שמסומן בחץ. לאחר יצירת הטוקן, העתיקו אותו ועברו להגדרות האפליקציה ← חיבור ל-iCount ← שדה 'טוקן API'.",
-        contentScale = androidx.compose.ui.layout.ContentScale.Fit
+        contentScale = androidx.compose.ui.layout.ContentScale.Fit,
+        circleHighlight = CircleHighlight(centerX = 0.094f, centerY = 0.410f, radiusRatio = 0.10f)
     ),
     TutorialSlide(
         drawableRes = R.drawable.tutorial_icount_connect,
