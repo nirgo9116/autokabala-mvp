@@ -1,8 +1,12 @@
 package com.autokabala.listener
 
 import com.autokabala.listener.R
+import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.background
+import androidx.compose.foundation.gestures.detectTapGestures
+import androidx.compose.foundation.gestures.rememberTransformableState
+import androidx.compose.foundation.gestures.transformable
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.pager.HorizontalPager
 import androidx.compose.foundation.pager.rememberPagerState
@@ -10,45 +14,88 @@ import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.*
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.geometry.Offset
+import androidx.compose.ui.geometry.Size
+import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.drawscope.Stroke
+import androidx.compose.ui.graphics.graphicsLayer
+import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.layout.ContentScale
+import androidx.compose.ui.layout.onSizeChanged
 import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
-import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.unit.toSize
 import kotlinx.coroutines.launch
 
 private val TutorialTextColor = Color(0xFF64B5F6) // light blue
+
+/** Normalized (0–1) position of a red circle drawn on top of an iCount screenshot. */
+private data class CircleHighlight(
+    val centerX: Float,
+    val centerY: Float,
+    val radiusRatio: Float = 0.09f  // fraction of min(renderedWidth, renderedHeight)
+)
 
 private data class TutorialSlide(
     val drawableRes: Int?,
     val title: String,
     val description: String,
     val imageAlignment: androidx.compose.ui.Alignment = androidx.compose.ui.Alignment.Center,
-    val contentScale: androidx.compose.ui.layout.ContentScale = androidx.compose.ui.layout.ContentScale.Fit
+    val contentScale: androidx.compose.ui.layout.ContentScale = androidx.compose.ui.layout.ContentScale.Fit,
+    val circleHighlight: CircleHighlight? = null
 )
 
 private val SLIDES = listOf(
     TutorialSlide(
-        drawableRes = R.drawable.tutorial_setup_welcome,
+        drawableRes = R.drawable.tutorial_welcome_logo,
         title = "ברוכים הבאים לאוטוקבלה!",
         description = "האפליקציה מפיקה קבלה אוטומטית ברגע שמאשרים תשלום מביט או פייבוקס.",
         contentScale = androidx.compose.ui.layout.ContentScale.Fit
     ),
     TutorialSlide(
-        drawableRes = R.drawable.tutorial_setup_overlay,
+        drawableRes = R.drawable.tutorial_homescreen_settings,
         title = "הרשאה ראשונה: הצגה מעל אפליקציות",
-        description = "כדי שטופס הקבלה יוצג מעל ביט ופייבוקס, יש לאשר הצגה מעל אפליקציות אחרות.",
+        description = "פתחו את מסך הבית ולחצו על אייקון 'הגדרות' (מסומן בעיגול).",
         contentScale = androidx.compose.ui.layout.ContentScale.Fit
     ),
     TutorialSlide(
-        drawableRes = R.drawable.tutorial_setup_notifications,
+        drawableRes = R.drawable.tutorial_settings_main,
+        title = "בחרו יישומים",
+        description = "בתוך הגדרות, גללו ולחצו על 'יישומים'.",
+        contentScale = androidx.compose.ui.layout.ContentScale.Fit
+    ),
+    TutorialSlide(
+        drawableRes = R.drawable.tutorial_apps_list,
+        title = "מצאו את אוטוקבלה",
+        description = "ברשימת היישומים מצאו את AutoKabalaListener ולחצו עליו.",
+        contentScale = androidx.compose.ui.layout.ContentScale.Fit
+    ),
+    TutorialSlide(
+        drawableRes = R.drawable.tutorial_overlay_permission,
+        title = "אפשרו הצגה מעל אפליקציות",
+        description = "בפרטי היישום לחצו על 'מוצג מעל פריטים אחרים' ואפשרו אותו.",
+        contentScale = androidx.compose.ui.layout.ContentScale.Fit
+    ),
+    TutorialSlide(
+        drawableRes = R.drawable.tutorial_overlay_toggle,
+        title = "אשרו את ההרשאה",
+        description = "הפעילו את המתג 'אשר הרשאה' עבור AutoKabalaListener.",
+        contentScale = androidx.compose.ui.layout.ContentScale.Fit
+    ),
+    TutorialSlide(
+        drawableRes = R.drawable.tutorial_notif_permission,
         title = "הרשאה שנייה: גישה להתראות",
-        description = "כדי לזהות תשלומים נכנסים, יש להפעיל גישה להתראות עבור אוטוקבלה.",
+        description = "הגדרות ← גישה להתראות ← הפעילו את המתג של AutoKabalaListener.",
         contentScale = androidx.compose.ui.layout.ContentScale.Fit
     ),
     TutorialSlide(
@@ -61,25 +108,29 @@ private val SLIDES = listOf(
         drawableRes = R.drawable.tutorial_icount_dashboard,
         title = "שלב 2: פתחו את תפריט מערכת",
         description = "בתחתית סרגל הניווט הימני לחצו על 'מערכת' (החץ מסמן היכן ללחוץ).",
-        contentScale = androidx.compose.ui.layout.ContentScale.Fit
+        contentScale = androidx.compose.ui.layout.ContentScale.Fit,
+        circleHighlight = CircleHighlight(centerX = 0.913f, centerY = 0.700f, radiusRatio = 0.09f)
     ),
     TutorialSlide(
         drawableRes = R.drawable.tutorial_icount_settings_nav,
         title = "שלב 3: כנסו להגדרות",
         description = "לאחר פתיחת תפריט מערכת, לחצו על 'הגדרות' כפי שמסומן בחץ.",
-        contentScale = androidx.compose.ui.layout.ContentScale.Fit
+        contentScale = androidx.compose.ui.layout.ContentScale.Fit,
+        circleHighlight = CircleHighlight(centerX = 0.905f, centerY = 0.838f, radiusRatio = 0.09f)
     ),
     TutorialSlide(
         drawableRes = R.drawable.tutorial_icount_settings,
         title = "שלב 4: בחרו אוטומציה",
         description = "בדף ההגדרות לחצו על הכרטיס 'אוטומציה' כפי שמסומן בחץ.",
-        contentScale = androidx.compose.ui.layout.ContentScale.Fit
+        contentScale = androidx.compose.ui.layout.ContentScale.Fit,
+        circleHighlight = CircleHighlight(centerX = 0.382f, centerY = 0.892f, radiusRatio = 0.13f)
     ),
     TutorialSlide(
         drawableRes = R.drawable.tutorial_icount_api_tokens,
         title = "שלב 5: לשונית API Tokens",
         description = "בדף האוטומציה לחצו על הלשונית 'API Tokens' כפי שמסומן בחץ.",
-        contentScale = androidx.compose.ui.layout.ContentScale.Fit
+        contentScale = androidx.compose.ui.layout.ContentScale.Fit,
+        circleHighlight = CircleHighlight(centerX = 0.305f, centerY = 0.499f, radiusRatio = 0.10f)
     ),
     TutorialSlide(
         drawableRes = R.drawable.tutorial_icount_create_token,
@@ -233,13 +284,47 @@ private fun TutorialSlideView(slide: TutorialSlide) {
             contentAlignment = Alignment.Center
         ) {
             if (slide.drawableRes != null) {
-                androidx.compose.foundation.Image(
-                    painter = painterResource(slide.drawableRes),
-                    contentDescription = slide.title,
-                    modifier = Modifier.fillMaxSize(),
-                    contentScale = slide.contentScale,
-                    alignment = slide.imageAlignment
-                )
+                val painter = painterResource(slide.drawableRes)
+                var boxSize by remember { mutableStateOf(Size.Zero) }
+                Box(
+                    modifier = Modifier
+                        .fillMaxSize()
+                        .onSizeChanged { boxSize = it.toSize() }
+                ) {
+                    ZoomableImage(
+                        drawableRes = slide.drawableRes,
+                        contentDescription = slide.title,
+                        contentScale = slide.contentScale,
+                        alignment = slide.imageAlignment,
+                        modifier = Modifier.fillMaxSize()
+                    )
+                    // Red circle overlay — iCount slides only
+                    val ch = slide.circleHighlight
+                    if (ch != null && boxSize != Size.Zero) {
+                        val imgSize = painter.intrinsicSize
+                        if (imgSize.width > 0f && imgSize.height > 0f) {
+                            val scale = minOf(
+                                boxSize.width / imgSize.width,
+                                boxSize.height / imgSize.height
+                            )
+                            val rendW = imgSize.width * scale
+                            val rendH = imgSize.height * scale
+                            val left = (boxSize.width - rendW) / 2f
+                            val top  = (boxSize.height - rendH) / 2f
+                            val cx = left + ch.centerX * rendW
+                            val cy = top  + ch.centerY * rendH
+                            val r  = ch.radiusRatio * minOf(rendW, rendH)
+                            Canvas(modifier = Modifier.fillMaxSize()) {
+                                drawCircle(
+                                    color = Color(0xFFFF3B30),
+                                    radius = r,
+                                    center = Offset(cx, cy),
+                                    style = Stroke(width = 3.dp.toPx())
+                                )
+                            }
+                        }
+                    }
+                }
             } else {
                 Text(
                     "📸\n\n[תמונה תופיע כאן]",
@@ -267,4 +352,87 @@ private fun TutorialSlideView(slide: TutorialSlide) {
             modifier = Modifier.padding(bottom = 4.dp)
         )
     }
+}
+
+@Composable
+private fun ZoomableImage(
+    drawableRes: Int,
+    contentDescription: String,
+    contentScale: ContentScale,
+    alignment: Alignment,
+    modifier: Modifier = Modifier
+) {
+    var scale by remember { mutableStateOf(1f) }
+    var offset by remember { mutableStateOf(Offset.Zero) }
+    var composableSize by remember { mutableStateOf(Size.Zero) }
+
+    val transformableState = rememberTransformableState { zoomChange, panChange, _ ->
+        val newScale = (scale * zoomChange).coerceIn(1f, 5f)
+        scale = newScale
+        offset = if (newScale > 1f) constrainOffset(offset + panChange, newScale, composableSize)
+                 else Offset.Zero
+    }
+
+    Box(
+        modifier = modifier
+            .onSizeChanged { composableSize = it.toSize() }
+            .pointerInput(Unit) {
+                detectTapGestures { tapOffset ->
+                    if (scale > 1f) {
+                        scale = 1f
+                        offset = Offset.Zero
+                    } else {
+                        val newScale = 2.5f
+                        val rawOffset = Offset(
+                            (composableSize.width / 2f - tapOffset.x) * (newScale - 1f),
+                            (composableSize.height / 2f - tapOffset.y) * (newScale - 1f)
+                        )
+                        scale = newScale
+                        offset = constrainOffset(rawOffset, newScale, composableSize)
+                    }
+                }
+            }
+            .transformable(state = transformableState)
+    ) {
+        androidx.compose.foundation.Image(
+            painter = painterResource(drawableRes),
+            contentDescription = contentDescription,
+            modifier = Modifier
+                .fillMaxSize()
+                .graphicsLayer {
+                    scaleX = scale
+                    scaleY = scale
+                    translationX = offset.x
+                    translationY = offset.y
+                },
+            contentScale = contentScale,
+            alignment = alignment
+        )
+
+        if (scale == 1f) {
+            Box(
+                modifier = Modifier
+                    .align(Alignment.BottomEnd)
+                    .padding(8.dp)
+                    .background(Color.Black.copy(alpha = 0.45f), RoundedCornerShape(4.dp))
+                    .padding(horizontal = 6.dp, vertical = 2.dp)
+            ) {
+                Text(
+                    "🔍 לחץ להגדלה",
+                    color = Color.White,
+                    style = MaterialTheme.typography.labelSmall
+                )
+            }
+        }
+    }
+}
+
+private fun constrainOffset(offset: Offset, scale: Float, size: Size): Offset {
+    if (size == Size.Zero) return offset
+    val maxX = size.width * (scale - 1f) / 2f
+    val maxY = size.height * (scale - 1f) / 2f
+    return Offset(
+        offset.x.coerceIn(-maxX, maxX),
+        offset.y.coerceIn(-maxY, maxY)
+    )
 }
