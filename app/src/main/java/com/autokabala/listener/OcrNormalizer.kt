@@ -37,7 +37,7 @@ object OcrNormalizer {
     // Only the specific words we need for Bit; broad letter-reconnection would corrupt
     // legitimate text (e.g. merging a preposition with the following word).
 
-    private val leadingDotAmount = Regex("""^[.„]([\d,]+)$""")
+    private val leadingDotAmount = Regex("""^[.„R]([\d,]+)$""")
     private fun stripLeadingDotFromAmount(line: String): String {
         val m = leadingDotAmount.matchEntire(line) ?: return line
         return "₪${m.groupValues[1]}"
