@@ -981,8 +981,9 @@ object OcrUtils {
      *    IN 58               — ₪ misread as IN (rare)
      */
     fun extractAmountFromText(text: String): Double? {
-        // Standard ₪ prefix or suffix
-        val shekelPattern = Regex("""[₪$]\$?\s*([\d,]+(?:\.\d{1,2})?)|([\d,]+(?:\.\d{1,2})?)\s*₪""")
+        // Standard ₪ prefix or suffix — use [ \t]* (not \s*) to prevent matching across lines.
+        // "\s*" would cross newlines and match "18\n₪160" as 18 instead of 160.
+        val shekelPattern = Regex("""[₪$]\$?[ \t]*([\d,]+(?:\.\d{1,2})?)|([\d,]+(?:\.\d{1,2})?)[ \t]*₪""")
         shekelPattern.find(text)?.let { match ->
             val raw = (match.groupValues[1].ifBlank { match.groupValues[2] }).replace(",", "")
             raw.toDoubleOrNull()?.takeIf { it in 1.0..99_999.0 }?.let { return it }
@@ -991,6 +992,13 @@ object OcrUtils {
         // ₪ on one line, number on next line (e.g. "₪\n300" or "₪\n.300")
         val splitPattern = Regex("""[₪$]\$?\s*\n\.?([\d,]+)""")
         splitPattern.find(text)?.let { match ->
+            match.groupValues[1].replace(",", "").toDoubleOrNull()
+                ?.takeIf { it in 1.0..99_999.0 }?.let { return it }
+        }
+
+        // Number on one line, ₪ on next (Paybox RTL display: 160 above, ₪ below)
+        val splitPatternReverse = Regex("""^([\d,]+(?:\.\d{1,2})?)\n[₪$]""", RegexOption.MULTILINE)
+        splitPatternReverse.find(text)?.let { match ->
             match.groupValues[1].replace(",", "").toDoubleOrNull()
                 ?.takeIf { it in 1.0..99_999.0 }?.let { return it }
         }

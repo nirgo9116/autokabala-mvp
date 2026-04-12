@@ -24,6 +24,16 @@ object PayboxShareParser {
     private val dateTimeFormatShort = SimpleDateFormat("dd.MM.yy HH:mm",   Locale.getDefault())
     private val dateTimeFormatLong  = SimpleDateFormat("dd.MM.yyyy HH:mm", Locale.getDefault())
 
+    // Trim street address appended to contact name (e.g. "גלית אביבי רבין 18" → "גלית אביבי").
+    // Finds the first purely-numeric word; drops it and the word before it (the street name).
+    private fun trimAddressFromName(name: String): String {
+        val words = name.trim().split(Regex("\\s+"))
+        val numIdx = words.indexOfFirst { it.all { c -> c.isDigit() } }
+        if (numIdx < 0) return name
+        val cutAt = maxOf(1, numIdx - 1)
+        return words.take(cutAt).joinToString(" ")
+    }
+
     // ─────────────────────────────────────────────────────────────────────────
 
     fun isPaybox(text: String): Boolean =
@@ -159,8 +169,9 @@ object PayboxShareParser {
                 .replace(Regex("""\s+"""), " ")
                 .trim()
             if (name.isNotBlank()) {
-                Log.d(TAG, "Name: '$name' (raw: '$raw')")
-                return name
+                val trimmed = trimAddressFromName(name)
+                Log.d(TAG, "Name: '$trimmed' (raw: '$raw')")
+                return trimmed
             }
         }
         return null
