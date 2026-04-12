@@ -150,8 +150,7 @@ private val SLIDES = listOf(
         drawableRes = R.drawable.tutorial_kabala,
         title = "בדקו את הקבלה",
         description = "אם השם או הסכום לא זהים לאלה שבביט\nלחצו על 'שלח למפתח'",
-        contentScale = androidx.compose.ui.layout.ContentScale.Crop,
-        imageAlignment = androidx.compose.ui.Alignment.TopCenter
+        contentScale = androidx.compose.ui.layout.ContentScale.Fit
     )
 )
 
