@@ -65,7 +65,20 @@
       "Bash(python3:*)",
       "Bash(DRAWABLE=\"C:/Users/user/AndroidStudioProjects/AutoKabalaListener/app/src/main/res/drawable\"\ncp \"C:/Users/user/Downloads/WhatsApp Image 2026-04-09 at 08.08.27 \\(4\\).jpeg\" \"$DRAWABLE/tutorial_ic_maarchet.jpg\"\ncp \"C:/Users/user/Downloads/WhatsApp Image 2026-04-09 at 08.08.27 \\(3\\).jpeg\" \"$DRAWABLE/tutorial_ic_hagdarot.jpg\"\ncp \"C:/Users/user/Downloads/WhatsApp Image 2026-04-09 at 08.08.27 \\(2\\).jpeg\" \"$DRAWABLE/tutorial_ic_otomatzya.jpg\"\ncp \"C:/Users/user/Downloads/WhatsApp Image 2026-04-09 at 08.08.27 \\(1\\).jpeg\" \"$DRAWABLE/tutorial_ic_api_tab.jpg\"\ncp \"C:/Users/user/Downloads/WhatsApp Image 2026-04-09 at 08.08.27.jpeg\"     \"$DRAWABLE/tutorial_ic_tzor_token.jpg\"\necho \"Done\")",
       "Bash(git log:*)",
-      "Bash(git show:*)"
+      "Bash(git show:*)",
+      "Read(//c/Users/user/AndroidStudioProjects/AutoKabalaListener/Local/Android/Sdk/**)",
+      "Bash(./adb logcat:*)",
+      "Bash(ADB=\"/c/Users/user/AppData/Local/Android/Sdk/platform-tools/adb.exe\" && \"$ADB\" devices && \"$ADB\" logcat -s BitShareParser -d 2>&1 | tail -150)",
+      "Bash(cmd.exe /c \"C:\\\\Users\\\\user\\\\AppData\\\\Local\\\\Android\\\\Sdk\\\\platform-tools\\\\adb.exe devices\")",
+      "Bash(powershell.exe -Command \"& 'C:\\\\Users\\\\user\\\\AppData\\\\Local\\\\Android\\\\Sdk\\\\platform-tools\\\\adb.exe' devices\")",
+      "Bash(powershell.exe -Command \"& 'C:\\\\Users\\\\user\\\\AppData\\\\Local\\\\Android\\\\Sdk\\\\platform-tools\\\\adb.exe' logcat -s BitShareParser -d | Select-Object -Last 200\" 2>&1)",
+      "Bash(powershell.exe -Command \"& 'C:\\\\Users\\\\user\\\\AppData\\\\Local\\\\Android\\\\Sdk\\\\platform-tools\\\\adb.exe' logcat -c\")",
+      "Bash(powershell.exe -Command \"& 'C:\\\\Users\\\\user\\\\AppData\\\\Local\\\\Android\\\\Sdk\\\\platform-tools\\\\adb.exe' logcat -s BitShareParser -d\")",
+      "Bash(powershell.exe -Command \"& 'C:\\\\Users\\\\user\\\\AppData\\\\Local\\\\Android\\\\Sdk\\\\platform-tools\\\\adb.exe' logcat -s PayboxShareParser -d\")",
+      "Bash(powershell.exe -Command \"& 'C:\\\\Users\\\\user\\\\AppData\\\\Local\\\\Android\\\\Sdk\\\\platform-tools\\\\adb.exe' logcat -c\" && echo \"cleared\")",
+      "Bash(powershell.exe -Command \"& 'C:\\\\Users\\\\user\\\\AppData\\\\Local\\\\Android\\\\Sdk\\\\platform-tools\\\\adb.exe' -s R9ZYB00WP6H logcat -s PayboxShareParser -d\")",
+      "Bash(powershell.exe -Command \"& 'C:\\\\Users\\\\user\\\\AppData\\\\Local\\\\Android\\\\Sdk\\\\platform-tools\\\\adb.exe' -s R9ZYB00WP6H logcat -s PayboxShareParser,BitShareParser,BubbleService,ShareOCR -d\")",
+      "Bash(powershell.exe -Command \"Copy-Item 'C:\\\\Users\\\\user\\\\Downloads\\\\WhatsApp Image 2026-04-12 at 22.31.14.jpeg' 'C:\\\\Users\\\\user\\\\AndroidStudioProjects\\\\AutoKabalaListener\\\\app\\\\src\\\\main\\\\res\\\\drawable\\\\tutorial_kabala.png' -Force\")"
     ]
   }
 }
