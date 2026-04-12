@@ -30,6 +30,16 @@ object BitShareParser {
         """([\u05D0-\u05EAA-Za-z]{2,}(?:\s+[\u05D0-\u05EAA-Za-z']{2,}){0,2})\s+שלח[ה]?\s+לך"""
     )
 
+    // Words that indicate sender-added notes, not part of the real name.
+    // Trim the name at the first word found in this set.
+    private val nameStopWords = setOf("השכנה", "כיתה", "מהקומה", "סטטוס", "לאן")
+
+    private fun trimNameAtStopWords(name: String): String {
+        val words = name.split(" ")
+        val cutIdx = words.indexOfFirst { it in nameStopWords }
+        return if (cutIdx > 0) words.take(cutIdx).joinToString(" ") else name
+    }
+
     // Amount patterns ─────────────────────────────────────────────────────────
     // Merged: collects all digit/comma/space chars before ₪ — handles OCR splitting "59₪" → "5 9₪".
     // Applied FIRST in strategy 1 (lines near name) to catch the merged number before normal pattern
@@ -264,7 +274,7 @@ object BitShareParser {
                 // Remove leading OCR artifact: a ≤2-char word before a longer name word
                 // (e.g. "וח מיכאל יובל" → "מיכאל יובל", caused by Tesseract misreading Latin 'm')
                 if (words.size >= 2 && words[0].length <= 2 && words[1].length >= 3) words.removeAt(0)
-                val name = words.joinToString(" ")
+                val name = trimNameAtStopWords(words.joinToString(" "))
                 Log.d(TAG, "Name [received]: '$name'")
                 return name
             }
@@ -272,7 +282,7 @@ object BitShareParser {
             // "ביקשת מ [name]" — payment request you sent (captured when they pay)
             val m2 = nameRequestedPattern.matcher(line)
             if (m2.find()) {
-                val name = m2.group(1)?.trim()
+                val name = m2.group(1)?.trim()?.let { trimNameAtStopWords(it) }
                 if (!name.isNullOrBlank()) {
                     Log.d(TAG, "Name [requested]: '$name'")
                     return name

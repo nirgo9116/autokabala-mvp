@@ -37,7 +37,9 @@ object OcrNormalizer {
     // Only the specific words we need for Bit; broad letter-reconnection would corrupt
     // legitimate text (e.g. merging a preposition with the following word).
 
-    private val leadingDotAmount = Regex("""^[.„R]([\d,]+)$""")
+    // ₪ is OCR-misread as various uppercase Latin letters (confirmed: R, T).
+    // Any line that is exactly one uppercase letter + digits is treated as ₪ + amount.
+    private val leadingDotAmount = Regex("""^[.„A-Z]([\d,]+)$""")
     private fun stripLeadingDotFromAmount(line: String): String {
         val m = leadingDotAmount.matchEntire(line) ?: return line
         return "₪${m.groupValues[1]}"
