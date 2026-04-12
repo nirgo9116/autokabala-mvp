@@ -87,7 +87,8 @@ object BitShareParser {
         Log.d(TAG, "Hebrew lines: ${hebrewLines.joinToString(" | ")}")
 
         val senderName = extractSenderName(hebrewLines, latinLines) ?: run {
-            Log.w(TAG, "Cannot extract sender name"); return null
+            Log.w(TAG, "Cannot extract sender name — using fallback")
+            "העסק שלי"
         }
 
         // Amount: prefer ML Kit bounding-box result (most reliable — picks the largest
