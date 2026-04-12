@@ -2861,6 +2861,16 @@ fun SettingsTab(
     ) {
         Text("הגדרות", style = MaterialTheme.typography.headlineSmall, fontWeight = FontWeight.Bold)
 
+        Button(
+            onClick = onShowTutorial,
+            modifier = Modifier.fillMaxWidth(),
+            colors = ButtonDefaults.buttonColors(containerColor = MaterialTheme.colorScheme.tertiary)
+        ) {
+            Icon(Icons.Default.HelpOutline, contentDescription = null, modifier = Modifier.size(18.dp))
+            Spacer(Modifier.width(8.dp))
+            Text("הצג מדריך למשתמש", fontWeight = FontWeight.Bold)
+        }
+
         // Listener card
         Card(modifier = Modifier.fillMaxWidth()) {
             Column(
@@ -3035,12 +3045,6 @@ fun SettingsTab(
                     )
                 }
             }
-        }
-
-        OutlinedButton(onClick = onShowTutorial, modifier = Modifier.fillMaxWidth()) {
-            Icon(Icons.Default.HelpOutline, contentDescription = null, modifier = Modifier.size(18.dp))
-            Spacer(Modifier.width(8.dp))
-            Text("הצג מדריך למשתמש")
         }
 
         OutlinedButton(onClick = { showFaq = true }, modifier = Modifier.fillMaxWidth()) {
