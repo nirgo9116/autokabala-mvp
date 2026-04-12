@@ -10,10 +10,11 @@ object BitShareParser {
     private const val TAG = "BitShareParser"
 
     // Names: 1–3 Hebrew OR Latin words (supports mixed-language names like "Reut Lazar").
-    // [A-Za-z]{0,3} after מ handles OCR artifact where Tesseract inserts a stray Latin char
-    // (e.g. "נשלחו לך מm מיכאל" — the "m" is a misread of the leading letter of the name).
+    // (?:[a-z]{1,2}\s+)? after מ handles OCR artifact where Tesseract inserts a stray lowercase
+    // Latin char (e.g. "נשלחו לך מm מיכאל"). Lowercase-only so real Latin names ("Maya Wayn")
+    // are not accidentally consumed.
     private val nameReceivedPattern = Pattern.compile(
-        """נשלחו לך מ\s*[A-Za-z]{0,3}\s*([\u05D0-\u05EAA-Za-z]{2,}(?:\s+[\u05D0-\u05EAA-Za-z']{2,}){0,2})"""
+        """נשלחו לך מ\s*(?:[a-z]{1,2}\s+)?([\u05D0-\u05EAA-Za-z]{2,}(?:\s+[\u05D0-\u05EAA-Za-z']{2,}){0,2})"""
     )
 
     // "ביקשת מ [name]" — payment request you sent; captured when they pay you back.
