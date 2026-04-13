@@ -17,13 +17,25 @@ import java.io.File
 class ShareHandlerActivity : Activity() {
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
+        Log.d("ShareHandler", "onCreate action=${intent?.action} type=${intent?.type}")
         if (intent?.action == Intent.ACTION_SEND) {
             @Suppress("DEPRECATION")
             val srcUri = intent.getParcelableExtra<Uri>(Intent.EXTRA_STREAM)
+                ?: intent.clipData?.getItemAt(0)?.uri
+            Log.d("ShareHandler", "srcUri=$srcUri clipItems=${intent.clipData?.itemCount}")
             if (srcUri != null) {
                 val fileUri = copyToCache(srcUri)
-                BubbleService.processShare(this, fileUri ?: srcUri, srcUri)
+                Log.d("ShareHandler", "fileUri=$fileUri — starting BubbleService")
+                try {
+                    BubbleService.processShare(this, fileUri ?: srcUri, srcUri)
+                } catch (e: Exception) {
+                    Log.e("ShareHandler", "startForegroundService failed", e)
+                }
+            } else {
+                Log.w("ShareHandler", "No URI found in EXTRA_STREAM or clipData")
             }
+        } else {
+            Log.w("ShareHandler", "Unexpected action: ${intent?.action}")
         }
         finish()
     }

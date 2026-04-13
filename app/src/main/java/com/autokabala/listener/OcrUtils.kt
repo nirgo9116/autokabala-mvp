@@ -192,7 +192,7 @@ object OcrUtils {
                 val result = tess.utF8Text
                 tess.recycle()
                 result.takeIf { it.isNotBlank() }
-            } catch (e: Exception) {
+            } catch (e: Throwable) {
                 Log.w("OcrUtils", "Tesseract OCR failed", e)
                 null
             }
@@ -283,7 +283,7 @@ object OcrUtils {
                     ?.toDoubleOrNull()
                     ?.takeIf { it in 1.0..99_999.0 }
             }  // closes return withContext(Dispatchers.IO)
-        } catch (e: Exception) {
+        } catch (e: Throwable) {
             Log.w("AmountCrop", "Crop OCR exception", e)
             return null
         }

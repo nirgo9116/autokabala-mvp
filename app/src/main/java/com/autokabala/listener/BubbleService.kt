@@ -197,6 +197,7 @@ class BubbleService : Service() {
                 stopSelf()
             }
             ACTION_PROCESS_SHARE -> {
+                Log.d("BubbleService", "ACTION_PROCESS_SHARE received")
                 startForegroundCompat(ServiceInfo.FOREGROUND_SERVICE_TYPE_SPECIAL_USE)
                 removeBubble()
                 val fileUri = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
@@ -217,6 +218,7 @@ class BubbleService : Service() {
                     current.add(originalUri.toString())
                     prefs.edit().putStringSet(KEY_SHARED_URIS, current).apply()
                 }
+                Log.d("BubbleService", "fileUri=$fileUri canDrawOverlays=${android.provider.Settings.canDrawOverlays(this)}")
                 if (fileUri != null) {
                     overlayState.value = OverlayState.Processing
                     showOverlayWindow()
@@ -559,7 +561,7 @@ class BubbleService : Service() {
 
             finishPaymentFlow(paymentData, startMs)
 
-        } catch (e: Exception) {
+        } catch (e: Throwable) {
             Log.e("BubbleService", "Error processing screenshot", e)
             showBlankPayment("bit")
         }
@@ -846,6 +848,10 @@ class BubbleService : Service() {
 
     private fun showOverlayWindow() {
         if (overlayView != null) return
+        if (!android.provider.Settings.canDrawOverlays(this)) {
+            Log.e("BubbleService", "SYSTEM_ALERT_WINDOW permission not granted — cannot show overlay")
+            return
+        }
         overlayAnimVisible.value = false
 
         val params = WindowManager.LayoutParams(
