@@ -365,24 +365,21 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         }
     }
 
+    private val _syncClientsResult = MutableStateFlow<String?>(null)
+    val syncClientsResult: StateFlow<String?> = _syncClientsResult
+
     fun onSyncClientsClicked() {
         viewModelScope.launch {
-            receiptRepository.syncClients()
+            if (!ReceiptApiClient.isConfigured()) {
+                _syncClientsResult.value = "יש להזין פרטי iCount בהגדרות (CID, משתמש, טוקן)"
+                return@launch
+            }
+            _syncClientsResult.value = "מסנכרן..."
+            val count = receiptRepository.syncClients()
+            _syncClientsResult.value = if (count != null) "✓ סונכרנו $count לקוחות" else "שגיאה בסנכרון — בדוק חיבור לאינטרנט ופרטי iCount"
         }
     }
 
-    private val _testConnectionResult = MutableStateFlow<String?>(null)
-    val testConnectionResult: StateFlow<String?> = _testConnectionResult
-
-    fun onTestConnectionClicked() {
-        viewModelScope.launch {
-            _testConnectionResult.value = "בודק..."
-            val error = ReceiptApiClient.testConnection()
-            _testConnectionResult.value = if (error == null) "✓ החיבור הצליח" else error
-        }
-    }
-
-    fun clearTestConnectionResult() { _testConnectionResult.value = null }
 
     fun onFakeIssueReceiptClicked(payment: PaymentEntity) {
         viewModelScope.launch {

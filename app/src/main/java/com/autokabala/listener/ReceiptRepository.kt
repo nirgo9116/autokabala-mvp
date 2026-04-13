@@ -178,10 +178,11 @@ class ReceiptRepository(private val paymentDao: PaymentDao, private val clientDa
     // --- Clients ---
     val allClients: Flow<List<ClientEntity>> = clientDao.getAllClients()
 
-    suspend fun syncClients() {
+    /** Returns the number of synced clients on success, or null on failure. */
+    suspend fun syncClients(): Int? {
         Log.d("SyncClients", "Starting client sync...")
         val clientsFromApi = ReceiptApiClient.getClients()
-        if (clientsFromApi != null) {
+        return if (clientsFromApi != null) {
             Log.d("SyncClients", "Successfully fetched ${clientsFromApi.size} clients. Updating database...")
 
             // Preserve isActive and lastReceiptDate — updated nightly by ActiveClientsWorker
@@ -199,8 +200,10 @@ class ReceiptRepository(private val paymentDao: PaymentDao, private val clientDa
             }
             clientDao.syncAll(clientEntities)
             Log.d("SyncClients", "Database updated successfully using atomic transaction.")
+            clientsFromApi.size
         } else {
             Log.e("SyncClients", "Failed to fetch clients from API.")
+            null
         }
     }
 }

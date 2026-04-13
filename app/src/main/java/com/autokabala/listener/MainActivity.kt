@@ -612,16 +612,14 @@ private fun MainTabsScreen(
                     onToggleListener = { viewModel.onEnableDisableClicked() },
                     onOpenSettings = onOpenSettingsClicked,
                     onSyncClients = { viewModel.onSyncClientsClicked() },
+                    syncClientsResult = viewModel.syncClientsResult.collectAsState().value,
                     onAddFakePayment = { viewModel.onAddFakePaymentClicked() },
                     onAddFakeOverduePayment = { viewModel.onAddFakeOverduePaymentClicked() },
                     onShowTutorial = onShowTutorial,
                     testResults = testResults,
                     onSendFailure = { result -> launchDeveloperFeedbackFromResult(context, result) },
                     onClearResults = { viewModel.clearTestResults() },
-                    onDeleteAllPayments = { viewModel.onDeleteAllPaymentsClicked() },
-                    onTestConnection = { viewModel.onTestConnectionClicked() },
-                    onClearConnectionResult = { viewModel.clearTestConnectionResult() },
-                    testConnectionResult = viewModel.testConnectionResult.collectAsState().value
+                    onDeleteAllPayments = { viewModel.onDeleteAllPaymentsClicked() }
                 )
                 2 -> HistoryScreen(
                     modifier = Modifier.padding(innerPadding),
@@ -2815,9 +2813,7 @@ fun SettingsTab(
     onSendFailure: (ParseTestResult) -> Unit = {},
     onClearResults: () -> Unit = {},
     onDeleteAllPayments: () -> Unit = {},
-    onTestConnection: () -> Unit = {},
-    onClearConnectionResult: () -> Unit = {},
-    testConnectionResult: String? = null
+    syncClientsResult: String? = null
 ) {
     var showTestResults by remember { mutableStateOf(false) }
     var showFaq by remember { mutableStateOf(false) }
@@ -2906,8 +2902,23 @@ fun SettingsTab(
             }
         }
 
-        Button(onClick = onSyncClients, modifier = Modifier.fillMaxWidth()) {
-            Text("סנכרן לקוחות")
+        Button(
+            onClick = onSyncClients,
+            modifier = Modifier.fillMaxWidth(),
+            enabled = syncClientsResult != "מסנכרן..."
+        ) {
+            Text(if (syncClientsResult == "מסנכרן...") "מסנכרן..." else "סנכרן לקוחות")
+        }
+        syncClientsResult?.let { result ->
+            if (result != "מסנכרן...") {
+                val isSuccess = result.startsWith("✓")
+                Text(
+                    text = result,
+                    color = if (isSuccess) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.error,
+                    style = MaterialTheme.typography.bodyMedium,
+                    modifier = Modifier.fillMaxWidth()
+                )
+            }
         }
 
         // ── OCR engine selector ───────────────────────────────────────────────
@@ -3006,43 +3017,26 @@ fun SettingsTab(
                     visualTransformation = androidx.compose.ui.text.input.PasswordVisualTransformation(),
                     modifier = Modifier.fillMaxWidth()
                 )
-                Button(
-                    onClick = {
-                        ReceiptApiClient.saveCredentials(icountCid.trim(), icountUser.trim(), icountPass.trim())
-                        icountSaved = true
-                        onClearConnectionResult()
-                    },
-                    modifier = Modifier.fillMaxWidth()
-                ) {
-                    Text(if (icountSaved) "נשמר ✓" else "שמור פרטי iCount")
-                }
                 Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                    OutlinedButton(
-                        onClick = { onTestConnection() },
+                    Button(
+                        onClick = {
+                            ReceiptApiClient.saveCredentials(icountCid.trim(), icountUser.trim(), icountPass.trim())
+                            icountSaved = true
+                        },
                         modifier = Modifier.weight(1f)
                     ) {
-                        Text("בדוק חיבור")
+                        Text(if (icountSaved) "נשמר ✓" else "שמור פרטי iCount")
                     }
                     OutlinedButton(
                         onClick = {
                             ReceiptApiClient.saveCredentials("", "", "")
                             icountCid = ""; icountUser = ""; icountPass = ""
                             icountSaved = false
-                            onClearConnectionResult()
                         },
                         modifier = Modifier.weight(1f)
                     ) {
                         Text("נקה פרטים")
                     }
-                }
-                testConnectionResult?.let { result ->
-                    val isSuccess = result.startsWith("✓")
-                    Text(
-                        text = result,
-                        color = if (isSuccess) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.error,
-                        style = MaterialTheme.typography.bodyMedium,
-                        modifier = Modifier.fillMaxWidth()
-                    )
                 }
             }
         }
