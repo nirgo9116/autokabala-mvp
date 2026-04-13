@@ -138,7 +138,7 @@ private val SLIDES = listOf(
         title = "שתפו אישור תשלום",
         description = "כנסו לאישור תשלום בביט ולחצו על כפתור השיתוף\n(מסומן בעיגול אדום בתמונה)",
         contentScale = androidx.compose.ui.layout.ContentScale.Fit,
-        circleHighlight = CircleHighlight(centerX = 0.50f, centerY = 0.83f, radiusRatio = 0.14f)
+        circleHighlight = CircleHighlight(centerX = 0.50f, centerY = 0.79f, radiusRatio = 0.14f)
     ),
     TutorialSlide(
         drawableRes = R.drawable.tutorial_shituf,
