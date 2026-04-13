@@ -1,5 +1,8 @@
 package com.autokabala.listener
 
+import android.content.Intent
+import android.net.Uri
+import android.provider.Settings
 import com.autokabala.listener.R
 import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.background
@@ -15,6 +18,7 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.layout.ContentScale
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
@@ -29,7 +33,8 @@ private data class TutorialSlide(
     val title: String,
     val description: String,
     val imageAlignment: androidx.compose.ui.Alignment = androidx.compose.ui.Alignment.Center,
-    val contentScale: androidx.compose.ui.layout.ContentScale = androidx.compose.ui.layout.ContentScale.Fit
+    val contentScale: androidx.compose.ui.layout.ContentScale = androidx.compose.ui.layout.ContentScale.Fit,
+    val settingsAction: String? = null  // Android settings action to open, null = no button
 )
 
 private val SLIDES = listOf(
@@ -40,16 +45,18 @@ private val SLIDES = listOf(
         contentScale = androidx.compose.ui.layout.ContentScale.Fit
     ),
     TutorialSlide(
-        drawableRes = R.drawable.tutorial_setup_overlay,
+        drawableRes = null, // הוסף drawable בשם tutorial_permission_overlay
         title = "הרשאה ראשונה: הצגה מעל אפליקציות",
-        description = "כדי שטופס הקבלה יוצג מעל ביט ופייבוקס, יש לאשר הצגה מעל אפליקציות אחרות.",
-        contentScale = androidx.compose.ui.layout.ContentScale.Fit
+        description = "כדי שטופס הקבלה יוצג מעל ביט ופייבוקס, יש לאשר הצגה מעל אפליקציות אחרות.\nלחץ על הכפתור כדי לעבור להגדרות ולאשר.",
+        contentScale = androidx.compose.ui.layout.ContentScale.Fit,
+        settingsAction = Settings.ACTION_MANAGE_OVERLAY_PERMISSION
     ),
     TutorialSlide(
-        drawableRes = R.drawable.tutorial_setup_notifications,
+        drawableRes = null, // הוסף drawable בשם tutorial_permission_notifications
         title = "הרשאה שנייה: גישה להתראות",
-        description = "כדי לזהות תשלומים נכנסים, יש להפעיל גישה להתראות עבור אוטוקבלה.",
-        contentScale = androidx.compose.ui.layout.ContentScale.Fit
+        description = "כדי לזהות תשלומים נכנסים, יש להפעיל גישה להתראות עבור אוטוקבלה.\nלחץ על הכפתור כדי לעבור להגדרות ולאשר.",
+        contentScale = androidx.compose.ui.layout.ContentScale.Fit,
+        settingsAction = Settings.ACTION_NOTIFICATION_LISTENER_SETTINGS
     ),
     TutorialSlide(
         drawableRes = R.drawable.tutorial_icount_login,
@@ -120,6 +127,7 @@ private val SLIDES = listOf(
 fun TutorialScreen(onDone: () -> Unit) {
     val pagerState = rememberPagerState(pageCount = { SLIDES.size })
     val scope = rememberCoroutineScope()
+    val context = LocalContext.current
 
     Column(
         modifier = Modifier
@@ -182,6 +190,34 @@ fun TutorialScreen(onDone: () -> Unit) {
             }
         }
 
+        val currentSlide = SLIDES[pagerState.currentPage]
+
+        // Settings button — shown only on permission slides
+        if (currentSlide.settingsAction != null) {
+            Button(
+                onClick = {
+                    val intent = if (currentSlide.settingsAction == Settings.ACTION_MANAGE_OVERLAY_PERMISSION) {
+                        Intent(
+                            Settings.ACTION_MANAGE_OVERLAY_PERMISSION,
+                            Uri.parse("package:${context.packageName}")
+                        )
+                    } else {
+                        Intent(currentSlide.settingsAction)
+                    }
+                    context.startActivity(intent)
+                },
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(horizontal = 24.dp),
+                colors = ButtonDefaults.buttonColors(
+                    containerColor = Color(0xFF1565C0)
+                )
+            ) {
+                Text("פתח הגדרות לאישור ההרשאה")
+            }
+            Spacer(Modifier.height(8.dp))
+        }
+
         // Navigation buttons
         Row(
             modifier = Modifier
@@ -242,7 +278,7 @@ private fun TutorialSlideView(slide: TutorialSlide) {
                 )
             } else {
                 Text(
-                    "📸\n\n[תמונה תופיע כאן]",
+                    "📸\n\n[הוסף תמונה]",
                     textAlign = TextAlign.Center,
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                     style = MaterialTheme.typography.bodyMedium
