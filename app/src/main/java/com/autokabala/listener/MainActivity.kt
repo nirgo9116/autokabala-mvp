@@ -2902,25 +2902,6 @@ fun SettingsTab(
             }
         }
 
-        Button(
-            onClick = onSyncClients,
-            modifier = Modifier.fillMaxWidth(),
-            enabled = syncClientsResult != "מסנכרן..."
-        ) {
-            Text(if (syncClientsResult == "מסנכרן...") "מסנכרן..." else "סנכרן לקוחות")
-        }
-        syncClientsResult?.let { result ->
-            if (result != "מסנכרן...") {
-                val isSuccess = result.startsWith("✓")
-                Text(
-                    text = result,
-                    color = if (isSuccess) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.error,
-                    style = MaterialTheme.typography.bodyMedium,
-                    modifier = Modifier.fillMaxWidth()
-                )
-            }
-        }
-
         // ── OCR engine selector ───────────────────────────────────────────────
         val ocrCtx = LocalContext.current
         val ocrPrefs = remember {
@@ -3036,6 +3017,24 @@ fun SettingsTab(
                         modifier = Modifier.weight(1f)
                     ) {
                         Text("נקה פרטים")
+                    }
+                }
+                Button(
+                    onClick = onSyncClients,
+                    modifier = Modifier.fillMaxWidth(),
+                    enabled = syncClientsResult != "מסנכרן..."
+                ) {
+                    Text(if (syncClientsResult == "מסנכרן...") "מסנכרן..." else "סנכרן לקוחות")
+                }
+                syncClientsResult?.let { result ->
+                    if (result != "מסנכרן...") {
+                        val isSuccess = result.startsWith("✓")
+                        Text(
+                            text = result,
+                            color = if (isSuccess) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.error,
+                            style = MaterialTheme.typography.bodyMedium,
+                            modifier = Modifier.fillMaxWidth()
+                        )
                     }
                 }
             }
