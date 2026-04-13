@@ -45,14 +45,14 @@ private val SLIDES = listOf(
         contentScale = androidx.compose.ui.layout.ContentScale.Fit
     ),
     TutorialSlide(
-        drawableRes = null, // הוסף drawable בשם tutorial_permission_overlay
+        drawableRes = R.drawable.tutorial_setup_overlay,
         title = "הרשאה ראשונה: הצגה מעל אפליקציות",
         description = "כדי שטופס הקבלה יוצג מעל ביט ופייבוקס, יש לאשר הצגה מעל אפליקציות אחרות.\nלחץ על הכפתור כדי לעבור להגדרות ולאשר.",
         contentScale = androidx.compose.ui.layout.ContentScale.Fit,
         settingsAction = Settings.ACTION_MANAGE_OVERLAY_PERMISSION
     ),
     TutorialSlide(
-        drawableRes = null, // הוסף drawable בשם tutorial_permission_notifications
+        drawableRes = R.drawable.tutorial_setup_notifications,
         title = "הרשאה שנייה: גישה להתראות",
         description = "כדי לזהות תשלומים נכנסים, יש להפעיל גישה להתראות עבור אוטוקבלה.\nלחץ על הכפתור כדי לעבור להגדרות ולאשר.",
         contentScale = androidx.compose.ui.layout.ContentScale.Fit,
