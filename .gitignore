@@ -16,3 +16,4 @@ local.properties
 backend/.env
 backend/.env.local
 backend/node_modules/
+cbt-app/
