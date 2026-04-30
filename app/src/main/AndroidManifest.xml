@@ -85,6 +85,12 @@
             android:noHistory="true"
             android:theme="@android:style/Theme.Translucent.NoTitleBar" />
 
+        <!-- iCount WebView: opens iCount web interface with receipt data pre-copied to clipboard -->
+        <activity
+            android:name=".ICountWebViewActivity"
+            android:exported="false"
+            android:theme="@style/Theme.AutoKabalaListener" />
+
         <!-- Notification Listener Service -->
         <service
             android:name=".AutoKabalaNotificationService"

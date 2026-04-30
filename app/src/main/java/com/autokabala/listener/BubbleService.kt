@@ -865,13 +865,15 @@ class BubbleService : Service() {
             setContent {
                 MaterialTheme {
                     ReceiptOverlayCard(
-                        state           = overlayState.value,
-                        animVisible     = overlayAnimVisible.value,
-                        onIssue         = ::issueReceipt,
-                        onDemoReceipt   = ::demoReceipt,
-                        onDismiss       = ::removeOverlay,
-                        onSelectPending = ::selectPendingPayment,
-                        onSendFeedback  = ::sendFeedbackToWhatsApp
+                        state            = overlayState.value,
+                        animVisible      = overlayAnimVisible.value,
+                        onIssue          = ::issueReceipt,
+                        onDemoReceipt    = ::demoReceipt,
+                        onDismiss        = ::removeOverlay,
+                        onSelectPending  = ::selectPendingPayment,
+                        onSendFeedback   = ::sendFeedbackToWhatsApp,
+                        onOpenICount     = ::openICountWebView,
+                        isApiConfigured  = ReceiptApiClient.isConfigured()
                     )
                 }
             }
@@ -941,6 +943,21 @@ class BubbleService : Service() {
             .addAction(0, "סגור", stopIntent)
             .build()
     }
+
+    // ─── iCount WebView ────────────────────────────────────────────────────────
+
+    private fun openICountWebView(client: ClientEntity, amount: Double, description: String) {
+        removeOverlay()
+        ICountWebViewActivity.launch(
+            context     = this,
+            user        = ReceiptApiClient.user,
+            cid         = ReceiptApiClient.cid,
+            pass        = ReceiptApiClient.pass,
+            clientName  = client.name,
+            amount      = amount,
+            description = description
+        )
+    }
 }
 
 // ─── Compose UI ───────────────────────────────────────────────────────────────
@@ -967,7 +984,9 @@ private fun ReceiptOverlayCard(
     onDismiss: () -> Unit,
     onSelectPending: (PaymentEntity) -> Unit,
     onCreateClient: () -> Unit = {},
-    onSendFeedback: (PaymentEntity) -> Unit = {}
+    onSendFeedback: (PaymentEntity) -> Unit = {},
+    onOpenICount: (ClientEntity, Double, String) -> Unit = { _, _, _ -> },
+    isApiConfigured: Boolean = false
 ) {
     AnimatedVisibility(
         visible = animVisible,
@@ -981,7 +1000,7 @@ private fun ReceiptOverlayCard(
         )
     ) {
         if (state is OverlayState.Ready) {
-            ReadyContent(state, onIssue, onDemoReceipt, onDismiss, onCreateClient, onSendFeedback)
+            ReadyContent(state, onIssue, onDemoReceipt, onDismiss, onCreateClient, onSendFeedback, onOpenICount, isApiConfigured)
             return@AnimatedVisibility
         }
         if (state is OverlayState.PendingList) {
@@ -1054,7 +1073,9 @@ private fun ReadyContent(
     onDemoReceipt: () -> Unit,
     onDismiss: () -> Unit,
     onCreateClient: () -> Unit = {},
-    onSendFeedback: (PaymentEntity) -> Unit = {}
+    onSendFeedback: (PaymentEntity) -> Unit = {},
+    onOpenICount: (ClientEntity, Double, String) -> Unit = { _, _, _ -> },
+    isApiConfigured: Boolean = false
 ) {
     var selectedClient by remember {
         mutableStateOf((state.matchResult as? MatchResult.SingleMatch)?.client)
@@ -1240,6 +1261,21 @@ private fun ReadyContent(
                         ) {
                             Text("הפק קבלה", color = ctaText, fontWeight = FontWeight.Bold, fontSize = 18.sp)
                         }
+                        // 🌐 iCount WebView
+                        Box(
+                            modifier = Modifier
+                                .size(54.dp)
+                                .alpha(if (btnEnabled) 1f else 0.45f)
+                                .clip(RoundedCornerShape(14.dp))
+                                .background(dismissBg)
+                                .border(1.dp, dismissBorder, RoundedCornerShape(14.dp))
+                                .clickable(enabled = btnEnabled) {
+                                    effectiveClient?.let { onOpenICount(it, editedAmount, editedDescription) }
+                                },
+                            contentAlignment = Alignment.Center
+                        ) {
+                            Text("🌐", fontSize = 20.sp)
+                        }
                         // קבלת דמה
                         Box(
                             modifier = Modifier
@@ -1253,17 +1289,34 @@ private fun ReadyContent(
                             Text("🔬", fontSize = 20.sp)
                         }
                     } else {
-                        // ── RELEASE: שלח למפתח ───────────────────────────────
+                        // ── RELEASE: API if configured, WebView fallback ──────
                         Box(
                             modifier = Modifier
                                 .weight(1f)
                                 .height(54.dp)
+                                .alpha(if (btnEnabled) 1f else 0.45f)
                                 .clip(RoundedCornerShape(14.dp))
                                 .background(brand)
-                                .clickable { onSendFeedback(state.payment) },
+                                .clickable(enabled = btnEnabled) {
+                                    effectiveClient?.let { client ->
+                                        if (isApiConfigured) {
+                                            if (editedAmount != state.payment.amount && state.payment.amount != 0.0)
+                                                showAmountDialog = true
+                                            else
+                                                onIssue(client, editedAmount, editedTimestamp, editedDescription)
+                                        } else {
+                                            onOpenICount(client, editedAmount, editedDescription)
+                                        }
+                                    }
+                                },
                             contentAlignment = Alignment.Center
                         ) {
-                            Text("📤 שלח למפתח", color = ctaText, fontWeight = FontWeight.Bold, fontSize = 16.sp)
+                            Text(
+                                if (isApiConfigured) "הפק קבלה" else "🌐 פתח ב-iCount",
+                                color = ctaText,
+                                fontWeight = FontWeight.Bold,
+                                fontSize = 16.sp
+                            )
                         }
                     }
                 }
