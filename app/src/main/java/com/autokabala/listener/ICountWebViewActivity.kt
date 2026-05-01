@@ -385,13 +385,22 @@ class ICountWebViewActivity : ComponentActivity() {
                     return AMOUNT; // fallback — use what we passed in
                 }
 
-                // Payment method: click the ⊕ אמצעי תשלום add button,
-                // then select מזומן, then fill the sum field
-                setTimeout(function() {
+                // Payment method: wait until iCount's total is non-zero (price fill recalc done),
+                // THEN click add payment → select מזומן → fill cash with that exact total.
+                // This replaces the fixed 3500ms timer that caused the race condition.
+                var paymentFilled = false;
+                var paymentStart = Date.now();
+                var paymentTimer = setInterval(function() {
                     var payAmount = readGrandTotal();
-                    console.log('Payment amount (from page total): ' + payAmount + ' (original AMOUNT=' + AMOUNT + ')');
+                    var totalReady = payAmount !== AMOUNT || parseFloat(payAmount) > 0;
+                    // Stop waiting after 12s even if total is still 0 (use AMOUNT as fallback)
+                    var timedOut = Date.now() - paymentStart > 12000;
+                    if (paymentFilled || (!totalReady && !timedOut)) return;
+                    clearInterval(paymentTimer);
+                    paymentFilled = true;
+                    console.log('Payment trigger: payAmount=' + payAmount + ' timedOut=' + timedOut);
 
-                    // Find the "add payment" button — contains "אמצעי תשלום" text and is a link/button
+                    // Find the "add payment" button — contains "אמצעי תשלום" text
                     var addBtn = null;
                     var candidates = document.querySelectorAll('a, button, span');
                     for (var i = 0; i < candidates.length; i++) {
@@ -409,10 +418,6 @@ class ICountWebViewActivity : ComponentActivity() {
 
                     // After the payment section opens, select מזומן and fill sum
                     setTimeout(function() {
-                        // Re-read total after recalc triggered by the click
-                        payAmount = readGrandTotal();
-
-                        // Look for מזומן option (radio, button, or list item)
                         var mazBtn = null;
                         var opts = document.querySelectorAll('input[type="radio"], a, button, li, label');
                         for (var j = 0; j < opts.length; j++) {
@@ -430,7 +435,7 @@ class ICountWebViewActivity : ComponentActivity() {
 
                         // Fill cash sum with the actual iCount grand total
                         setTimeout(function() {
-                            payAmount = readGrandTotal(); // final read after מזומן selected
+                            payAmount = readGrandTotal(); // re-read after מזומן selected
                             var sumEl = document.querySelector('input[name="cash[sum]"]')
                                      || document.querySelector('input[name="cash[0][sum]"]')
                                      || document.querySelector('input[name*="cash"][name*="sum"]');
@@ -442,7 +447,7 @@ class ICountWebViewActivity : ComponentActivity() {
                             }
                         }, 800);
                     }, 800);
-                }, 3500);
+                }, 300);
 
             })();
         """.trimIndent(), null)
