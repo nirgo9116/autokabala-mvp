@@ -239,6 +239,7 @@ class ICountWebViewActivity : ComponentActivity() {
                     ['input','keyup','change','blur'].forEach(function(ev) {
                         el.dispatchEvent(new Event(ev, {bubbles:true}));
                     });
+                    if (window.$) ${'$'}(el).trigger('change').trigger('input').trigger('keyup');
                 }
 
                 function poll(fn, cb, maxMs) {
@@ -246,24 +247,76 @@ class ICountWebViewActivity : ComponentActivity() {
                     var t = setInterval(function() {
                         var el = fn();
                         if (el) { clearInterval(t); cb(el); }
-                        else if (Date.now() - start > (maxMs || 15000)) clearInterval(t);
+                        else if (Date.now() - start > (maxMs || 15000)) {
+                            clearInterval(t);
+                            fn(); // last attempt without visibility check
+                        }
                     }, 200);
                 }
 
-                // Amount / price field
+                // Debug: dump all inputs AND contenteditable elements
+                function dumpFields(label) {
+                    var all = document.querySelectorAll('input,textarea,select');
+                    var names = [];
+                    for (var i = 0; i < all.length; i++) {
+                        var e = all[i];
+                        names.push((e.name||'?') + ':' + (e.type||'?') + ':' + (e.offsetParent?'V':'H'));
+                    }
+                    console.log(label + '_INPUTS: ' + names.join(' | '));
+                    var edits = document.querySelectorAll('[contenteditable]');
+                    var editInfo = [];
+                    for (var j = 0; j < edits.length; j++) {
+                        var ed = edits[j];
+                        editInfo.push((ed.className||'?') + ':' + (ed.getAttribute('data-field')||ed.getAttribute('data-name')||'?') + ':' + (ed.offsetParent?'V':'H') + ':' + ed.textContent.trim().substring(0,10));
+                    }
+                    console.log(label + '_EDITABLE: ' + editInfo.join(' | '));
+                }
+                setTimeout(function() { dumpFields('T1500'); }, 1500);
+                setTimeout(function() { dumpFields('T4000'); }, 4000);
+
+                // Amount / price field — try every known iCount naming pattern
                 poll(function() {
                     var el = document.querySelector('input[name="items[0][unitprice]"]')
+                          || document.querySelector('input[name="unitprice[0]"]')
                           || document.querySelector('input[name="items[0][price]"]')
+                          || document.querySelector('input[name="price[0]"]')
                           || document.querySelector('input[name="items[0][amount]"]')
+                          || document.querySelector('input[name="amount[0]"]')
+                          || document.querySelector('input[name="item_price[0]"]')
                           || document.querySelector('input[name="price"]')
                           || document.querySelector('input[name="amount"]')
                           || document.querySelector('input[name="unitprice"]')
                           || document.querySelector('input.price')
-                          || document.querySelector('input[placeholder*="\u05de\u05d7\u05d9\u05e8"]');
-                    return (el && el.offsetParent !== null) ? el : null;
+                          || document.querySelector('input.unitprice')
+                          || document.querySelector('input[placeholder*="\u05de\u05d7\u05d9\u05e8"]')
+                          || document.querySelector('input[placeholder*="\u05e1\u05db\u05d5\u05dd"]');
+                    if (el && el.offsetParent !== null) return el;
+                    // Broad fallback: any visible writable input whose name suggests price
+                    var inputs = document.querySelectorAll('input[type="number"],input[type="text"]');
+                    for (var i = 0; i < inputs.length; i++) {
+                        var inp = inputs[i];
+                        if (!inp.offsetParent || inp.readOnly || inp.disabled) continue;
+                        var n = (inp.name || '').toLowerCase();
+                        if (n.indexOf('cash') !== -1 || n.indexOf('qty') !== -1 || n.indexOf('quan') !== -1 || n.indexOf('discount') !== -1 || n.indexOf('vat') !== -1) continue;
+                        if (n.indexOf('price') !== -1 || n.indexOf('unitprice') !== -1 || n.indexOf('amount') !== -1) return inp;
+                    }
+                    return null;
                 }, function(el) {
-                    console.log('Amount field found: name=' + el.name);
+                    console.log('Amount field found: name=' + el.name + ' type=' + el.type);
                     nativeFill(el, AMOUNT);
+                    // Try to trigger iCount's own row-total recalculation
+                    setTimeout(function() {
+                        if (typeof calcRow === 'function') { try { calcRow(0); } catch(e){} }
+                        if (typeof calc_total === 'function') { try { calc_total(); } catch(e){} }
+                        if (typeof recalc === 'function') { try { recalc(); } catch(e){} }
+                        // Also try to directly fill the row-total field
+                        var totalEl = document.querySelector('input[name="items[0][total]"]')
+                                   || document.querySelector('input[name="total[0]"]')
+                                   || document.querySelector('input[name="items[0][sum]"]')
+                                   || document.querySelector('input[name="items[0][price_total]"]')
+                                   || document.querySelector('input[name="line_total[0]"]');
+                        if (totalEl) { console.log('Row-total field: name=' + totalEl.name); nativeFill(totalEl, AMOUNT); }
+                    }, 400);
                 }, 15000);
 
                 // Description field

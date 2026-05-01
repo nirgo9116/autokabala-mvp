@@ -241,6 +241,10 @@ class BubbleService : Service() {
     // ─── Bubble (floating button) ─────────────────────────────────────────────
 
     private fun showBubble() {
+        if (!android.provider.Settings.canDrawOverlays(this)) {
+            Log.w("BubbleService", "Overlay permission not granted — skipping bubble")
+            return
+        }
         if (bubbleView != null) return
         val dp = resources.displayMetrics.density
         val size = (72 * dp).toInt()
@@ -845,6 +849,10 @@ class BubbleService : Service() {
     // ─── WindowManager overlay ────────────────────────────────────────────────
 
     private fun showOverlayWindow() {
+        if (!android.provider.Settings.canDrawOverlays(this)) {
+            Log.w("BubbleService", "Overlay permission not granted — skipping overlay")
+            return
+        }
         if (overlayView != null) return
         overlayAnimVisible.value = false
 
