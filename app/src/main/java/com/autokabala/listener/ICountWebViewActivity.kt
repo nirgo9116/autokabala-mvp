@@ -230,17 +230,7 @@ class ICountWebViewActivity : ComponentActivity() {
                 var AMOUNT      = '${amount.esc()}';
                 var DESCRIPTION = '${description.esc()}';
 
-                function nativeFill(el, val) {
-                    var proto = (el.tagName === 'TEXTAREA')
-                        ? window.HTMLTextAreaElement.prototype
-                        : window.HTMLInputElement.prototype;
-                    var s = Object.getOwnPropertyDescriptor(proto, 'value').set;
-                    s.call(el, val);
-                    ['input','keyup','change','blur'].forEach(function(ev) {
-                        el.dispatchEvent(new Event(ev, {bubbles:true}));
-                    });
-                    if (window.$) ${'$'}(el).trigger('change').trigger('input').trigger('keyup');
-                }
+                function nativeFill(el, val) { robustFill(el, val); }
 
                 function poll(fn, cb, maxMs) {
                     var start = Date.now();
@@ -274,6 +264,35 @@ class ICountWebViewActivity : ComponentActivity() {
                 setTimeout(function() { dumpFields('T1500'); }, 1500);
                 setTimeout(function() { dumpFields('T4000'); }, 4000);
 
+                // Robust fill: tries native-setter (React-compatible), direct assign, and jQuery val()
+                function robustFill(el, val) {
+                    // 1. Native setter (works with React/Vue controlled inputs)
+                    try {
+                        var proto = (el.tagName === 'TEXTAREA') ? window.HTMLTextAreaElement.prototype : window.HTMLInputElement.prototype;
+                        var s = Object.getOwnPropertyDescriptor(proto, 'value').set;
+                        s.call(el, val);
+                    } catch(e) {}
+                    // 2. Direct assign (works with plain jQuery forms)
+                    el.value = val;
+                    // 3. Events
+                    ['input','keyup','change','blur'].forEach(function(ev) {
+                        el.dispatchEvent(new Event(ev, {bubbles:true}));
+                    });
+                    if (window.$) ${'$'}(el).val(val).trigger('input').trigger('keyup').trigger('change').trigger('blur');
+                }
+
+                // Ensure qty=1 so row-total = unitprice exactly
+                function ensureQty1() {
+                    var qtyEl = document.querySelector('input[name="items[0][quantity]"]')
+                             || document.querySelector('input[name="items[0][qty]"]')
+                             || document.querySelector('input[name="qty[0]"]')
+                             || document.querySelector('input[name="quantity[0]"]');
+                    if (qtyEl && (qtyEl.value === '' || qtyEl.value === '0')) {
+                        console.log('Setting qty=1: name=' + qtyEl.name);
+                        robustFill(qtyEl, '1');
+                    }
+                }
+
                 // Amount / price field — try every known iCount naming pattern
                 poll(function() {
                     var el = document.querySelector('input[name="items[0][unitprice]"]')
@@ -302,21 +321,30 @@ class ICountWebViewActivity : ComponentActivity() {
                     }
                     return null;
                 }, function(el) {
-                    console.log('Amount field found: name=' + el.name + ' type=' + el.type);
-                    nativeFill(el, AMOUNT);
-                    // Try to trigger iCount's own row-total recalculation
+                    console.log('Amount field found: name=' + el.name + ' type=' + el.type + ' currentVal=' + el.value);
+                    ensureQty1();
+                    el.focus();
+                    robustFill(el, AMOUNT);
+                    // Verify the fill stuck after 500ms; retry once if not
                     setTimeout(function() {
+                        console.log('Amount field value after fill: ' + el.value);
+                        if (el.value !== AMOUNT && el.value !== parseFloat(AMOUNT).toString()) {
+                            console.log('Fill did not stick — retrying');
+                            el.focus();
+                            robustFill(el, AMOUNT);
+                        }
+                        // Trigger iCount's own row-total recalculation
                         if (typeof calcRow === 'function') { try { calcRow(0); } catch(e){} }
                         if (typeof calc_total === 'function') { try { calc_total(); } catch(e){} }
                         if (typeof recalc === 'function') { try { recalc(); } catch(e){} }
-                        // Also try to directly fill the row-total field
+                        // Also directly fill the row-total field if present
                         var totalEl = document.querySelector('input[name="items[0][total]"]')
                                    || document.querySelector('input[name="total[0]"]')
                                    || document.querySelector('input[name="items[0][sum]"]')
                                    || document.querySelector('input[name="items[0][price_total]"]')
                                    || document.querySelector('input[name="line_total[0]"]');
-                        if (totalEl) { console.log('Row-total field: name=' + totalEl.name); nativeFill(totalEl, AMOUNT); }
-                    }, 400);
+                        if (totalEl) { console.log('Row-total field: name=' + totalEl.name); robustFill(totalEl, AMOUNT); }
+                    }, 500);
                 }, 15000);
 
                 // Description field
@@ -333,9 +361,36 @@ class ICountWebViewActivity : ComponentActivity() {
                     if (DESCRIPTION) nativeFill(el, DESCRIPTION);
                 }, 15000);
 
+                // Read the grand total that iCount computed (post-recalc) so the
+                // cash payment always matches exactly — avoids "הפרש בין הסכום לתשלום"
+                function readGrandTotal() {
+                    // Hidden inputs iCount uses to track the computed total
+                    var hiddenTotal = document.querySelector('input[name="total_amount"]')
+                                   || document.querySelector('input[name="doc_total"]')
+                                   || document.querySelector('input[name="total"]')
+                                   || document.querySelector('input[name="grand_total"]');
+                    if (hiddenTotal && hiddenTotal.value && parseFloat(hiddenTotal.value) > 0)
+                        return hiddenTotal.value;
+                    // Visible summary elements
+                    var summaryEl = document.querySelector('.total_price')
+                                 || document.querySelector('.doc-total')
+                                 || document.querySelector('#total_price')
+                                 || document.querySelector('#doc_total')
+                                 || document.querySelector('[class*="grand-total"]')
+                                 || document.querySelector('[class*="grandtotal"]');
+                    if (summaryEl) {
+                        var raw = summaryEl.textContent.replace(/[^\d.]/g, '');
+                        if (raw && parseFloat(raw) > 0) return raw;
+                    }
+                    return AMOUNT; // fallback — use what we passed in
+                }
+
                 // Payment method: click the ⊕ אמצעי תשלום add button,
                 // then select מזומן, then fill the sum field
                 setTimeout(function() {
+                    var payAmount = readGrandTotal();
+                    console.log('Payment amount (from page total): ' + payAmount + ' (original AMOUNT=' + AMOUNT + ')');
+
                     // Find the "add payment" button — contains "אמצעי תשלום" text and is a link/button
                     var addBtn = null;
                     var candidates = document.querySelectorAll('a, button, span');
@@ -354,6 +409,9 @@ class ICountWebViewActivity : ComponentActivity() {
 
                     // After the payment section opens, select מזומן and fill sum
                     setTimeout(function() {
+                        // Re-read total after recalc triggered by the click
+                        payAmount = readGrandTotal();
+
                         // Look for מזומן option (radio, button, or list item)
                         var mazBtn = null;
                         var opts = document.querySelectorAll('input[type="radio"], a, button, li, label');
@@ -370,20 +428,21 @@ class ICountWebViewActivity : ComponentActivity() {
                             console.log('\u05de\u05d6\u05d5\u05de\u05df option not found after add click');
                         }
 
-                        // Fill cash sum after מזומן is selected
+                        // Fill cash sum with the actual iCount grand total
                         setTimeout(function() {
+                            payAmount = readGrandTotal(); // final read after מזומן selected
                             var sumEl = document.querySelector('input[name="cash[sum]"]')
                                      || document.querySelector('input[name="cash[0][sum]"]')
                                      || document.querySelector('input[name*="cash"][name*="sum"]');
                             if (sumEl && sumEl.offsetParent !== null) {
-                                console.log('Cash sum fill: name=' + sumEl.name);
-                                nativeFill(sumEl, AMOUNT);
+                                console.log('Cash sum fill: name=' + sumEl.name + ' value=' + payAmount);
+                                nativeFill(sumEl, payAmount);
                             } else {
                                 console.log('Cash sum field not visible after מזומן select');
                             }
-                        }, 600);
-                    }, 600);
-                }, 3000);
+                        }, 800);
+                    }, 800);
+                }, 3500);
 
             })();
         """.trimIndent(), null)
