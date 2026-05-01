@@ -329,31 +329,63 @@ class ICountWebViewActivity : ComponentActivity() {
                         if (n.indexOf('price') !== -1 || n.indexOf('unitprice') !== -1 || n.indexOf('amount') !== -1) return inp;
                     }
                     return null;
-                }, function(el) {
-                    console.log('Amount field found: name=' + el.name + ' type=' + el.type + ' currentVal=' + el.value);
+                }, function(priceEl) {
+                    console.log('Price field found: name=' + priceEl.name + ' type=' + priceEl.type);
+
+                    // Step A: fill price
                     ensureQty1();
-                    el.focus();
-                    robustFill(el, AMOUNT);
-                    // Verify the fill stuck after 500ms; retry once if not
+                    robustFill(priceEl, AMOUNT);
+
+                    // Step B: simulate Tab → focus qty field so iCount's blur handler fires
                     setTimeout(function() {
-                        console.log('Amount field value after fill: ' + el.value);
-                        if (el.value !== AMOUNT && el.value !== parseFloat(AMOUNT).toString()) {
-                            console.log('Fill did not stick — retrying');
-                            el.focus();
-                            robustFill(el, AMOUNT);
+                        var qtyEl = document.querySelector('input[name="items[0][quantity]"]')
+                                 || document.querySelector('input[name="items[0][qty]"]')
+                                 || document.querySelector('input[name="qty[0]"]')
+                                 || document.querySelector('input[name="quantity[0]"]');
+                        if (qtyEl) {
+                            qtyEl.focus(); // real focus change = genuine blur on priceEl
+                            robustFill(qtyEl, '1');
                         }
-                        // Trigger iCount's own row-total recalculation
-                        if (typeof calcRow === 'function') { try { calcRow(0); } catch(e){} }
-                        if (typeof calc_total === 'function') { try { calc_total(); } catch(e){} }
-                        if (typeof recalc === 'function') { try { recalc(); } catch(e){} }
-                        // Also directly fill the row-total field if present
-                        var totalEl = document.querySelector('input[name="items[0][total]"]')
-                                   || document.querySelector('input[name="total[0]"]')
-                                   || document.querySelector('input[name="items[0][sum]"]')
-                                   || document.querySelector('input[name="items[0][price_total]"]')
-                                   || document.querySelector('input[name="line_total[0]"]');
-                        if (totalEl) { console.log('Row-total field: name=' + totalEl.name); robustFill(totalEl, AMOUNT); }
-                    }, 500);
+
+                        // Step C: force-fill the סה"כ (row total) field directly with every possible selector
+                        setTimeout(function() {
+                            // Try named selectors first
+                            var totalEl = document.querySelector('input[name="items[0][total]"]')
+                                       || document.querySelector('input[name="total[0]"]')
+                                       || document.querySelector('input[name="items[0][sum]"]')
+                                       || document.querySelector('input[name="items[0][price_total]"]')
+                                       || document.querySelector('input[name="line_total[0]"]')
+                                       || document.querySelector('input[name="items[0][rowtotal]"]')
+                                       || document.querySelector('input[name="items[0][row_total]"]')
+                                       || document.querySelector('input[name="items[0][linetotal]"]')
+                                       || document.querySelector('input[name="items[0][totalprice]"]')
+                                       || document.querySelector('input[name="items[0][sumtotal]"]');
+                            // Broad fallback: find a visible, writable numeric input in the same row
+                            // whose current value is "0" (the unfilled total)
+                            if (!totalEl) {
+                                var row = priceEl.closest('tr,div[class*="row"],div[class*="item"],li') || priceEl.parentNode;
+                                var candidates = row ? row.querySelectorAll('input') : [];
+                                for (var i = 0; i < candidates.length; i++) {
+                                    var c = candidates[i];
+                                    if (c === priceEl) continue;
+                                    if (!c.offsetParent || c.readOnly || c.disabled) continue;
+                                    var n = (c.name || '').toLowerCase();
+                                    if (n.indexOf('qty') !== -1 || n.indexOf('quan') !== -1 || n.indexOf('desc') !== -1 || n.indexOf('detail') !== -1) continue;
+                                    if (c.value === '0' || c.value === '') { totalEl = c; break; }
+                                }
+                            }
+                            if (totalEl) {
+                                console.log('Row-total field fill: name=' + totalEl.name + ' → ' + AMOUNT);
+                                robustFill(totalEl, AMOUNT);
+                            } else {
+                                console.log('Row-total field not found');
+                            }
+                            // Also try iCount global recalc functions
+                            ['calcRow','calc_total','recalc','calculateRow','updateRow','calcItems'].forEach(function(fn) {
+                                if (typeof window[fn] === 'function') { try { window[fn](0); } catch(e) {} }
+                            });
+                        }, 400);
+                    }, 300);
                 }, 15000);
 
                 // Description field
