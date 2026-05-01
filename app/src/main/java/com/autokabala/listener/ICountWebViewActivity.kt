@@ -264,21 +264,30 @@ class ICountWebViewActivity : ComponentActivity() {
                 setTimeout(function() { dumpFields('T1500'); }, 1500);
                 setTimeout(function() { dumpFields('T4000'); }, 4000);
 
-                // Robust fill: tries native-setter (React-compatible), direct assign, and jQuery val()
+                // Robust fill: simulates real typing so iCount's jQuery recalc always fires
                 function robustFill(el, val) {
-                    // 1. Native setter (works with React/Vue controlled inputs)
-                    try {
-                        var proto = (el.tagName === 'TEXTAREA') ? window.HTMLTextAreaElement.prototype : window.HTMLInputElement.prototype;
-                        var s = Object.getOwnPropertyDescriptor(proto, 'value').set;
-                        s.call(el, val);
-                    } catch(e) {}
-                    // 2. Direct assign (works with plain jQuery forms)
-                    el.value = val;
-                    // 3. Events
+                    el.focus();
+                    // Clear existing value first
+                    el.select();
+                    try { document.execCommand('selectAll', false, null); } catch(e) {}
+                    // execCommand('insertText') simulates actual keyboard typing —
+                    // the most reliable trigger for jQuery .on('input'/.on('change') handlers
+                    var inserted = false;
+                    try { inserted = document.execCommand('insertText', false, val); } catch(e) {}
+                    if (!inserted) {
+                        // execCommand not supported — fall back to native setter + direct assign
+                        try {
+                            var proto = (el.tagName === 'TEXTAREA') ? window.HTMLTextAreaElement.prototype : window.HTMLInputElement.prototype;
+                            Object.getOwnPropertyDescriptor(proto, 'value').set.call(el, val);
+                        } catch(e) {}
+                        el.value = val;
+                    }
+                    // Fire all relevant events regardless
                     ['input','keyup','change','blur'].forEach(function(ev) {
                         el.dispatchEvent(new Event(ev, {bubbles:true}));
                     });
-                    if (window.$) ${'$'}(el).val(val).trigger('input').trigger('keyup').trigger('change').trigger('blur');
+                    if (window.$) ${'$'}(el).trigger('input').trigger('keyup').trigger('change').trigger('blur');
+                    el.blur();
                 }
 
                 // Ensure qty=1 so row-total = unitprice exactly
