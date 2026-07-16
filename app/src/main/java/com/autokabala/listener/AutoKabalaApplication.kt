@@ -41,6 +41,22 @@ class AutoKabalaApplication : Application() {
         publishShareShortcut()
         receiptRepository.startListeningForPayments(applicationScope)
 
+        val notificationManager = getSystemService(Context.NOTIFICATION_SERVICE) as NotificationManager
+        notificationManager.createNotificationChannel(
+            NotificationChannel("new_payment_channel", "New Payments", NotificationManager.IMPORTANCE_DEFAULT)
+        )
+
+        if (TermsGate.isAccepted(this)) {
+            startPostTermsWork()
+        }
+    }
+
+    /**
+     * Kicks off client sync + reminder/active-clients scheduling. Runs at process start if
+     * terms were already accepted, and again immediately from [TermsScreen]'s onAccept so the
+     * user doesn't have to wait for the next process restart.
+     */
+    fun startPostTermsWork() {
         applicationScope.launch {
             receiptRepository.syncClients()
         }
@@ -60,11 +76,6 @@ class AutoKabalaApplication : Application() {
             .build()
         WorkManager.getInstance(this)
             .enqueueUniqueWork("active_clients_once", ExistingWorkPolicy.KEEP, immediateWork)
-
-        val notificationManager = getSystemService(Context.NOTIFICATION_SERVICE) as NotificationManager
-        notificationManager.createNotificationChannel(
-            NotificationChannel("new_payment_channel", "New Payments", NotificationManager.IMPORTANCE_DEFAULT)
-        )
     }
 
     /**

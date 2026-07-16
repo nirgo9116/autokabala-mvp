@@ -179,6 +179,7 @@ class MainActivity : ComponentActivity() {
             val factory = remember { MainViewModelFactory(application) }
             val mainViewModel: MainViewModel = viewModel(factory = factory)
             val prefs = remember { getSharedPreferences("autokabala_prefs", android.content.Context.MODE_PRIVATE) }
+            var termsAccepted by remember { mutableStateOf(TermsGate.isAccepted(this@MainActivity)) }
             var showTutorial by remember { mutableStateOf(!prefs.getBoolean("tutorial_shown", false)) }
             AutoKabalaListenerTheme {
                 val ocrDebugInfo by mainViewModel.ocrDebugInfo.collectAsState()
@@ -220,7 +221,13 @@ class MainActivity : ComponentActivity() {
                     }
                 }
 
-                if (showTutorial) {
+                if (!termsAccepted) {
+                    TermsScreen(onAccept = {
+                        TermsGate.accept(this@MainActivity)
+                        (application as AutoKabalaApplication).startPostTermsWork()
+                        termsAccepted = true
+                    })
+                } else if (showTutorial) {
                     TutorialScreen(onDone = {
                         prefs.edit().putBoolean("tutorial_shown", true).apply()
                         showTutorial = false

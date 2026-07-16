@@ -13,6 +13,8 @@ class PaymentReminderWorker(
 ) : CoroutineWorker(context, workerParams) {
 
     override suspend fun doWork(): Result {
+        if (!TermsGate.isAccepted(context)) return Result.success()
+
         val db = AppDatabase.getDatabase(context)
         val scheduledPaymentDao = db.scheduledPaymentDao()
         val paymentDao = db.paymentDao()

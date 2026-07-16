@@ -45,6 +45,8 @@ class DailySessionReminderWorker(
     }
 
     override suspend fun doWork(): Result {
+        if (!TermsGate.isAccepted(context)) return Result.success()
+
         val db         = AppDatabase.getDatabase(context)
         val dao        = db.scheduledPaymentDao()
         val paymentDao = db.paymentDao()

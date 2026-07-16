@@ -47,6 +47,7 @@ class ActiveClientsWorker(
     }
 
     override suspend fun doWork(): Result {
+        if (!TermsGate.isAccepted(context)) return Result.success()
         if (!ReceiptApiClient.isConfigured()) {
             Log.d("ActiveClientsWorker", "iCount not configured, skipping")
             return Result.success()

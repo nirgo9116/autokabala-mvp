@@ -84,6 +84,7 @@ class AutoKabalaNotificationService : NotificationListenerService() {
                 Log.d("AutoKabalaNL", "Payment app opened: $current — showing bubble")
             }
             lastForegroundPkg = current
+            if (!TermsGate.isAccepted(this)) return
             val bubbleEnabled = getSharedPreferences(BubbleService.PREFS_NAME, MODE_PRIVATE)
                 .getBoolean(BubbleService.KEY_BUBBLE_ENABLED, true)
             if (!bubbleEnabled) return
@@ -110,6 +111,7 @@ class AutoKabalaNotificationService : NotificationListenerService() {
     override fun onNotificationPosted(sbn: StatusBarNotification) {
         val packageName = sbn.packageName
         if (packageName !in PAYMENT_PACKAGES) return
+        if (!TermsGate.isAccepted(this)) return
 
         val extras = sbn.notification.extras
         val rawText = extras.getString("android.text") ?: return

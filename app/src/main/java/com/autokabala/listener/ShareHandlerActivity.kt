@@ -17,6 +17,13 @@ import java.io.File
 class ShareHandlerActivity : Activity() {
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
+        if (!TermsGate.isAccepted(this)) {
+            startActivity(Intent(this, MainActivity::class.java).apply {
+                addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+            })
+            finish()
+            return
+        }
         if (intent?.action == Intent.ACTION_SEND) {
             @Suppress("DEPRECATION")
             val srcUri = intent.getParcelableExtra<Uri>(Intent.EXTRA_STREAM)
