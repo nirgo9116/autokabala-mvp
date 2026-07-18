@@ -306,22 +306,27 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                     _uiEvent.send(UiEvent.ShowError("לא נמצא לקוח חדש לתשלום זה."))
                     return@launch
                 }
-                val docUrl = receiptRepository.createClientAndIssueReceipt(
+                when (val result = receiptRepository.createClientAndIssueReceipt(
                     payment, pending.name, pending.phone, pending.email, description
-                )
-                if (docUrl != null) {
-                    _justIssuedCards.value = _justIssuedCards.value + (payment.id to IssuedReceiptInfo(docUrl = docUrl, clientPhone = pending.phone, clientName = pending.name, amount = payment.amount, timestamp = payment.timestamp))
-                    _pendingNewClients.value = _pendingNewClients.value - payment.id
-                } else {
-                    _uiEvent.send(UiEvent.ShowError("שגיאה ביצירת לקוח או הפקת קבלה."))
+                )) {
+                    is ApiResult.Success -> {
+                        _justIssuedCards.value = _justIssuedCards.value + (payment.id to IssuedReceiptInfo(docUrl = result.data, clientPhone = pending.phone, clientName = pending.name, amount = payment.amount, timestamp = payment.timestamp))
+                        _pendingNewClients.value = _pendingNewClients.value - payment.id
+                    }
+                    is ApiResult.Failure -> {
+                        _uiEvent.send(UiEvent.ShowError("שגיאה ביצירת לקוח או הפקת קבלה: ${result.reason}"))
+                    }
                 }
             } else {
-                val outcome = receiptRepository.issueReceiptForClient(payment, client, description)
-                if (outcome != null) {
-                    val phone = client.phone ?: receiptRepository.fetchAndCachePhone(client.id)
-                    _justIssuedCards.value = _justIssuedCards.value + (payment.id to IssuedReceiptInfo(docUrl = outcome.docUrl, clientPhone = phone, docNum = outcome.docNum, clientName = client.name, amount = payment.amount, timestamp = payment.timestamp))
-                } else {
-                    _uiEvent.send(UiEvent.ShowError("שגיאה בהפקת קבלה. בדוק חיבור לאינטרנט ונסה שוב."))
+                when (val result = receiptRepository.issueReceiptForClient(payment, client, description)) {
+                    is ApiResult.Success -> {
+                        val outcome = result.data
+                        val phone = client.phone ?: receiptRepository.fetchAndCachePhone(client.id)
+                        _justIssuedCards.value = _justIssuedCards.value + (payment.id to IssuedReceiptInfo(docUrl = outcome.docUrl, clientPhone = phone, docNum = outcome.docNum, clientName = client.name, amount = payment.amount, timestamp = payment.timestamp))
+                    }
+                    is ApiResult.Failure -> {
+                        _uiEvent.send(UiEvent.ShowError("שגיאה בהפקת קבלה: ${result.reason}"))
+                    }
                 }
             }
         }
@@ -701,17 +706,20 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                 return@launch
             }
             val payment = syntheticPayment.copy(id = rowId.toInt())
-            val outcome = receiptRepository.issueReceiptForClient(payment, client, session.description)
-            if (outcome != null) {
-                val phone = client.phone ?: receiptRepository.fetchAndCachePhone(client.id)
-                _justIssuedCards.value = _justIssuedCards.value + (payment.id to IssuedReceiptInfo(
-                    docUrl = outcome.docUrl, clientPhone = phone, docNum = outcome.docNum,
-                    clientName = client.name, amount = payment.amount, timestamp = payment.timestamp
-                ))
-                scheduledPaymentDao.updateScheduledPayment(session.copy(tookPlace = true, receiptIssued = true))
-                _uiEvent.send(UiEvent.ShowMessage("קבלה הופקה בהצלחה ✓"))
-            } else {
-                _uiEvent.send(UiEvent.ShowError("שגיאה בהפקת קבלה. בדוק חיבור לאינטרנט ונסה שוב."))
+            when (val result = receiptRepository.issueReceiptForClient(payment, client, session.description)) {
+                is ApiResult.Success -> {
+                    val outcome = result.data
+                    val phone = client.phone ?: receiptRepository.fetchAndCachePhone(client.id)
+                    _justIssuedCards.value = _justIssuedCards.value + (payment.id to IssuedReceiptInfo(
+                        docUrl = outcome.docUrl, clientPhone = phone, docNum = outcome.docNum,
+                        clientName = client.name, amount = payment.amount, timestamp = payment.timestamp
+                    ))
+                    scheduledPaymentDao.updateScheduledPayment(session.copy(tookPlace = true, receiptIssued = true))
+                    _uiEvent.send(UiEvent.ShowMessage("קבלה הופקה בהצלחה ✓"))
+                }
+                is ApiResult.Failure -> {
+                    _uiEvent.send(UiEvent.ShowError("שגיאה בהפקת קבלה: ${result.reason}"))
+                }
             }
         }
     }

@@ -224,7 +224,7 @@ object ReceiptApiClient {
         }
     }
 
-    suspend fun issueReceipt(paymentData: PaymentData, clientId: String, description: String = ""): IssuedDocument? {
+    suspend fun issueReceipt(paymentData: PaymentData, clientId: String, description: String = ""): ApiResult<IssuedDocument> {
         Log.i("AutoKabalaAPI", "--- Starting Document Issuance for client ID: $clientId ---")
         return try {
             val requestBody = CreateDocumentWithClientIdRequest(
@@ -247,14 +247,16 @@ object ReceiptApiClient {
             val createResponse = response.body<CreateDocumentResponse>()
             if (createResponse.status) {
                 Log.i("AutoKabalaAPI", "##### SUCCESS! doc=${createResponse.docNum} url=${createResponse.docUrl} #####")
-                IssuedDocument(docUrl = createResponse.docUrl ?: "", docNum = createResponse.docNum ?: "")
+                ApiResult.Success(IssuedDocument(docUrl = createResponse.docUrl ?: "", docNum = createResponse.docNum ?: ""))
             } else {
-                Log.e("AutoKabalaAPI", "##### FAILED to issue document: ${createResponse.error} #####")
-                null
+                val errorMsg = createResponse.error ?: "שגיאה לא ידועה מ-iCount"
+                Log.e("AutoKabalaAPI", "##### FAILED to issue document: $errorMsg #####")
+                ApiResult.Failure(errorMsg)
             }
         } catch (e: Exception) {
-            Log.e("AutoKabalaAPI", "##### EXCEPTION during document creation: ${e.message} #####", e)
-            null
+            val errorMsg = e.message ?: "שגיאת רשת"
+            Log.e("AutoKabalaAPI", "##### EXCEPTION during document creation: $errorMsg #####", e)
+            ApiResult.Failure(errorMsg)
         }
     }
 

@@ -749,23 +749,29 @@ class BubbleService : Service() {
             try {
                 val repo = (application as AutoKabalaApplication).receiptRepository
                 val startMs = System.currentTimeMillis()
-                val success = withContext(Dispatchers.IO) {
+                val result = withContext(Dispatchers.IO) {
                     if (client.id.startsWith("new:")) {
                         repo.createClientAndIssueReceipt(
                             payment, client.name, client.phone, client.email, description
-                        ) != null
+                        )
                     } else {
-                        repo.issueReceiptForClient(payment, client, description) != null
+                        when (val r = repo.issueReceiptForClient(payment, client, description)) {
+                            is ApiResult.Success -> ApiResult.Success(r.data.docUrl)
+                            is ApiResult.Failure -> r
+                        }
                     }
                 }
                 val elapsed = System.currentTimeMillis() - startMs
                 if (elapsed < 1200L) delay(1200L - elapsed)
-                if (success) {
-                    pendingPaymentId = null
-                    overlayState.value = OverlayState.Done(client.name)
-                    handler.postDelayed({ removeOverlay(); maybeShowGalleryCleanup() }, 3000)
-                } else {
-                    overlayState.value = OverlayState.Err("שגיאה בהפקת קבלה — בדוק חיבור לאינטרנט")
+                when (result) {
+                    is ApiResult.Success -> {
+                        pendingPaymentId = null
+                        overlayState.value = OverlayState.Done(client.name)
+                        handler.postDelayed({ removeOverlay(); maybeShowGalleryCleanup() }, 3000)
+                    }
+                    is ApiResult.Failure -> {
+                        overlayState.value = OverlayState.Err("שגיאה בהפקת קבלה: ${result.reason}")
+                    }
                 }
             } catch (e: Exception) {
                 overlayState.value = OverlayState.Err("שגיאה: ${e.message}")
