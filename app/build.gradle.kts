@@ -17,9 +17,30 @@ if (localPropertiesFile.exists()) {
     localProperties.load(localPropertiesFile.inputStream())
 }
 
+val releaseKeystorePath = localProperties.getProperty("release.keystore.path")
+val releaseKeystorePassword = localProperties.getProperty("release.keystore.password")
+val releaseKeyAlias = localProperties.getProperty("release.key.alias")
+val releaseKeyPassword = localProperties.getProperty("release.key.password")
+val hasReleaseSigning = !releaseKeystorePath.isNullOrBlank() &&
+    !releaseKeystorePassword.isNullOrBlank() &&
+    !releaseKeyAlias.isNullOrBlank() &&
+    !releaseKeyPassword.isNullOrBlank() &&
+    rootProject.file(releaseKeystorePath).exists()
+
 android {
     namespace = "com.autokabala.listener"
     compileSdk = 35
+
+    signingConfigs {
+        if (hasReleaseSigning) {
+            create("release") {
+                storeFile = rootProject.file(releaseKeystorePath!!)
+                storePassword = releaseKeystorePassword
+                keyAlias = releaseKeyAlias
+                keyPassword = releaseKeyPassword
+            }
+        }
+    }
 
     defaultConfig {
         applicationId = "com.autokabala.listener"
@@ -47,6 +68,9 @@ android {
         release {
             isMinifyEnabled = true
             proguardFiles(getDefaultProguardFile("proguard-android-optimize.txt"), "proguard-rules.pro")
+            if (hasReleaseSigning) {
+                signingConfig = signingConfigs.getByName("release")
+            }
         }
         debug {
             firebaseAppDistribution {
