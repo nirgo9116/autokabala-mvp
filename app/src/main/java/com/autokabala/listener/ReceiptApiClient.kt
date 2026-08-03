@@ -182,14 +182,47 @@ object ReceiptApiClient {
 
     private const val BASE_URL = "https://api.icount.co.il/api/v3.php"
 
-    // SharedPreferences keys (same prefs file as BubbleService)
+    // SharedPreferences keys
     const val KEY_CID  = "icount_cid"
     const val KEY_USER = "icount_user"
     const val KEY_PASS = "icount_pass"
 
+    private const val SECURE_PREFS_NAME = "autokabala_secure_prefs"
+
     lateinit var appContext: android.content.Context
 
-    private val prefs get() = appContext.getSharedPreferences(BubbleService.PREFS_NAME, android.content.Context.MODE_PRIVATE)
+    // iCount credentials are the business owner's real login for their iCount account,
+    // so they're kept in an encrypted-at-rest file, separate from the plain-text
+    // BubbleService.PREFS_NAME file used for ordinary app settings.
+    private val prefs: android.content.SharedPreferences by lazy {
+        val masterKey = androidx.security.crypto.MasterKey.Builder(appContext)
+            .setKeyScheme(androidx.security.crypto.MasterKey.KeyScheme.AES256_GCM)
+            .build()
+        val secure = androidx.security.crypto.EncryptedSharedPreferences.create(
+            appContext,
+            SECURE_PREFS_NAME,
+            masterKey,
+            androidx.security.crypto.EncryptedSharedPreferences.PrefKeyEncryptionScheme.AES256_SIV,
+            androidx.security.crypto.EncryptedSharedPreferences.PrefValueEncryptionScheme.AES256_GCM
+        )
+        migrateLegacyPlaintextPrefs(secure)
+        secure
+    }
+
+    // One-time migration: earlier versions stored these in a plain-text file shared with
+    // other app settings. Copy any existing values over, then wipe them from the old file.
+    private fun migrateLegacyPlaintextPrefs(secure: android.content.SharedPreferences) {
+        if (secure.contains(KEY_CID)) return
+        val legacy = appContext.getSharedPreferences(BubbleService.PREFS_NAME, android.content.Context.MODE_PRIVATE)
+        val legacyCid = legacy.getString(KEY_CID, null)
+        if (legacyCid == null) return
+        secure.edit()
+            .putString(KEY_CID, legacyCid)
+            .putString(KEY_USER, legacy.getString(KEY_USER, ""))
+            .putString(KEY_PASS, legacy.getString(KEY_PASS, ""))
+            .apply()
+        legacy.edit().remove(KEY_CID).remove(KEY_USER).remove(KEY_PASS).apply()
+    }
 
     val cid:  String get() = prefs.getString(KEY_CID,  "") ?.takeIf { it.isNotBlank() } ?: ""
     val user: String get() = prefs.getString(KEY_USER, "") ?.takeIf { it.isNotBlank() } ?: ""

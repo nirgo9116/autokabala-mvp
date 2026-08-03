@@ -2956,13 +2956,9 @@ fun SettingsTab(
         }
 
         // ── iCount credentials ───────────────────────────────────────────────
-        val icountCtx = LocalContext.current
-        val icountPrefs = remember {
-            icountCtx.getSharedPreferences(BubbleService.PREFS_NAME, android.content.Context.MODE_PRIVATE)
-        }
-        var icountCid  by remember { mutableStateOf(icountPrefs.getString(ReceiptApiClient.KEY_CID,  "") ?: "") }
-        var icountUser by remember { mutableStateOf(icountPrefs.getString(ReceiptApiClient.KEY_USER, "") ?: "") }
-        var icountPass by remember { mutableStateOf(icountPrefs.getString(ReceiptApiClient.KEY_PASS, "") ?: "") }
+        var icountCid  by remember { mutableStateOf(ReceiptApiClient.cid) }
+        var icountUser by remember { mutableStateOf(ReceiptApiClient.user) }
+        var icountPass by remember { mutableStateOf(ReceiptApiClient.pass) }
         var icountSaved by remember { mutableStateOf(false) }
 
         Card(modifier = Modifier.fillMaxWidth()) {

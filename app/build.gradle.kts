@@ -30,16 +30,10 @@ android {
 
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
 
-        val icountCid = localProperties.getProperty("icount.cid") ?: ""
-        val icountUser = localProperties.getProperty("icount.user") ?: ""
-        val icountPass = localProperties.getProperty("icount.pass") ?: ""
         val backendUrl = localProperties.getProperty("backend.url") ?: "http://192.168.1.198:3000"
         val aiProxyUrl = localProperties.getProperty("ai.proxy.url") ?: "https://autokabala-ai-proxy.YOUR-SUBDOMAIN.workers.dev"
         val aiProxySecret = localProperties.getProperty("ai.proxy.secret") ?: ""
 
-        buildConfigField("String", "ICOUNT_CID", "\"$icountCid\"")
-        buildConfigField("String", "ICOUNT_USER", "\"$icountUser\"")
-        buildConfigField("String", "ICOUNT_PASS", "\"$icountPass\"")
         buildConfigField("String", "BACKEND_URL", "\"$backendUrl\"")
         buildConfigField("String", "AI_PROXY_URL", "\"$aiProxyUrl\"")
         buildConfigField("String", "AI_PROXY_SECRET", "\"$aiProxySecret\"")
@@ -97,6 +91,9 @@ dependencies {
 
     // OkHttp
     implementation("com.squareup.okhttp3:okhttp:4.12.0")
+
+    // Encrypted local storage (iCount credentials)
+    implementation("androidx.security:security-crypto:1.1.0-alpha06")
 
     // OCR
     implementation("com.google.mlkit:text-recognition:16.0.1")
