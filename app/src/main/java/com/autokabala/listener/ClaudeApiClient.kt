@@ -45,14 +45,12 @@ object ClaudeApiClient {
     }
 
     suspend fun sendMessage(
-        apiKey: String,
         systemPrompt: String,
         messages: List<ChatMessage>
     ): String? {
         return try {
-            val response: ClaudeResponse = client.post("https://api.anthropic.com/v1/messages") {
-                header("x-api-key", apiKey)
-                header("anthropic-version", "2023-06-01")
+            val response: ClaudeResponse = client.post("${BuildConfig.AI_PROXY_URL}/claude/v1/messages") {
+                header("X-App-Secret", BuildConfig.AI_PROXY_SECRET)
                 contentType(ContentType.Application.Json)
                 setBody(
                     ClaudeRequest(

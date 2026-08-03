@@ -409,12 +409,6 @@ object OcrUtils {
 
     suspend fun runGeminiOcr(bitmap: Bitmap): GeminiResult? = withContext(Dispatchers.IO) {
         try {
-            val apiKey = BuildConfig.GEMINI_API_KEY
-            if (apiKey.isBlank()) {
-                Log.w("OcrUtils", "Gemini API key not configured")
-                return@withContext null
-            }
-
             // Scale down to max 720px on the longest side to reduce upload size
             val maxDim = 720
             val scale = maxDim.toFloat() / maxOf(bitmap.width, bitmap.height)
@@ -483,7 +477,8 @@ object OcrUtils {
             }.toString()
 
             val request = Request.Builder()
-                .url("https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent?key=$apiKey")
+                .url("${BuildConfig.AI_PROXY_URL}/gemini/v1beta/generate")
+                .header("X-App-Secret", BuildConfig.AI_PROXY_SECRET)
                 .post(body.toRequestBody("application/json".toMediaType()))
                 .build()
 
@@ -576,12 +571,6 @@ object OcrUtils {
 
     suspend fun runOpenAiOcr(bitmap: Bitmap): GeminiResult? = withContext(Dispatchers.IO) {
         try {
-            val apiKey = BuildConfig.OPENAI_API_KEY
-            if (apiKey.isBlank()) {
-                Log.w("OcrUtils", "OpenAI API key not configured")
-                return@withContext null
-            }
-
             val maxDim = 720
             val scale = maxDim.toFloat() / maxOf(bitmap.width, bitmap.height)
             val small = if (scale < 1f)
@@ -650,8 +639,8 @@ object OcrUtils {
             }.toString()
 
             val request = Request.Builder()
-                .url("https://api.openai.com/v1/chat/completions")
-                .header("Authorization", "Bearer $apiKey")
+                .url("${BuildConfig.AI_PROXY_URL}/openai/v1/chat/completions")
+                .header("X-App-Secret", BuildConfig.AI_PROXY_SECRET)
                 .post(body.toRequestBody("application/json".toMediaType()))
                 .build()
 
@@ -889,12 +878,6 @@ object OcrUtils {
 
     suspend fun runGoogleVisionOcr(bitmap: Bitmap): VisionResult? = withContext(Dispatchers.IO) {
         try {
-            val apiKey = BuildConfig.GOOGLE_VISION_API_KEY
-            if (apiKey.isBlank()) {
-                Log.w("OcrUtils", "Google Vision API key not configured")
-                return@withContext null
-            }
-
             // Scale to max 1600px — higher resolution reduces ₪ misread as $/$$/IN
             val maxDim = 1600
             val scale = maxDim.toFloat() / maxOf(bitmap.width, bitmap.height)
@@ -930,7 +913,8 @@ object OcrUtils {
             }.toString()
 
             val request = Request.Builder()
-                .url("https://vision.googleapis.com/v1/images:annotate?key=$apiKey")
+                .url("${BuildConfig.AI_PROXY_URL}/vision/v1/images:annotate")
+                .header("X-App-Secret", BuildConfig.AI_PROXY_SECRET)
                 .post(body.toRequestBody("application/json".toMediaType()))
                 .build()
 

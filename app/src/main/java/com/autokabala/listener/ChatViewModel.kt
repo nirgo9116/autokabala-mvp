@@ -14,7 +14,6 @@ import java.util.Locale
 class ChatViewModel(application: Application) : AndroidViewModel(application) {
 
     private val database = (application as AutoKabalaApplication).database
-    private val apiKey = BuildConfig.CLAUDE_API_KEY
 
     private val _messages = MutableStateFlow<List<ChatMessage>>(emptyList())
     val messages: StateFlow<List<ChatMessage>> = _messages.asStateFlow()
@@ -31,7 +30,6 @@ class ChatViewModel(application: Application) : AndroidViewModel(application) {
             _isLoading.value = true
             val systemPrompt = buildSystemPrompt()
             val response = ClaudeApiClient.sendMessage(
-                apiKey = apiKey,
                 systemPrompt = systemPrompt,
                 messages = updatedMessages
             )
