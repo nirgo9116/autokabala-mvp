@@ -84,7 +84,7 @@ class ChatViewModel(application: Application) : AndroidViewModel(application) {
                 "- $name: ₪$amount (${p.source}, $date) — $status"
             }
 
-        return """אתה עוזר CRM חכם לעסק עצמאי ישראלי. האפליקציה מזהה תשלומים מ-Bit ו-Paybox ומנפיקה קבלות דרך מערכת iCount.
+        return """אתה עוזר CRM חכם לעסק עצמאי ישראלי. האפליקציה מעבדת תשלומים מ-Bit ו-Paybox שהמשתמש משתף איתה, ומנפיקה קבלות דרך מערכת iCount.
 
 ענה **בעברית** תמיד, בצורה ידידותית וקצרה. השתמש במספרים ובנתונים האמיתיים שמטה.
 

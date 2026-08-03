@@ -245,9 +245,6 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
     }.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), emptyList())
 
 
-    val isEnabled: StateFlow<Boolean> = ListenerManager.enabled
-        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), false)
-
     private val _isProcessingShare = MutableStateFlow(false)
     val isProcessingShare: StateFlow<Boolean> = _isProcessingShare.asStateFlow()
 
@@ -290,14 +287,6 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
     }
 
     // --- Event Handlers ---
-
-    fun onEnableDisableClicked() {
-        if (isEnabled.value) {
-            ListenerManager.disable()
-        } else {
-            ListenerManager.enable()
-        }
-    }
 
     fun onIssueReceiptForClientClicked(payment: PaymentEntity, client: ClientEntity, description: String = "") {
         viewModelScope.launch {

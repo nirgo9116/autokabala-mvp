@@ -8,7 +8,6 @@ import android.net.Uri
 import android.os.Build
 import android.os.Bundle
 import android.provider.MediaStore
-import android.provider.Settings
 import androidx.activity.result.IntentSenderRequest
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.rememberLauncherForActivityResult
@@ -146,7 +145,6 @@ import androidx.compose.ui.text.input.ImeAction
 import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
-import androidx.core.app.NotificationManagerCompat
 import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.LifecycleEventObserver
 import androidx.lifecycle.ViewModel
@@ -250,9 +248,6 @@ class MainActivity : ComponentActivity() {
                 } else {
                     MainScreen(
                         viewModel = mainViewModel,
-                        onOpenSettingsClicked = {
-                            startActivity(Intent(Settings.ACTION_NOTIFICATION_LISTENER_SETTINGS))
-                        },
                         onShowTutorial = { showTutorial = true }
                     )
                 }
@@ -311,7 +306,7 @@ private val ChipGrayBorder  = Color(0xFFBDBDBD)
 // ─────────────────────────────────────────────────────────────────────────────
 
 @Composable
-fun MainScreen(viewModel: MainViewModel, onOpenSettingsClicked: () -> Unit, onShowTutorial: () -> Unit) {
+fun MainScreen(viewModel: MainViewModel, onShowTutorial: () -> Unit) {
     val currentScreen by viewModel.currentScreen.collectAsState()
 
     BackHandler(enabled = currentScreen == Screen.CLIENT_DETAIL || currentScreen == Screen.CHAT) {
@@ -324,7 +319,6 @@ fun MainScreen(viewModel: MainViewModel, onOpenSettingsClicked: () -> Unit, onSh
         MainTabsScreen(
             viewModel = viewModel,
             context = LocalContext.current,
-            onOpenSettingsClicked = onOpenSettingsClicked,
             onShowTutorial = onShowTutorial
         )
     }
@@ -335,14 +329,12 @@ fun MainScreen(viewModel: MainViewModel, onOpenSettingsClicked: () -> Unit, onSh
 private fun MainTabsScreen(
     viewModel: MainViewModel,
     context: android.content.Context,
-    onOpenSettingsClicked: () -> Unit,
     onShowTutorial: () -> Unit
 ) {
     val currentScreen by viewModel.currentScreen.collectAsState()
     val selectedClient by viewModel.selectedClient.collectAsState()
     val clientPayments by viewModel.clientPayments.collectAsState()
     val allClients by viewModel.allClients.collectAsState()
-    val isEnabled by viewModel.isEnabled.collectAsState()
     val paymentStates by viewModel.paymentProcessingStates.collectAsState()
     val isProcessingShare by viewModel.isProcessingShare.collectAsState()
     val paymentHistory by viewModel.paymentHistory.collectAsState()
@@ -355,11 +347,6 @@ private fun MainTabsScreen(
     val calendarEvents by viewModel.calendarEvents.collectAsState()
     val scheduledPayments by viewModel.scheduledPayments.collectAsState()
     val lifecycleOwner = LocalLifecycleOwner.current
-    var hasNotificationPermission by remember {
-        mutableStateOf(
-            NotificationManagerCompat.getEnabledListenerPackages(context).contains(context.packageName)
-        )
-    }
     var hasCalendarPermission by remember {
         mutableStateOf(
             ContextCompat.checkSelfPermission(context, Manifest.permission.READ_CALENDAR) == PackageManager.PERMISSION_GRANTED
@@ -383,8 +370,6 @@ private fun MainTabsScreen(
     DisposableEffect(lifecycleOwner) {
         val observer = LifecycleEventObserver { _, event ->
             if (event == Lifecycle.Event.ON_RESUME) {
-                hasNotificationPermission = NotificationManagerCompat
-                    .getEnabledListenerPackages(context).contains(context.packageName)
                 hasCalendarPermission = ContextCompat.checkSelfPermission(
                     context, Manifest.permission.READ_CALENDAR
                 ) == PackageManager.PERMISSION_GRANTED
@@ -605,10 +590,6 @@ private fun MainTabsScreen(
                 ) }
                 1 -> SettingsTab(
                     modifier = Modifier.padding(innerPadding),
-                    isEnabled = isEnabled,
-                    hasPermission = hasNotificationPermission,
-                    onToggleListener = { viewModel.onEnableDisableClicked() },
-                    onOpenSettings = onOpenSettingsClicked,
                     onSyncClients = { viewModel.onSyncClientsClicked() },
                     onAddFakePayment = { viewModel.onAddFakePaymentClicked() },
                     onAddFakeOverduePayment = { viewModel.onAddFakeOverduePaymentClicked() },
@@ -807,7 +788,7 @@ fun PaymentsTab(
             EmptyState(
                 icon     = Icons.Default.List,
                 title    = "אין תשלומים ממתינים",
-                subtitle = "תשלומים יופיעו כאן לאחר קבלת התראת ביט או שיתוף תמונת אישור תשלום"
+                subtitle = "תשלומים יופיעו כאן לאחר שיתוף תמונת אישור תשלום מ-Bit או Paybox"
             )
         } else {
             LazyColumn(verticalArrangement = Arrangement.spacedBy(12.dp)) {
@@ -2801,10 +2782,6 @@ fun CalendarTab(
 @OptIn(ExperimentalMaterial3Api::class)
 fun SettingsTab(
     modifier: Modifier,
-    isEnabled: Boolean,
-    hasPermission: Boolean,
-    onToggleListener: () -> Unit,
-    onOpenSettings: () -> Unit,
     onSyncClients: () -> Unit,
     onAddFakePayment: () -> Unit,
     onAddFakeOverduePayment: () -> Unit,
@@ -2858,41 +2835,6 @@ fun SettingsTab(
         verticalArrangement = Arrangement.spacedBy(16.dp)
     ) {
         Text("הגדרות", style = MaterialTheme.typography.headlineSmall, fontWeight = FontWeight.Bold)
-
-        // Listener card
-        Card(modifier = Modifier.fillMaxWidth()) {
-            Column(
-                modifier = Modifier.padding(16.dp),
-                verticalArrangement = Arrangement.spacedBy(10.dp)
-            ) {
-                Text(
-                    "האזנה להתראות",
-                    style = MaterialTheme.typography.titleMedium,
-                    fontWeight = FontWeight.Bold
-                )
-                Row(
-                    modifier = Modifier.fillMaxWidth(),
-                    horizontalArrangement = Arrangement.SpaceBetween,
-                    verticalAlignment = Alignment.CenterVertically
-                ) {
-                    Column {
-                        Text(
-                            "סטטוס: ${if (isEnabled) "פעיל" else "לא פעיל"}",
-                            style = MaterialTheme.typography.bodyMedium
-                        )
-                        Text(
-                            "הרשאה: ${if (hasPermission) "מאושרת" else "לא מאושרת"}",
-                            style = MaterialTheme.typography.bodySmall,
-                            color = if (hasPermission) ChipGreenText else MaterialTheme.colorScheme.error
-                        )
-                    }
-                    Switch(checked = isEnabled, onCheckedChange = { onToggleListener() })
-                }
-                OutlinedButton(onClick = onOpenSettings, modifier = Modifier.fillMaxWidth()) {
-                    Text("הגדרות הרשאות")
-                }
-            }
-        }
 
         Button(onClick = onSyncClients, modifier = Modifier.fillMaxWidth()) {
             Text("סנכרן לקוחות")
@@ -3043,43 +2985,6 @@ fun SettingsTab(
             Text("שאלות נפוצות")
         }
 
-        // Bubble overlay toggle
-        Card(modifier = Modifier.fillMaxWidth()) {
-            Row(
-                modifier = Modifier
-                    .padding(16.dp)
-                    .fillMaxWidth(),
-                horizontalArrangement = Arrangement.SpaceBetween,
-                verticalAlignment = Alignment.CenterVertically
-            ) {
-                val bubbleCtx = LocalContext.current
-                val bubblePrefs = remember {
-                    bubbleCtx.getSharedPreferences(BubbleService.PREFS_NAME, android.content.Context.MODE_PRIVATE)
-                }
-                var isBubbleEnabled by remember { mutableStateOf(bubblePrefs.getBoolean(BubbleService.KEY_BUBBLE_ENABLED, true)) }
-                Column(modifier = Modifier.weight(1f)) {
-                    Text(
-                        "בועת שיתוף",
-                        style = MaterialTheme.typography.titleMedium,
-                        fontWeight = FontWeight.Bold
-                    )
-                    Text(
-                        "הצג בועה בעת פתיחת ביט / פייבוקס",
-                        style = MaterialTheme.typography.bodySmall,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant
-                    )
-                }
-                Switch(
-                    checked = isBubbleEnabled,
-                    onCheckedChange = { enabled ->
-                        isBubbleEnabled = enabled
-                        bubblePrefs.edit().putBoolean(BubbleService.KEY_BUBBLE_ENABLED, enabled).apply()
-                        if (!enabled) BubbleService.hide(bubbleCtx)
-                    }
-                )
-            }
-        }
-
         // Filter active clients toggle
         Card(modifier = Modifier.fillMaxWidth()) {
             Row(
@@ -3123,25 +3028,6 @@ fun SettingsTab(
             ActivityResultContracts.StartActivityForResult()
         ) { hasOverlayPermission.value = android.provider.Settings.canDrawOverlays(context) }
 
-        val notifService = remember {
-            context.getSystemService(android.content.Context.NOTIFICATION_SERVICE)
-            // Use a lambda so it re-reads on recomposition trigger
-        }
-        val hasUsagePermission = remember { mutableStateOf(
-            (context.applicationContext as? AutoKabalaApplication)?.let {
-                val ops = context.getSystemService(android.content.Context.APP_OPS_SERVICE) as android.app.AppOpsManager
-                ops.unsafeCheckOpNoThrow(android.app.AppOpsManager.OPSTR_GET_USAGE_STATS,
-                    android.os.Process.myUid(), context.packageName) == android.app.AppOpsManager.MODE_ALLOWED
-            } ?: false
-        )}
-        val usagePermLauncher = rememberLauncherForActivityResult(
-            ActivityResultContracts.StartActivityForResult()
-        ) {
-            val ops = context.getSystemService(android.content.Context.APP_OPS_SERVICE) as android.app.AppOpsManager
-            hasUsagePermission.value = ops.unsafeCheckOpNoThrow(android.app.AppOpsManager.OPSTR_GET_USAGE_STATS,
-                android.os.Process.myUid(), context.packageName) == android.app.AppOpsManager.MODE_ALLOWED
-        }
-
         if (!hasOverlayPermission.value) {
             Button(
                 onClick = {
@@ -3153,16 +3039,6 @@ fun SettingsTab(
                 modifier = Modifier.fillMaxWidth(),
                 colors = ButtonDefaults.buttonColors(containerColor = MaterialTheme.colorScheme.tertiary)
             ) { Text("אפשר הצגת בועה מעל אפליקציות") }
-        }
-
-        if (!hasUsagePermission.value) {
-            Button(
-                onClick = {
-                    usagePermLauncher.launch(Intent(android.provider.Settings.ACTION_USAGE_ACCESS_SETTINGS))
-                },
-                modifier = Modifier.fillMaxWidth(),
-                colors = ButtonDefaults.buttonColors(containerColor = MaterialTheme.colorScheme.tertiary)
-            ) { Text("אפשר זיהוי פתיחת ביט / פייבוקס") }
         }
 
         if (hasOverlayPermission.value) {

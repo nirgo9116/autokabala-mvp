@@ -1,9 +1,6 @@
 package com.autokabala.listener
 
 import android.app.Application
-import android.app.NotificationChannel
-import android.app.NotificationManager
-import android.content.Context
 import android.content.Intent
 import android.net.Uri
 import androidx.core.app.Person
@@ -40,11 +37,6 @@ class AutoKabalaApplication : Application() {
         ReceiptApiClient.appContext = this
         publishShareShortcut()
         receiptRepository.startListeningForPayments(applicationScope)
-
-        val notificationManager = getSystemService(Context.NOTIFICATION_SERVICE) as NotificationManager
-        notificationManager.createNotificationChannel(
-            NotificationChannel("new_payment_channel", "New Payments", NotificationManager.IMPORTANCE_DEFAULT)
-        )
 
         if (TermsGate.isAccepted(this)) {
             startPostTermsWork()

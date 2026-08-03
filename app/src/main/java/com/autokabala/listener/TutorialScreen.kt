@@ -41,22 +41,15 @@ private val SLIDES = listOf(
     TutorialSlide(
         drawableRes = R.drawable.tutorial_setup_welcome,
         title = "ברוכים הבאים לאוטוקבלה!",
-        description = "האפליקציה מפיקה קבלה אוטומטית ברגע שמאשרים תשלום מביט או פייבוקס.",
+        description = "כשמאשרים תשלום מביט או פייבוקס, משתפים את אישור התשלום עם אוטוקבלה והאפליקציה מפיקה קבלה.",
         contentScale = androidx.compose.ui.layout.ContentScale.Fit
     ),
     TutorialSlide(
         drawableRes = R.drawable.tutorial_setup_overlay,
-        title = "הרשאה ראשונה: הצגה מעל אפליקציות",
+        title = "הרשאה: הצגה מעל אפליקציות",
         description = "כדי שטופס הקבלה יוצג מעל ביט ופייבוקס, יש לאשר הצגה מעל אפליקציות אחרות.\nלחץ על הכפתור כדי לעבור להגדרות ולאשר.",
         contentScale = androidx.compose.ui.layout.ContentScale.Fit,
         settingsAction = Settings.ACTION_MANAGE_OVERLAY_PERMISSION
-    ),
-    TutorialSlide(
-        drawableRes = R.drawable.tutorial_setup_notifications,
-        title = "הרשאה שנייה: גישה להתראות",
-        description = "כדי לזהות תשלומים נכנסים, יש להפעיל גישה להתראות עבור אוטוקבלה.\nלחץ על הכפתור כדי לעבור להגדרות ולאשר.",
-        contentScale = androidx.compose.ui.layout.ContentScale.Fit,
-        settingsAction = Settings.ACTION_NOTIFICATION_LISTENER_SETTINGS
     ),
     TutorialSlide(
         drawableRes = R.drawable.tutorial_icount_login,

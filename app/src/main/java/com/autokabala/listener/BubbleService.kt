@@ -111,7 +111,6 @@ class BubbleService : Service() {
         private const val NOTIF_ID     = 9001
         const val CHANNEL_ID           = "bubble_channel"
         const val PREFS_NAME           = "autokabala_prefs"
-        const val KEY_BUBBLE_ENABLED        = "bubble_enabled"
         const val KEY_FILTER_ACTIVE_CLIENTS = "filter_active_clients"
         const val KEY_OCR_ENGINE            = "ocr_engine"
         const val OCR_ENGINE_AUTO           = "AUTO"
