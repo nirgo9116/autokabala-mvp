@@ -7,7 +7,7 @@ Last verified against code: 2026-08-03.
 ## Section: Data collection and security
 
 - **Does your app collect or share any of the required user data types?** Yes
-- **Is all of the user data collected by your app encrypted in transit?** Yes — iCount API, the Cloudflare Worker AI proxy, and Firebase are all accessed over HTTPS. (The unused `backend.url` dev default in `local.properties`/`BuildConfig.BACKEND_URL` points at plain HTTP, but it has zero call sites in the app — dead code, not a live data path. Worth deleting separately so it doesn't confuse a future reviewer, but it's not answered here.)
+- **Is all of the user data collected by your app encrypted in transit?** Yes — iCount API, the Cloudflare Worker AI proxy, and Firebase are all accessed over HTTPS. (The dead `backend.url`/`BuildConfig.BACKEND_URL` plain-HTTP dev default has since been removed — see commit history.)
 - **Does your app provide a way for users to request that their data be deleted?** Yes — via the contact email in the privacy policy (nirgo9116@gmail.com). Also: uninstalling the app removes all on-device data (Room DB, encrypted prefs); data held by iCount must be deleted through iCount directly (call this out in the form's free-text field).
 - **Account creation:** the app itself has no user-account/login system of its own — the iCount credentials are a bridge to the user's *existing* third-party iCount account, not an account created within AutoKabala. Answer "No" to "does your app require or allow account creation."
 

@@ -51,11 +51,9 @@ android {
 
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
 
-        val backendUrl = localProperties.getProperty("backend.url") ?: "http://192.168.1.198:3000"
         val aiProxyUrl = localProperties.getProperty("ai.proxy.url") ?: "https://autokabala-ai-proxy.YOUR-SUBDOMAIN.workers.dev"
         val aiProxySecret = localProperties.getProperty("ai.proxy.secret") ?: ""
 
-        buildConfigField("String", "BACKEND_URL", "\"$backendUrl\"")
         buildConfigField("String", "AI_PROXY_URL", "\"$aiProxyUrl\"")
         buildConfigField("String", "AI_PROXY_SECRET", "\"$aiProxySecret\"")
 
