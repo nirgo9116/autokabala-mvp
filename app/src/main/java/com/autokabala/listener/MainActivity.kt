@@ -3048,6 +3048,30 @@ fun SettingsTab(
             ) { Text("🫧  הצג בועה עכשיו (בדיקה)") }
         }
 
+        // Notification permission button — required on Android 13+ so the bubble's
+        // foreground-service notification is actually visible to the user.
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
+            val hasNotificationPermission = remember {
+                mutableStateOf(
+                    ContextCompat.checkSelfPermission(
+                        context, Manifest.permission.POST_NOTIFICATIONS
+                    ) == PackageManager.PERMISSION_GRANTED
+                )
+            }
+            val notificationPermLauncher = rememberLauncherForActivityResult(
+                ActivityResultContracts.RequestPermission()
+            ) { granted -> hasNotificationPermission.value = granted }
+
+            if (!hasNotificationPermission.value) {
+                Spacer(Modifier.height(8.dp))
+                Button(
+                    onClick = { notificationPermLauncher.launch(Manifest.permission.POST_NOTIFICATIONS) },
+                    modifier = Modifier.fillMaxWidth(),
+                    colors = ButtonDefaults.buttonColors(containerColor = MaterialTheme.colorScheme.tertiary)
+                ) { Text("אפשר התראות") }
+            }
+        }
+
         if (BuildConfig.DEBUG && testResults.isNotEmpty()) {
             val ok = testResults.count { it.isSuccess }
             val fail = testResults.count { !it.isSuccess }
