@@ -27,6 +27,7 @@ import androidx.compose.ui.unit.dp
 import kotlinx.coroutines.launch
 
 private val TutorialTextColor = Color(0xFF64B5F6) // light blue
+private val TutorialDescriptionColor = Color(0xFF5C8DFF) // dark/royal blue, legible on the dark tutorial background
 
 private data class TutorialSlide(
     val drawableRes: Int?,
@@ -41,7 +42,7 @@ private val SLIDES = listOf(
     TutorialSlide(
         drawableRes = R.drawable.tutorial_setup_welcome,
         title = "ברוכים הבאים לאוטוקבלה!",
-        description = "כשמאשרים תשלום מביט או פייבוקס, משתפים את אישור התשלום עם אוטוקבלה והאפליקציה מפיקה קבלה.",
+        description = "כשמתקבל אישור תשלום בביט או פייבוקס, משתפים אותו עם אוטוקבלה דרך תפריט השיתוף — האפליקציה קוראת את פרטי התשלום ומציעה להפיק קבלה.\nשימו לב: השיתוף הוא ידני בכל פעם — האפליקציה לא מזהה תשלומים אוטומטית.",
         contentScale = androidx.compose.ui.layout.ContentScale.Fit
     ),
     TutorialSlide(
@@ -108,8 +109,8 @@ private val SLIDES = listOf(
     ),
     TutorialSlide(
         drawableRes = R.drawable.tutorial_kabala,
-        title = "בדקו את הקבלה",
-        description = "אם השם או הסכום לא זהים לאלה שבביט\nלחצו על 'שלח למפתח'",
+        title = "בדקו את הפרטים והפיקו קבלה",
+        description = "ודאו שהשם בשדה 'לכבוד' נכון (אפשר לבחור לקוח אחר), ואם צריך הוסיפו תיאור לשירות.\nלחצו 'הפק קבלה' — הקבלה תופק אוטומטית דרך iCount.\nאם השם או הסכום לא תואמים למה שמופיע בביט, אפשר לתקן אותם כאן, או ללחוץ 'שלח למפתח' כדי לדווח על טעות.",
         contentScale = androidx.compose.ui.layout.ContentScale.Crop,
         imageAlignment = androidx.compose.ui.Alignment.TopCenter
     )
@@ -291,7 +292,7 @@ private fun TutorialSlideView(slide: TutorialSlide) {
             slide.description,
             style = MaterialTheme.typography.bodySmall,
             textAlign = TextAlign.Center,
-            color = TutorialTextColor,
+            color = TutorialDescriptionColor,
             lineHeight = MaterialTheme.typography.bodySmall.lineHeight,
             modifier = Modifier.padding(bottom = 4.dp)
         )

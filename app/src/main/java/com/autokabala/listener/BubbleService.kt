@@ -1223,29 +1223,29 @@ private fun ReadyContent(
                     ) {
                         Text("✕", fontSize = 20.sp, color = dismissText)
                     }
+                    // הפק קבלה — real auto-generate action (calls iCount via onIssue), all builds
+                    val issueEnabled = btnEnabled
+                    Box(
+                        modifier = Modifier
+                            .weight(1f)
+                            .height(54.dp)
+                            .alpha(if (issueEnabled) 1f else 0.45f)
+                            .clip(RoundedCornerShape(14.dp))
+                            .background(brand)
+                            .clickable(enabled = issueEnabled) {
+                                effectiveClient?.let {
+                                    if (editedAmount != state.payment.amount && state.payment.amount != 0.0)
+                                        showAmountDialog = true
+                                    else
+                                        onIssue(it, editedAmount, editedTimestamp, editedDescription)
+                                }
+                            },
+                        contentAlignment = Alignment.Center
+                    ) {
+                        Text("הפק קבלה", color = ctaText, fontWeight = FontWeight.Bold, fontSize = 18.sp)
+                    }
                     if (BuildConfig.DEBUG) {
-                        // ── DEBUG: הפק קבלה רגיל ────────────────────────────
-                        val issueEnabled = btnEnabled
-                        Box(
-                            modifier = Modifier
-                                .weight(1f)
-                                .height(54.dp)
-                                .alpha(if (issueEnabled) 1f else 0.45f)
-                                .clip(RoundedCornerShape(14.dp))
-                                .background(brand)
-                                .clickable(enabled = issueEnabled) {
-                                    effectiveClient?.let {
-                                        if (editedAmount != state.payment.amount && state.payment.amount != 0.0)
-                                            showAmountDialog = true
-                                        else
-                                            onIssue(it, editedAmount, editedTimestamp, editedDescription)
-                                    }
-                                },
-                            contentAlignment = Alignment.Center
-                        ) {
-                            Text("הפק קבלה", color = ctaText, fontWeight = FontWeight.Bold, fontSize = 18.sp)
-                        }
-                        // קבלת דמה
+                        // קבלת דמה — debug-only testing shortcut, bypasses iCount entirely
                         Box(
                             modifier = Modifier
                                 .size(54.dp)
@@ -1258,17 +1258,17 @@ private fun ReadyContent(
                             Text("🔬", fontSize = 20.sp)
                         }
                     } else {
-                        // ── RELEASE: שלח למפתח ───────────────────────────────
+                        // שלח למפתח — secondary: report a wrong extraction, doesn't block issuing
                         Box(
                             modifier = Modifier
-                                .weight(1f)
-                                .height(54.dp)
+                                .size(54.dp)
                                 .clip(RoundedCornerShape(14.dp))
-                                .background(brand)
+                                .background(dismissBg)
+                                .border(1.dp, dismissBorder, RoundedCornerShape(14.dp))
                                 .clickable { onSendFeedback(state.payment) },
                             contentAlignment = Alignment.Center
                         ) {
-                            Text("📤 שלח למפתח", color = ctaText, fontWeight = FontWeight.Bold, fontSize = 16.sp)
+                            Text("📤", fontSize = 20.sp)
                         }
                     }
                 }
