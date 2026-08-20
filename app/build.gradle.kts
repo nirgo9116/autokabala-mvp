@@ -1,4 +1,5 @@
 import java.util.Properties
+import com.google.firebase.appdistribution.gradle.firebaseAppDistribution
 
 plugins {
     alias(libs.plugins.android.application)
@@ -29,7 +30,7 @@ val hasReleaseSigning = !releaseKeystorePath.isNullOrBlank() &&
 
 android {
     namespace = "com.autokabala.listener"
-    compileSdk = 35
+    compileSdk = 36
 
     signingConfigs {
         if (hasReleaseSigning) {
@@ -45,8 +46,8 @@ android {
     defaultConfig {
         applicationId = "com.autokabala.share"
         minSdk = 26
-        targetSdk = 35
-        versionCode = 4
+        targetSdk = 36
+        versionCode = 5
         versionName = "1.3"
 
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"

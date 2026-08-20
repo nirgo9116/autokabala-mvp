@@ -830,7 +830,7 @@ object OcrUtils {
         // Post-process: drop trailing all-lowercase noise tokens; collapse doubled trailing letter
         val words = best.toMutableList()
         while (words.size > 1 && words.last().length <= 4 && words.last().all { it.isLowerCase() })
-            words.removeLast()
+            words.removeAt(words.lastIndex)
         return words.joinToString(" ") { w -> w.replace(Regex("([A-Za-z])\\1\$"), "$1") }
             .trim()
             .replace(Regex("^[^A-Za-z]+"), "")  // strip Hebrew prefix chars (e.g. "מMeital" → "Meital")
